@@ -39,6 +39,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("gui", help="open local GUI for others' probes")
     lst = sub.add_parser("list", help="print queue json")
     lst.add_argument("root")
+    rep = sub.add_parser("report", help="which code has a problem, and where to blame")
+    rep.add_argument("root")
+    chk = sub.add_parser("checkup", help="temporary reverse-dev suggestions, not verification")
+    chk.add_argument("root")
     args = parser.parse_args(argv)
     try:
         if args.cmd == "mcp":
@@ -99,6 +103,16 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "run":
             result = run_queue(root)
             print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "report":
+            from .report import problems
+
+            print(json.dumps(problems(root), ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "checkup":
+            from .checkup import checkup
+
+            print(json.dumps(checkup(root), ensure_ascii=False, indent=2))
             return 0
     except ChainBroken as exc:
         print(str(exc), file=sys.stderr)

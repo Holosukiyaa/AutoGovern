@@ -99,6 +99,24 @@ TOOLS = [
             "required": ["root"],
         },
     },
+    {
+        "name": "ag_report",
+        "description": "Which declared paths have a problem, and where to blame (runs.jsonl, run_id, git_head, probe_id). Trust rate is not this.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"root": {"type": "string"}},
+            "required": ["root"],
+        },
+    },
+    {
+        "name": "ag_checkup",
+        "description": "Temporary reverse-dev suggestions (fat files, glue if ag2c flatten is importable). Not verification.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"root": {"type": "string"}},
+            "required": ["root"],
+        },
+    },
 ]
 
 
@@ -188,6 +206,14 @@ def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return {"added": item, "queue": load_queue(root)}
     if name == "ag_queue_run":
         return run_queue(root)
+    if name == "ag_report":
+        from .report import problems
+
+        return problems(root)
+    if name == "ag_checkup":
+        from .checkup import checkup
+
+        return checkup(root)
     raise ChainBroken(f"unknown tool {name}")
 
 

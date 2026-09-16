@@ -7,8 +7,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from .checkup import checkup
 from .managed import add_project, load_managed, project_snapshot
 from .queue import ChainBroken, add_exists, add_hash, add_unknown, run_queue
+from .report import problems
 
 HOST = "127.0.0.1"
 PORT = 7420
@@ -153,6 +155,38 @@ def _index() -> bytes:
 
 def _detail(root: str) -> bytes:
     snap = project_snapshot(Path(root))
+    issue = problems(Path(root))
+    advice = checkup(Path(root))
+    issue_rows = []
+    for row in issue.get("problems") or []:
+        blame = row.get("blame") if isinstance(row.get("blame"), dict) else {}
+        issue_rows.append(
+            "<tr>"
+            f"<td class='bad'>{html.escape(str(row.get('kind')))}</td>"
+            f"<td>{html.escape(str(row.get('path') or ''))}</td>"
+            f"<td>{html.escape(str(row.get('problem') or ''))}</td>"
+            f"<td>run {html.escape(str(blame.get('run_id') or ''))} git {html.escape(str(blame.get('git_head') or ''))} {html.escape(str(blame.get('evidence') or ''))}</td>"
+            "</tr>"
+        )
+    issue_table = "<p class='ok'>声明过的针里没有红/未跑/无法验证。</p>" if not issue_rows else (
+        "<table><tr><th>类型</th><th>代码位置</th><th>问题</th><th>追责</th></tr>"
+        + "".join(issue_rows)
+        + "</table>"
+    )
+    hint_rows = []
+    for row in advice.get("suggestions") or []:
+        hint_rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(row.get('kind')))}</td>"
+            f"<td>{html.escape(str(row.get('path') or ''))}</td>"
+            f"<td>{html.escape(str(row.get('claim') or ''))}</td>"
+            "</tr>"
+        )
+    hint_table = "<p>没有行数/胶水建议。</p>" if not hint_rows else (
+        "<table><tr><th>建议</th><th>位置</th><th>说明</th></tr>"
+        + "".join(hint_rows)
+        + "</table>"
+    )
     rows = []
     for item in snap["items"]:
         rows.append(
@@ -185,6 +219,10 @@ def _detail(root: str) -> bytes:
 <p>{html.escape(_rate_text(snap.get('trust_rate')))}</p>
 <p>声明：精确 {int((snap.get('declared') or {}).get('precise') or 0)} · 较广 {int((snap.get('declared') or {}).get('broad') or 0)} · 无法验证 {int((snap.get('declared') or {}).get('wide') or 0)}（没有全仓库覆盖率）</p>
 {run_line}
+<h2>有问题的代码（追责）</h2>
+{issue_table}
+<h2>反向开发建议（不是验证）</h2>
+{hint_table}
 <p>队列文件 {html.escape(snap['queue'])} · 历史 .ag/runs.jsonl</p>
 {table}
 <form method="post" action="/run">
