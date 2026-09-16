@@ -29,6 +29,9 @@ class ReportTests(unittest.TestCase):
             dash = dashboard_view(root)
             self.assertTrue(any("无法验证" in str(row.get("text")) for row in dash["records"]))
             self.assertTrue(dash["tree"])
+            files = {row["path"]: row for row in dash["files"]}
+            self.assertTrue(files["keep.txt"]["probed"])
+            self.assertEqual("exists", files["keep.txt"]["probes"][0]["kind"])
 
     def test_checkup_lists_fat_file_as_suggestion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

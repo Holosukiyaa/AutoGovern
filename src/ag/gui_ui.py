@@ -20,7 +20,7 @@ INDEX_HTML = """<!DOCTYPE html>
   <span id="status" class="status"></span>
 </header>
 <nav id="tree">
-  <h2>探针</h2>
+  <h2>文件</h2>
   <input id="tree-filter" type="search" placeholder="筛选路径">
   <ul></ul>
 </nav>
@@ -44,7 +44,7 @@ INDEX_HTML = """<!DOCTYPE html>
 </main>
 <aside id="inspect">
   <h2>这根针能说什么</h2>
-  <p id="inspect-title">点左侧探针</p>
+  <p id="inspect-title">点左侧文件</p>
   <dl id="inspect-fields"></dl>
 </aside>
 <footer id="ops">
@@ -163,7 +163,7 @@ function fillList(id, rows, emptyText) {
     li.className = row.severity || "";
     li.textContent = row.text || "";
     li.dataset.id = row.id || "";
-    li.onclick = function () { inspect(row.id); };
+    li.onclick = function () { inspect(row.path || row.id); };
     ul.appendChild(li);
   });
   var vacant = !ul.childElementCount;
@@ -174,34 +174,44 @@ function fillList(id, rows, emptyText) {
 function copyText(text) {
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text || "");
 }
-function inspect(id) {
+function inspect(path) {
   var model = window.__AG_VIEW || {};
-  var item = (model.tree || []).find(function (row) { return row.id === id; });
-  document.getElementById("inspect-title").textContent = (item && (item.path || item.note)) || "点左侧探针";
+  var file = (model.files || []).find(function (row) { return row.path === path; });
+  document.getElementById("inspect-title").textContent = (file && file.path) || "点左侧文件";
   var dl = document.getElementById("inspect-fields");
   dl.innerHTML = "";
-  if (!item) return;
-  var fields = [
-    ["种类", item.kind],
-    ["路径", item.path],
-    ["范围", item.breadth],
-    ["能说什么", item.claim],
-    ["状态", item.status],
-    ["追责 run", item.run_id],
-    ["git", item.git_head],
-    ["证据", item.evidence]
-  ];
-  fields.forEach(function (pair) {
-    if (!pair[1]) return;
+  if (!file) return;
+  var probes = file.probes || [];
+  if (!probes.length) {
     var dt = document.createElement("dt");
-    dt.textContent = pair[0];
+    dt.textContent = "探针";
     var dd = document.createElement("dd");
-    dd.textContent = pair[1];
+    dd.textContent = "无针。这块无法验证，不是目录绿过。";
     dl.appendChild(dt);
     dl.appendChild(dd);
-  });
+  } else {
+    probes.forEach(function (probe, i) {
+      [["针 " + (i + 1), probe.kind], ["能说什么", probe.claim], ["状态", probe.status], ["说明", probe.note]].forEach(function (pair) {
+        if (!pair[1]) return;
+        var dt = document.createElement("dt");
+        dt.textContent = pair[0];
+        var dd = document.createElement("dd");
+        dd.textContent = pair[1];
+        dl.appendChild(dt);
+        dl.appendChild(dd);
+      });
+    });
+    if (model.evidence_text) {
+      var dt = document.createElement("dt");
+      dt.textContent = "追责";
+      var dd = document.createElement("dd");
+      dd.textContent = model.evidence_text;
+      dl.appendChild(dt);
+      dl.appendChild(dd);
+    }
+  }
   document.querySelectorAll("#tree li").forEach(function (li) {
-    li.classList.toggle("active", li.dataset.id === id);
+    li.classList.toggle("active", li.dataset.path === path);
   });
 }
 function render(view) {
@@ -217,11 +227,12 @@ function render(view) {
   fillList("record", view.records, "没有记录。");
   var ul = document.querySelector("#tree ul");
   ul.innerHTML = "";
-  (view.tree || []).forEach(function (row) {
+  (view.files || []).forEach(function (row) {
     var li = document.createElement("li");
-    li.textContent = (row.path || row.note || row.id) + " · " + (row.status || "");
-    li.dataset.id = row.id;
-    li.onclick = function () { inspect(row.id); };
+    var mark = row.probed ? ((row.probes[0] && row.probes[0].status) || "有针") : "无针";
+    li.textContent = row.path + " · " + mark;
+    li.dataset.path = row.path;
+    li.onclick = function () { inspect(row.path); };
     ul.appendChild(li);
   });
   document.getElementById("ops-body").textContent = view.evidence_text || "";

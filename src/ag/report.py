@@ -4,9 +4,52 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .checkup import checkup
+from .checkup import SKIP_PARTS, checkup, _skip
 from .managed import project_snapshot
 from .queue import runs_path
+
+MAX_TREE_FILES = 5000
+
+
+def _probe_paths(item: dict[str, Any]) -> list[str]:
+    paths = []
+    if item.get("path"):
+        paths.append(str(item.get("path")).replace("\\", "/"))
+    for rel in item.get("paths") or []:
+        paths.append(str(rel).replace("\\", "/"))
+    return [p for p in paths if p]
+
+
+def file_index(root: Path, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    root = root.expanduser().resolve()
+    by_path: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        for rel in _probe_paths(item):
+            by_path.setdefault(rel, []).append(item)
+    rows: list[dict[str, Any]] = []
+    count = 0
+    for path in sorted(root.rglob("*")):
+        if _skip(path) or not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        probes = []
+        for item in by_path.get(rel, []):
+            speech = item.get("speech") if isinstance(item.get("speech"), dict) else {}
+            probes.append(
+                {
+                    "id": item.get("id"),
+                    "kind": item.get("kind"),
+                    "status": _status_label(item),
+                    "claim": speech.get("claim"),
+                    "breadth": speech.get("breadth"),
+                    "note": item.get("note"),
+                }
+            )
+        rows.append({"path": rel, "probes": probes, "probed": bool(probes)})
+        count += 1
+        if count >= MAX_TREE_FILES:
+            break
+    return rows
 
 
 def problems(root: Path) -> dict[str, Any]:
@@ -162,4 +205,5 @@ def dashboard_view(root: Path) -> dict[str, Any]:
             f"{evidence}"
         ),
         "problems": issue.get("problems"),
+        "files": file_index(root, snap.get("items") or []),
     }
