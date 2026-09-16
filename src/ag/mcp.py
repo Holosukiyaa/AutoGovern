@@ -125,7 +125,6 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
                     "ag is a probe queue. AI output is untrusted. "
                     "Each probe must fail its red chain then pass its green chain. "
                     "High-trust fences run first. If a fence cannot bar its field, later items are skipped, never green."
-            ),
                 ),
             },
         )
@@ -190,20 +189,71 @@ def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     raise ChainBroken(f"unknown tool {name}")
 
 
+def _reconfigure_utf8(stream: Any) -> None:
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        return
+    try:
+        reconfigure(encoding="utf-8", errors="replace")
+    except (OSError, ValueError):
+        pass
+
+
+def _read_message(reader: Any) -> dict[str, Any] | None:
+    first = reader.readline()
+    if first == "":
+        return None
+    if first.lower().startswith("content-length:"):
+        length = int(first.split(":", 1)[1].strip())
+        while True:
+            line = reader.readline()
+            if line in ("", "\n", "\r\n"):
+                break
+        body = reader.read(length)
+        payload = json.loads(body)
+        return payload if isinstance(payload, dict) else None
+    text = first.strip()
+    if not text:
+        return None
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _write_message(writer: Any, payload: dict[str, Any]) -> None:
+    blob = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    header = f"Content-Length: {len(blob)}\r\n\r\n".encode("ascii")
+    raw = getattr(writer, "buffer", None)
+    if raw is not None:
+        raw.write(header + blob)
+        raw.flush()
+        return
+    writer.write(header.decode("ascii"))
+    writer.write(blob.decode("utf-8"))
+    writer.flush()
+
+
 def serve() -> None:
-    stdin = sys.stdin
-    for line in stdin:
-        line = line.strip()
-        if not line:
-            continue
+    _reconfigure_utf8(sys.stdin)
+    _reconfigure_utf8(sys.stdout)
+    reader = sys.stdin
+    writer = sys.stdout
+    while True:
         try:
-            msg = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(msg, dict):
-            continue
-        reply = _handle(msg)
+            message = _read_message(reader)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            return
+        if message is None:
+            return
+        try:
+            reply = _handle(message)
+        except Exception as exc:
+            req_id = message.get("id")
+            if req_id is None:
+                continue
+            reply = _err(req_id, str(exc))
         if reply is None:
             continue
-        sys.stdout.write(json.dumps(reply, ensure_ascii=False) + "\n")
-        sys.stdout.flush()
+        _write_message(writer, reply)

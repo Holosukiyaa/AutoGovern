@@ -35,6 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     manage = sub.add_parser("manage", help="register another project")
     manage.add_argument("root")
     manage.add_argument("--note", default="")
+    sub.add_parser("projects", help="list managed projects")
     sub.add_parser("gui", help="open local GUI for others' probes")
     lst = sub.add_parser("list", help="print queue json")
     lst.add_argument("root")
@@ -55,6 +56,18 @@ def main(argv: list[str] | None = None) -> int:
 
             item = add_project(Path(args.root), note=args.note)
             print(json.dumps(item, ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "projects":
+            from .managed import load_managed, project_snapshot
+
+            blob = load_managed()
+            rows = []
+            for item in blob.get("projects") or []:
+                if not isinstance(item, dict):
+                    continue
+                snap = project_snapshot(Path(str(item.get("root") or "")))
+                rows.append(snap)
+            print(json.dumps({"schema": "ag.projects.v1", "projects": rows}, ensure_ascii=False, indent=2))
             return 0
         root = Path(args.root)
         if args.cmd == "list":
