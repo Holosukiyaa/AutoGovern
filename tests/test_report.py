@@ -32,10 +32,27 @@ class ReportTests(unittest.TestCase):
             root = Path(directory)
             fat = root / "huge.py"
             fat.write_text("x\n" * 850, encoding="utf-8")
-            out = checkup(root)
+            out = checkup(root, insert=False)
             self.assertEqual("fat", out["suggestions"][0]["kind"])
             self.assertEqual("huge.py", out["suggestions"][0]["path"])
             self.assertIn("Not a trust fence", out["suggestions"][0]["claim"])
+            self.assertEqual([], out["inserted"])
+
+    def test_checkup_plants_exists_and_hash(self) -> None:
+        from ag.queue import load_queue
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fat = root / "huge.py"
+            fat.write_text("x\n" * 850, encoding="utf-8")
+            out = checkup(root)
+            kinds = {(row["kind"], row["path"]) for row in out["inserted"]}
+            self.assertIn(("exists", "huge.py"), kinds)
+            self.assertIn(("hash", "huge.py"), kinds)
+            again = checkup(root)
+            self.assertEqual([], again["inserted"])
+            paths = [(item.get("kind"), item.get("path")) for item in load_queue(root)["items"]]
+            self.assertEqual(1, paths.count(("exists", "huge.py")))
 
 
 if __name__ == "__main__":

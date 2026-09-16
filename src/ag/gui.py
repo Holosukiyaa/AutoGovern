@@ -111,6 +111,13 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Location", "/p?root=" + root)
                 self.end_headers()
                 return
+            if parsed.path == "/checkup":
+                root = (form.get("root") or [""])[0]
+                checkup(Path(unquote(root)), insert=True)
+                self.send_response(303)
+                self.send_header("Location", "/p?root=" + root)
+                self.end_headers()
+                return
             if parsed.path == "/add-unknown":
                 root = (form.get("root") or [""])[0]
                 note = (form.get("note") or [""])[0]
@@ -156,7 +163,7 @@ def _index() -> bytes:
 def _detail(root: str) -> bytes:
     snap = project_snapshot(Path(root))
     issue = problems(Path(root))
-    advice = checkup(Path(root))
+    advice = checkup(Path(root), insert=False)
     issue_rows = []
     for row in issue.get("problems") or []:
         blame = row.get("blame") if isinstance(row.get("blame"), dict) else {}
@@ -228,6 +235,10 @@ def _detail(root: str) -> bytes:
 <form method="post" action="/run">
 <input type="hidden" name="root" value="{enc}">
 <button type="submit">跑全部探针</button>
+</form>
+<form method="post" action="/checkup">
+<input type="hidden" name="root" value="{enc}">
+<button type="submit">反向开发插针</button>
 </form>
 <form method="post" action="/add-exists">
 <input type="hidden" name="root" value="{enc}">

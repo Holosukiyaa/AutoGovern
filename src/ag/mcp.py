@@ -110,10 +110,13 @@ TOOLS = [
     },
     {
         "name": "ag_checkup",
-        "description": "Temporary reverse-dev suggestions (fat files, glue if ag2c flatten is importable). Not verification.",
+        "description": "Reverse-dev scan of fat/glue files and plant exists/hash probes. Not verification. Set insert false to only list.",
         "inputSchema": {
             "type": "object",
-            "properties": {"root": {"type": "string"}},
+            "properties": {
+                "root": {"type": "string"},
+                "insert": {"type": "boolean", "default": True},
+            },
             "required": ["root"],
         },
     },
@@ -213,7 +216,7 @@ def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "ag_checkup":
         from .checkup import checkup
 
-        return checkup(root)
+        return checkup(root, insert=bool(args.get("insert", True)))
     raise ChainBroken(f"unknown tool {name}")
 
 

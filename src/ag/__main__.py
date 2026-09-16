@@ -41,8 +41,9 @@ def main(argv: list[str] | None = None) -> int:
     lst.add_argument("root")
     rep = sub.add_parser("report", help="which code has a problem, and where to blame")
     rep.add_argument("root")
-    chk = sub.add_parser("checkup", help="temporary reverse-dev suggestions, not verification")
+    chk = sub.add_parser("checkup", help="reverse-dev scan; plants exists/hash probes by default")
     chk.add_argument("root")
+    chk.add_argument("--no-insert", action="store_true", help="only list suggestions, do not plant probes")
     args = parser.parse_args(argv)
     try:
         if args.cmd == "mcp":
@@ -112,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "checkup":
             from .checkup import checkup
 
-            print(json.dumps(checkup(root), ensure_ascii=False, indent=2))
+            print(json.dumps(checkup(root, insert=not args.no_insert), ensure_ascii=False, indent=2))
             return 0
     except ChainBroken as exc:
         print(str(exc), file=sys.stderr)
