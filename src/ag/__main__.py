@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from .queue import ChainBroken, add_exists, add_hash, add_item, add_unknown, load_queue, run_queue
+from .queue import ChainBroken, add_exists, add_files, add_hash, add_item, add_unknown, load_queue, run_queue
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -20,7 +20,12 @@ def main(argv: list[str] | None = None) -> int:
     add.add_argument("--expect-exit", type=int, default=0)
     add.add_argument("--red-argv", nargs="+", required=True)
     add.add_argument("--red-expect-exit", type=int, required=True)
+    add.add_argument("--paths", nargs="+", required=True, help="files this command covers")
     add.add_argument("--note", default="")
+    bundle = sub.add_parser("add-files", help="pin several files as one claim")
+    bundle.add_argument("root")
+    bundle.add_argument("paths", nargs="+")
+    bundle.add_argument("--note", default="")
     ex = sub.add_parser("add-exists", help="add a high-trust exists fence")
     ex.add_argument("root")
     ex.add_argument("path")
@@ -85,12 +90,17 @@ def main(argv: list[str] | None = None) -> int:
                 expect_exit=args.expect_exit,
                 red_argv=list(args.red_argv),
                 red_expect_exit=args.red_expect_exit,
+                paths=list(args.paths),
                 note=args.note,
             )
             print(json.dumps(item, ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "add-exists":
             item = add_exists(root, args.path, note=args.note)
+            print(json.dumps(item, ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "add-files":
+            item = add_files(root, list(args.paths), note=args.note)
             print(json.dumps(item, ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "add-hash":

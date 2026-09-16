@@ -8,7 +8,7 @@ from typing import Any
 
 from . import __version__
 from .managed import add_project, load_managed, project_snapshot
-from .queue import ChainBroken, add_exists, add_hash, add_item, add_unknown, load_queue, run_queue
+from .queue import ChainBroken, add_exists, add_files, add_hash, add_item, add_unknown, load_queue, run_queue
 
 PROTOCOL = "2024-11-05"
 TOOLS = [
@@ -46,9 +46,23 @@ TOOLS = [
                 "expect_exit": {"type": "integer", "default": 0},
                 "red_argv": {"type": "array", "items": {"type": "string"}},
                 "red_expect_exit": {"type": "integer"},
+                "paths": {"type": "array", "items": {"type": "string"}},
                 "note": {"type": "string"},
             },
-            "required": ["root", "argv", "red_argv", "red_expect_exit"],
+            "required": ["root", "argv", "red_argv", "red_expect_exit", "paths"],
+        },
+    },
+    {
+        "name": "ag_queue_add_files",
+        "description": "One claim over several files. Evidence pins every listed file. Directories are refused.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "root": {"type": "string"},
+                "paths": {"type": "array", "items": {"type": "string"}},
+                "note": {"type": "string"},
+            },
+            "required": ["root", "paths"],
         },
     },
     {
@@ -191,8 +205,12 @@ def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
             expect_exit=int(args.get("expect_exit") or 0),
             red_argv=red_argv,
             red_expect_exit=int(args["red_expect_exit"]),
+            paths=[str(x) for x in (args.get("paths") or [])],
             note=str(args.get("note") or ""),
         )
+        return {"added": item, "queue": load_queue(root)}
+    if name == "ag_queue_add_files":
+        item = add_files(root, [str(x) for x in (args.get("paths") or [])], note=str(args.get("note") or ""))
         return {"added": item, "queue": load_queue(root)}
     if name == "ag_queue_add_exists":
         item = add_exists(root, str(args.get("path") or ""), note=str(args.get("note") or ""))

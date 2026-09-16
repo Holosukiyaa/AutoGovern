@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ag.queue import ChainBroken, add_exists, add_hash, add_item, add_unknown, load_queue, run_queue, runs_path
+from ag.queue import ChainBroken, add_exists, add_files, add_hash, add_item, add_unknown, load_queue, run_queue, runs_path
 
 
 PY = sys.executable
@@ -20,12 +20,14 @@ class QueueChainTests(unittest.TestCase):
     def test_red_then_green_is_trusted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            (root / "keep.txt").write_text("x", encoding="utf-8")
             add_item(
                 root,
                 argv=[PY, "-c", "raise SystemExit(0)"],
                 expect_exit=0,
                 red_argv=[PY, "-c", "raise SystemExit(2)"],
                 red_expect_exit=2,
+                paths=["keep.txt"],
             )
             result = run_queue(root)
             self.assertTrue(result["ok"])
@@ -40,12 +42,14 @@ class QueueChainTests(unittest.TestCase):
     def test_red_not_failing_breaks_the_chain(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            (root / "keep.txt").write_text("x", encoding="utf-8")
             add_item(
                 root,
                 argv=[PY, "-c", "raise SystemExit(0)"],
                 expect_exit=0,
                 red_argv=[PY, "-c", "raise SystemExit(0)"],
                 red_expect_exit=1,
+                paths=["keep.txt"],
             )
             result = run_queue(root)
             self.assertFalse(result["ok"])
@@ -55,6 +59,7 @@ class QueueChainTests(unittest.TestCase):
     def test_identical_red_and_green_refused(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            (root / "keep.txt").write_text("x", encoding="utf-8")
             same = [PY, "-c", "raise SystemExit(0)"]
             with self.assertRaises(ChainBroken):
                 add_item(
@@ -63,6 +68,7 @@ class QueueChainTests(unittest.TestCase):
                     expect_exit=0,
                     red_argv=same,
                     red_expect_exit=0,
+                    paths=["keep.txt"],
                 )
 
     def test_exists_same_predicate_two_states(self) -> None:
@@ -77,12 +83,14 @@ class QueueChainTests(unittest.TestCase):
     def test_high_trust_first_then_halt_skips_rest(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            (root / "keep.txt").write_text("x", encoding="utf-8")
             add_item(
                 root,
                 argv=[PY, "-c", "raise SystemExit(0)"],
                 expect_exit=0,
                 red_argv=[PY, "-c", "raise SystemExit(2)"],
                 red_expect_exit=2,
+                paths=["keep.txt"],
                 note="low",
             )
             add_exists(root, "missing.txt")
@@ -108,6 +116,25 @@ class QueueChainTests(unittest.TestCase):
             self.assertEqual(1, len(result["trusted"]))
             self.assertEqual(1, len(result["unknown"]))
             self.assertIn("reminder", result)
+
+    def test_exists_refuses_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "src").mkdir()
+            with self.assertRaises(ChainBroken):
+                add_exists(root, "src")
+
+    def test_files_bundle_reds_when_one_file_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "a.txt").write_text("a", encoding="utf-8")
+            (root / "b.txt").write_text("b", encoding="utf-8")
+            add_files(root, ["a.txt", "b.txt"])
+            self.assertTrue(run_queue(root)["ok"])
+            (root / "b.txt").write_text("B", encoding="utf-8")
+            result = run_queue(root)
+            self.assertFalse(result["ok"])
+            self.assertEqual("files", result["broken"][0]["kind"])
 
     def test_hash_pin_reds_when_bytes_change(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

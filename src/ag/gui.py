@@ -276,7 +276,7 @@ def _detail(root: str) -> bytes:
 </form>
 <form method="post" action="/add-exists">
 <input type="hidden" name="root" value="{enc}">
-<label>exists 路径 <input type="text" name="path" required></label>
+<label>exists 单个文件 <input type="text" name="path" required></label>
 <button type="submit">加高信任针</button>
 </form>
 <form method="post" action="/add-hash">

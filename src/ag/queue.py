@@ -44,6 +44,8 @@ def _evidence(item: dict[str, Any]) -> dict[str, Any]:
         "id": item.get("id"),
         "kind": item.get("kind"),
         "path": item.get("path"),
+        "paths": item.get("paths"),
+        "pins": item.get("pins"),
         "pin": item.get("pin"),
         "note": item.get("note"),
         "scope": item.get("scope"),
@@ -87,12 +89,15 @@ def speech(item: dict[str, Any]) -> dict[str, str]:
         return {"breadth": "wide", "claim": str(item.get("note") or "cannot verify")}
     if kind == "hash":
         return {"breadth": "precise", "claim": f"bytes of {path} match pin"}
+    if kind == "files":
+        names = [str(p) for p in (item.get("paths") or [])]
+        return {"breadth": "precise", "claim": "bytes of " + ", ".join(names) + " match pins"}
     if kind == "exists":
-        name = path.rsplit("/", 1)[-1]
-        if "." in name:
-            return {"breadth": "precise", "claim": f"{path} exists"}
-        return {"breadth": "broad", "claim": f"{path} exists as a tree"}
-    return {"breadth": "broad", "claim": "custom command"}
+        return {"breadth": "precise", "claim": f"{path} exists as a file"}
+    names = [str(p) for p in (item.get("paths") or [])]
+    if names:
+        return {"breadth": "precise", "claim": "command plus files " + ", ".join(names)}
+    return {"breadth": "wide", "claim": "custom command with no file range"}
 
 
 def trust_rank(item: dict[str, Any]) -> tuple[int, str]:
@@ -101,6 +106,8 @@ def trust_rank(item: dict[str, Any]) -> tuple[int, str]:
         return (0, "0" + str(item.get("path") or ""))
     if kind == "hash":
         return (0, "1" + str(item.get("path") or ""))
+    if kind == "files":
+        return (0, "2" + ",".join(str(p) for p in (item.get("paths") or [])))
     if kind == "unknown":
         return (2, str(item.get("note") or item.get("id") or ""))
     blob = json.dumps(item.get("argv") or [], ensure_ascii=False)
@@ -117,7 +124,30 @@ def _safe_target(root: Path, rel: str) -> Path:
 
 
 def _exists_exit(root: Path, rel: str) -> int:
-    return 0 if _safe_target(root, rel).exists() else 1
+    target = _safe_target(root, rel)
+    if target.is_dir():
+        return 2
+    return 0 if target.is_file() else 1
+
+
+def _require_file(root: Path, rel: str) -> Path:
+    target = _safe_target(root, rel)
+    if target.exists() and not target.is_file():
+        raise ChainBroken(f"probe cannot cover a directory: {rel}")
+    return target
+
+
+def _pins_for(root: Path, rels: list[str]) -> dict[str, str]:
+    pins: dict[str, str] = {}
+    for rel in rels:
+        rel = str(rel).replace("\\", "/").strip().strip("/")
+        target = _require_file(root, rel)
+        if not target.is_file():
+            raise ChainBroken(f"range missing file: {rel}")
+        pins[rel] = _file_digest(target)
+    if not pins:
+        raise ChainBroken("file range is empty")
+    return pins
 
 
 def _file_digest(path: Path) -> str:
@@ -148,8 +178,9 @@ def _run(argv: list[str], cwd: Path) -> int:
 
 def add_exists(root: Path, rel: str, *, note: str = "") -> dict[str, Any]:
     rel = str(rel).replace("\\", "/").strip().strip("/")
-    if not rel or rel == ABSENT:
-        raise ChainBroken("exists probe needs a real relative path")
+    if not rel or rel == ABSENT or rel.endswith("/"):
+        raise ChainBroken("exists probe needs a real relative file")
+    _require_file(root.resolve(), rel)
     item = {
         "id": uuid.uuid4().hex[:12],
         "kind": "exists",
@@ -168,6 +199,7 @@ def add_hash(root: Path, rel: str, *, note: str = "") -> dict[str, Any]:
     if not rel or rel == ABSENT:
         raise ChainBroken("hash probe needs a real relative file")
     target = _safe_target(root.resolve(), rel)
+    _require_file(root.resolve(), rel)
     if not target.is_file():
         raise ChainBroken(f"cannot pin missing file: {rel}")
     item = {
@@ -175,6 +207,23 @@ def add_hash(root: Path, rel: str, *, note: str = "") -> dict[str, Any]:
         "kind": "hash",
         "path": rel,
         "pin": _file_digest(target),
+        "note": str(note or ""),
+        "last": None,
+    }
+    queue = load_queue(root)
+    queue["items"].append(item)
+    save_queue(root, queue)
+    return item
+
+
+def add_files(root: Path, paths: list[str], *, note: str = "") -> dict[str, Any]:
+    rels = [str(p).replace("\\", "/").strip().strip("/") for p in paths]
+    pins = _pins_for(root.resolve(), rels)
+    item = {
+        "id": uuid.uuid4().hex[:12],
+        "kind": "files",
+        "paths": list(pins.keys()),
+        "pins": pins,
         "note": str(note or ""),
         "last": None,
     }
@@ -208,12 +257,15 @@ def add_item(
     expect_exit: int,
     red_argv: list[str],
     red_expect_exit: int,
+    paths: list[str],
     note: str = "",
 ) -> dict[str, Any]:
     if not argv or not red_argv:
         raise ChainBroken("probe needs argv and red_argv")
     if red_expect_exit == expect_exit and red_argv == argv:
         raise ChainBroken("red chain cannot be identical to green chain")
+    rels = [str(p).replace("\\", "/").strip().strip("/") for p in paths]
+    pins = _pins_for(root.resolve(), rels)
     item = {
         "id": uuid.uuid4().hex[:12],
         "kind": "exec",
@@ -221,6 +273,8 @@ def add_item(
         "expect_exit": int(expect_exit),
         "red_argv": list(red_argv),
         "red_expect_exit": int(red_expect_exit),
+        "paths": list(pins.keys()),
+        "pins": pins,
         "note": str(note or ""),
         "last": None,
     }
@@ -244,11 +298,41 @@ def run_item(root: Path, item: dict[str, Any]) -> dict[str, Any]:
         red_ok = red_code == 1
         green_code = _hash_exit(cwd, str(item.get("path") or ""), pin) if red_ok else None
         green_ok = green_code == 0
+    elif kind == "files":
+        pins = item.get("pins") if isinstance(item.get("pins"), dict) else {}
+        red_code = _hash_exit(cwd, ABSENT, "x")
+        red_ok = red_code == 1
+        green_code = 0
+        green_ok = True
+        seen: dict[str, int] = {}
+        if red_ok:
+            for rel, pin in pins.items():
+                code = _hash_exit(cwd, str(rel), str(pin))
+                seen[str(rel)] = code
+                if code != 0:
+                    green_ok = False
+                    green_code = code
+        file_hits = seen
     else:
+        paths = [str(p) for p in (item.get("paths") or [])]
+        if not paths:
+            raise ChainBroken(f"{item.get('id')}: exec probe must declare the files it covers")
         red_code = _run([str(x) for x in item["red_argv"]], cwd)
         red_ok = red_code == int(item["red_expect_exit"])
         green_code = _run([str(x) for x in item["argv"]], cwd) if red_ok else None
         green_ok = green_code == int(item["expect_exit"]) if red_ok else False
+        file_hits = {}
+        if red_ok and green_ok:
+            try:
+                current = _pins_for(cwd, paths)
+            except ChainBroken:
+                current = {}
+                green_ok = False
+                green_code = 1
+            if current != (item.get("pins") or {}):
+                green_ok = False
+                green_code = 1
+            file_hits = current
     last = {
         "red_exit": red_code,
         "red_ok": red_ok,
@@ -257,6 +341,8 @@ def run_item(root: Path, item: dict[str, Any]) -> dict[str, Any]:
         "trusted": bool(red_ok and green_ok),
         "skipped": False,
     }
+    if kind in {"files", "exec"}:
+        last["files"] = file_hits
     item["last"] = last
     if not red_ok:
         raise ChainBroken(
