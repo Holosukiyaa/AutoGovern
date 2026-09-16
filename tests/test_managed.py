@@ -35,6 +35,8 @@ class ManagedTests(unittest.TestCase):
                 snap = project_snapshot(other)
                 self.assertEqual(1, len(snap["items"]))
                 self.assertTrue(snap["items"][0]["trusted"])
+                self.assertEqual("precise", snap["items"][0]["speech"]["breadth"])
+                self.assertEqual(1, snap["declared"]["precise"])
                 blob = load_managed()
                 self.assertEqual(1, len(blob["projects"]))
             finally:

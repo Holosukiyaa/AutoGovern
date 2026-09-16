@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .queue import ChainBroken, git_head, load_queue, queue_path, save_queue
+from .queue import ChainBroken, git_head, load_queue, queue_path, save_queue, speech
 
 SCHEMA = "ag.managed.v1"
 
@@ -69,10 +69,17 @@ def project_snapshot(root: Path) -> dict[str, Any]:
                 "green_ok": last.get("green_ok"),
                 "unverifiable": bool(last.get("unverifiable") or item.get("kind") == "unknown"),
                 "pin": item.get("pin"),
+                "speech": speech(item),
             }
         )
     trusted_n = sum(1 for p in items if p.get("trusted"))
     total = len(items)
+    declared = {"precise": 0, "broad": 0, "wide": 0}
+    for row in items:
+        b = str((row.get("speech") or {}).get("breadth") or "broad")
+        if b not in declared:
+            b = "broad"
+        declared[b] += 1
     queue_blob = load_queue(root)
     last_run = queue_blob.get("last_run") if isinstance(queue_blob.get("last_run"), dict) else {}
     head = git_head(root)
@@ -86,4 +93,6 @@ def project_snapshot(root: Path) -> dict[str, Any]:
         "last_run": last_run,
         "git_head": head,
         "stale": stale,
+        "declared": declared,
+        "declared_note": "counts only declared probes; there is no honest coverage of the whole repo",
     }

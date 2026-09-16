@@ -52,6 +52,7 @@ def _evidence(item: dict[str, Any]) -> dict[str, Any]:
         "expect_exit": item.get("expect_exit"),
         "red_expect_exit": item.get("red_expect_exit"),
         "last": item.get("last"),
+        "speech": speech(item),
     }
 
 
@@ -76,6 +77,22 @@ def save_queue(root: Path, queue: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(queue, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return path
+
+
+def speech(item: dict[str, Any]) -> dict[str, str]:
+    """Larger scope → broader speech. Not a trust root."""
+    kind = str(item.get("kind") or "")
+    path = str(item.get("path") or "").replace("\\", "/").rstrip("/")
+    if kind == "unknown":
+        return {"breadth": "wide", "claim": str(item.get("note") or "cannot verify")}
+    if kind == "hash":
+        return {"breadth": "precise", "claim": f"bytes of {path} match pin"}
+    if kind == "exists":
+        name = path.rsplit("/", 1)[-1]
+        if "." in name:
+            return {"breadth": "precise", "claim": f"{path} exists"}
+        return {"breadth": "broad", "claim": f"{path} exists as a tree"}
+    return {"breadth": "broad", "claim": "custom command"}
 
 
 def trust_rank(item: dict[str, Any]) -> tuple[int, str]:

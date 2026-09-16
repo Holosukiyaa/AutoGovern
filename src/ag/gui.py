@@ -160,11 +160,13 @@ def _detail(root: str) -> bytes:
             f"<td>{html.escape(str(item.get('kind')))}</td>"
             f"<td>{html.escape(str(item.get('path') or ''))}</td>"
             f"<td>{html.escape(str(item.get('note') or ''))}</td>"
+            f"<td>{html.escape(str((item.get('speech') or {}).get('breadth') or ''))}</td>"
+            f"<td>{html.escape(str((item.get('speech') or {}).get('claim') or ''))}</td>"
             f"<td>{_status(item)}</td>"
             "</tr>"
         )
     table = "<p>还没有探针。</p>" if not rows else (
-        "<table><tr><th>种类</th><th>路径</th><th>说明</th><th>上次</th></tr>"
+        "<table><tr><th>种类</th><th>路径</th><th>说明</th><th>范围</th><th>能说什么</th><th>上次</th></tr>"
         + "".join(rows)
         + "</table>"
     )
@@ -181,6 +183,7 @@ def _detail(root: str) -> bytes:
         run_line += "<p class='bad'>证据过期：当前 HEAD 与上次 git_head 不一致，旧绿不能当现在的。</p>"
     body = f"""<h1>{enc}</h1>
 <p>{html.escape(_rate_text(snap.get('trust_rate')))}</p>
+<p>声明：精确 {int((snap.get('declared') or {}).get('precise') or 0)} · 较广 {int((snap.get('declared') or {}).get('broad') or 0)} · 无法验证 {int((snap.get('declared') or {}).get('wide') or 0)}（没有全仓库覆盖率）</p>
 {run_line}
 <p>队列文件 {html.escape(snap['queue'])} · 历史 .ag/runs.jsonl</p>
 {table}

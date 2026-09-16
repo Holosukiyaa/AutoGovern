@@ -124,7 +124,9 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
                 "instructions": (
                     "ag is a probe queue. AI output is untrusted. "
                     "Each probe must fail its red chain then pass its green chain. "
-                    "High-trust fences run first. If a fence cannot bar its field, later items are skipped, never green."
+                    "High-trust fences run first. If a fence cannot bar its field, later items are skipped, never green. "
+                    "AI may propose probes; proposals are not evidence. Larger scope means broader speech. "
+                    "There is no honest whole-repo coverage percent."
                 ),
             },
         )
