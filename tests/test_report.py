@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ag.checkup import checkup
 from ag.queue import add_exists, add_unknown, run_queue
-from ag.report import problems
+from ag.report import dashboard_view, problems
 
 
 class ReportTests(unittest.TestCase):
@@ -26,6 +26,9 @@ class ReportTests(unittest.TestCase):
             unknown = next(row for row in rep["problems"] if row["kind"] == "unknown")
             self.assertIn("runs.jsonl", unknown["blame"]["evidence"])
             self.assertTrue(unknown["blame"]["run_id"])
+            dash = dashboard_view(root)
+            self.assertTrue(any("无法验证" in str(row.get("text")) for row in dash["records"]))
+            self.assertTrue(dash["tree"])
 
     def test_checkup_lists_fat_file_as_suggestion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

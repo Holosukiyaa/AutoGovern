@@ -8,9 +8,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from .checkup import checkup
+from .gui_ui import APP_JS, INDEX_HTML, LAYOUT_CSS
 from .managed import add_project, load_managed, project_snapshot
 from .queue import ChainBroken, add_exists, add_hash, add_unknown, run_queue
-from .report import problems
+from .report import dashboard_view, problems
 
 HOST = "127.0.0.1"
 PORT = 7420
@@ -56,17 +57,38 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: object) -> None:
         return
 
-    def _send(self, payload: bytes, status: int = 200) -> None:
+    def _send(self, payload: bytes, status: int = 200, content_type: str = "text/html; charset=utf-8") -> None:
         self.send_response(status)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         self.wfile.write(payload)
 
+    def _send_json(self, payload: dict, status: int = 200) -> None:
+        blob = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self._send(blob, status, "application/json; charset=utf-8")
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         if parsed.path == "/":
-            self._send(_index())
+            self._send(INDEX_HTML.encode("utf-8"))
+            return
+        if parsed.path == "/ui/layout.css":
+            self._send(LAYOUT_CSS.encode("utf-8"), content_type="text/css; charset=utf-8")
+            return
+        if parsed.path == "/ui/app.js":
+            self._send(APP_JS.encode("utf-8"), content_type="text/javascript; charset=utf-8")
+            return
+        if parsed.path == "/api/projects":
+            rows = []
+            for item in load_managed().get("projects") or []:
+                if isinstance(item, dict) and item.get("root"):
+                    rows.append({"root": item["root"]})
+            self._send_json({"projects": rows})
+            return
+        if parsed.path == "/api/view":
+            root = (parse_qs(parsed.query).get("root") or [""])[0]
+            self._send_json(dashboard_view(Path(unquote(root))))
             return
         if parsed.path == "/p":
             qs = parse_qs(parsed.query)
@@ -78,8 +100,20 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length).decode("utf-8")
-        form = parse_qs(raw)
         parsed = urlparse(self.path)
+        if parsed.path in {"/api/run", "/api/checkup"}:
+            try:
+                body = json.loads(raw or "{}")
+                root = Path(str(body.get("root") or ""))
+                if parsed.path == "/api/run":
+                    run_queue(root)
+                else:
+                    checkup(root, insert=True)
+                self._send_json({"ok": True, "root": str(root)})
+            except (ChainBroken, OSError, ValueError, json.JSONDecodeError) as exc:
+                self._send_json({"ok": False, "error": str(exc)}, 400)
+            return
+        form = parse_qs(raw)
         try:
             if parsed.path == "/add-project":
                 root = (form.get("root") or [""])[0]
