@@ -32,6 +32,8 @@ class ReportTests(unittest.TestCase):
             files = {row["path"]: row for row in dash["files"]}
             self.assertTrue(files["keep.txt"]["probed"])
             self.assertEqual("exists", files["keep.txt"]["probes"][0]["kind"])
+            self.assertGreaterEqual(dash["stats"]["green"], 1)
+            self.assertTrue(any("无法验证" in line for line in dash["advice"]))
 
     def test_checkup_lists_fat_file_as_suggestion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

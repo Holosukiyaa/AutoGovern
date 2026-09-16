@@ -146,6 +146,11 @@ section.is-ready.is-empty ul { display: none; }
 #copy-ops { margin-left: auto; }
 .ops-panel { flex: 1; overflow: auto; padding: 0.6rem 0.85rem; white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; font-size: 0.82rem; color: #d7d7dc; }
 .muted { color: var(--muted); }
+.tree-dir { list-style: none; margin: 0; padding-left: 0.85rem; }
+.tree-dir > summary { cursor: pointer; color: var(--muted); padding: 0.15rem 0; }
+.tree-file { padding-left: 0.2rem; }
+.needle-ok { color: var(--ok); }
+.needle-bad { color: var(--danger); }
 @media (max-width: 900px) {
   body { grid-template: "bar" auto "home" 1fr "ops" minmax(8rem, 34%) / 1fr; }
   #tree, #inspect { display: none; }
@@ -214,28 +219,83 @@ function inspect(path) {
     li.classList.toggle("active", li.dataset.path === path);
   });
 }
+function nestFiles(files) {
+  var root = { name: "", children: {}, files: [] };
+  (files || []).forEach(function (item) {
+    var parts = String(item.path || "").split("/").filter(Boolean);
+    var node = root;
+    parts.slice(0, -1).forEach(function (part) {
+      if (!node.children[part]) node.children[part] = { name: part, children: {}, files: [] };
+      node = node.children[part];
+    });
+    node.files.push(item);
+  });
+  return root;
+}
+function folderStats(node) {
+  var g = 0, r = 0, n = 0;
+  (node.files || []).forEach(function (f) {
+    if (!f.probed) { n += 1; return; }
+    var st = (f.probes[0] && f.probes[0].status) || "";
+    if (st === "绿") g += 1;
+    else if (st === "红") r += 1;
+    else n += 1;
+  });
+  Object.keys(node.children || {}).forEach(function (k) {
+    var s = folderStats(node.children[k]);
+    g += s.g; r += s.r; n += s.n;
+  });
+  return { g: g, r: r, n: n };
+}
+function renderTreeNode(host, node, filter) {
+  Object.keys(node.children).sort().forEach(function (name) {
+    var child = node.children[name];
+    var details = document.createElement("details");
+    details.className = "tree-dir";
+    details.open = Boolean(filter);
+    var stat = folderStats(child);
+    var summary = document.createElement("summary");
+    summary.textContent = name + "  绿" + stat.g + " 红" + stat.r + " 无针" + stat.n;
+    details.appendChild(summary);
+    var inner = document.createElement("div");
+    renderTreeNode(inner, child, filter);
+    details.appendChild(inner);
+    host.appendChild(details);
+  });
+  node.files.forEach(function (item) {
+    var label = item.path || "";
+    if (filter && label.toLowerCase().indexOf(filter) < 0) return;
+    var li = document.createElement("li");
+    li.className = "tree-file";
+    var mark = item.probed ? ((item.probes[0] && item.probes[0].status) || "有针") : "无针";
+    li.textContent = label.split("/").pop() + " · " + mark;
+    if (mark === "绿") li.classList.add("needle-ok");
+    if (mark === "红") li.classList.add("needle-bad");
+    li.dataset.path = item.path;
+    li.onclick = function () { inspect(item.path); };
+    host.appendChild(li);
+  });
+}
 function render(view) {
   window.__AG_VIEW = view;
   var n = (view.actions || []).length;
+  var stats = view.stats || {};
   var rate = view.trust_rate == null ? "未知" : Math.round(view.trust_rate * 100) + "%";
   document.getElementById("attention").textContent = n ? ("有 " + n + " 件要看") : "声明过的针没有红账";
   document.getElementById("gate").textContent = view.stale ? "证据过期" : "可跑";
   document.getElementById("gate").className = "gate" + (view.stale ? " warn" : "");
-  document.getElementById("status").textContent = "可信率 " + rate + " · 提醒不拦业务";
+  document.getElementById("status").textContent =
+    "绿针 " + (stats.green || 0) + " · 红针 " + (stats.red || 0) +
+    " · 无法验证 " + (stats.unknown || 0) + " · 无针文件 " + (stats.unprobed || 0) +
+    " · 可信率 " + rate + " 仅提醒";
   fillList("action", view.actions, "没有要处理的红账。");
   fillList("alert", view.alerts, "没有警情。");
   fillList("record", view.records, "没有记录。");
   var ul = document.querySelector("#tree ul");
   ul.innerHTML = "";
-  (view.files || []).forEach(function (row) {
-    var li = document.createElement("li");
-    var mark = row.probed ? ((row.probes[0] && row.probes[0].status) || "有针") : "无针";
-    li.textContent = row.path + " · " + mark;
-    li.dataset.path = row.path;
-    li.onclick = function () { inspect(row.path); };
-    ul.appendChild(li);
-  });
-  document.getElementById("ops-body").textContent = view.evidence_text || "";
+  renderTreeNode(ul, nestFiles(view.files || []), document.getElementById("tree-filter").value.trim().toLowerCase());
+  var advice = (view.advice || []).join("\\n");
+  document.getElementById("ops-body").textContent = (view.evidence_text || "") + "\\n\\n" + advice;
 }
 function loadView(root) {
   var url = "/api/view?root=" + encodeURIComponent(root || "");
@@ -269,10 +329,7 @@ function boot() {
       .then(function () { loadView(root); });
   };
   document.getElementById("tree-filter").oninput = function () {
-    var q = this.value.toLowerCase();
-    document.querySelectorAll("#tree li").forEach(function (li) {
-      li.style.display = li.textContent.toLowerCase().indexOf(q) >= 0 ? "" : "none";
-    });
+    if (window.__AG_VIEW) render(window.__AG_VIEW);
   };
   document.querySelectorAll("[data-copy]").forEach(function (btn) {
     btn.onclick = function () {

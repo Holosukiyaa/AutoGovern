@@ -191,6 +191,18 @@ def dashboard_view(root: Path) -> dict[str, Any]:
                 "path": hint.get("path") or "",
             }
         )
+    files = file_index(root, snap.get("items") or [])
+    green_n = sum(1 for item in snap.get("items") or [] if item.get("trusted"))
+    red_n = sum(1 for item in snap.get("items") or [] if item.get("green_ok") is False)
+    unknown_n = sum(1 for item in snap.get("items") or [] if item.get("unverifiable"))
+    advice_lines = ["总体建议（给人和 AI，不是验证、不拦业务）："]
+    for item in snap.get("items") or []:
+        if item.get("unverifiable"):
+            advice_lines.append("- 无法验证：" + str(item.get("note") or ""))
+    for hint in advice.get("suggestions") or []:
+        advice_lines.append("- " + str(hint.get("claim") or hint.get("path") or ""))
+    if len(advice_lines) == 1:
+        advice_lines.append("- 声明过的针里没有额外建议。")
     return {
         "root": snap["root"],
         "trust_rate": snap.get("trust_rate"),
@@ -205,5 +217,12 @@ def dashboard_view(root: Path) -> dict[str, Any]:
             f"{evidence}"
         ),
         "problems": issue.get("problems"),
-        "files": file_index(root, snap.get("items") or []),
+        "files": files,
+        "stats": {
+            "green": green_n,
+            "red": red_n,
+            "unknown": unknown_n,
+            "unprobed": sum(1 for row in files if not row.get("probed")),
+        },
+        "advice": advice_lines,
     }
