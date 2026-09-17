@@ -115,23 +115,25 @@ def _read_message(reader: Any) -> dict[str, Any] | None:
 
 
 def _write_message(writer: Any, payload: dict[str, Any]) -> None:
-    blob = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    header = f"Content-Length: {len(blob)}\r\n\r\n".encode("ascii")
+    # Grok stdio MCP parses each stdout line as JSON. LSP Content-Length
+    # framing makes initialize fail with "expected value at line 1 column 1".
+    line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
     raw = getattr(writer, "buffer", None)
     if raw is not None:
-        raw.write(header + blob)
+        raw.write(line.encode("utf-8"))
         raw.flush()
         return
-    writer.write(header.decode("ascii"))
-    writer.write(blob.decode("utf-8"))
+    writer.write(line)
     writer.flush()
 
 
-def serve() -> None:
-    _reconfigure_utf8(sys.stdin)
-    _reconfigure_utf8(sys.stdout)
-    reader = sys.stdin
-    writer = sys.stdout
+def serve(stdin: Any | None = None, stdout: Any | None = None) -> None:
+    reader = stdin or sys.stdin
+    writer = stdout or sys.stdout
+    if stdin is None:
+        _reconfigure_utf8(sys.stdin)
+    if stdout is None:
+        _reconfigure_utf8(sys.stdout)
     while True:
         try:
             message = _read_message(reader)
