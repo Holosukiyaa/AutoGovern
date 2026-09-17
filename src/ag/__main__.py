@@ -7,6 +7,9 @@ from pathlib import Path
 
 from .loop import abandon, enroll, finish, hook_main, start, status, unenroll, verify
 from .gui import write_dashboard
+from .heal import run as heal_run
+from .lift import run as lift_run
+from .see import run as see_run
 from .see import usage
 from .managed import ChainBroken
 
@@ -28,6 +31,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("abandon", help="drop the open worktree").add_argument("root")
     sub.add_parser("unenroll", help="remove the hook and restore previous hooksPath").add_argument("root")
     sub.add_parser("usage", help="see lane: help/block counts per ship item").add_argument("root")
+    sub.add_parser("lift", help="lift advice; does not refuse finish").add_argument("root")
+    sub.add_parser("heal", help="heal findings; does not refuse finish").add_argument("root")
+    sub.add_parser("see", help="see snapshot; does not refuse finish").add_argument("root")
     gui_p = sub.add_parser("gui", help="write a read-only HTML dashboard and open it")
     gui_p.add_argument("root", nargs="?")
     sub.add_parser("hook", help="git pre-commit helper")
@@ -69,6 +75,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "usage":
             print(json.dumps(usage(root), ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "lift":
+            print(json.dumps(lift_run(root), ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "heal":
+            print(json.dumps(heal_run(root), ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "see":
+            print(json.dumps(see_run(root), ensure_ascii=False, indent=2))
             return 0
     except ChainBroken as exc:
         print(str(exc), file=sys.stderr)

@@ -21,7 +21,7 @@ INSTRUCTIONS = (
     "Git hook refuses commits on canonical. "
     "ag_usage (see) counts how often each ship item helped or blocked; it is not product green. "
     "ag_gui writes a read-only HTML view; HTML is not a lane and not the core. "
-    "heal/lift have no tools yet; they must not become finish gates."
+    "ag_lift / ag_heal / ag_see are advice and findings; they must not become finish gates."
 )
 TOOLS = lane_tools() + gui.TOOLS
 

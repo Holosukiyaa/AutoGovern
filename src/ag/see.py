@@ -19,6 +19,11 @@ TOOLS = [
         "description": "Per-item help/block counts for vibe-coding. Observation only, not a green.",
         "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}}, "required": ["root"]},
     },
+    {
+        "name": "ag_see",
+        "description": "Run see strategies as a snapshot. Does not set product or refuse finish.",
+        "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}}, "required": ["root"]},
+    },
 ]
 
 
@@ -103,9 +108,17 @@ def usage(root: Path, lane: str = "ship") -> dict[str, Any]:
     }
 
 
+def run(root: Path) -> dict[str, Any]:
+    from .advice import run_lane
+
+    return run_lane("see", Path(root))
+
+
 def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     from .managed import ChainBroken
 
     if name == "ag_usage":
         return usage(Path(str(args.get("root") or "")))
+    if name == "ag_see":
+        return run(Path(str(args.get("root") or "")))
     raise ChainBroken(f"see has no tool {name}")

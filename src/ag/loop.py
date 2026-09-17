@@ -284,7 +284,7 @@ def status(root: Path) -> dict[str, Any]:
     else:
         product = str(item.get("last_product") or "pending")
         process = str(item.get("last_process") or "idle")
-    return {
+    out = {
         "schema": "ag.status.v1",
         "root": str(root),
         "key": key,
@@ -300,6 +300,13 @@ def status(root: Path) -> dict[str, Any]:
         "portrait": (task or {}).get("portrait") if task else "",
         "worktree": (task or {}).get("worktree") if task else "",
     }
+    try:
+        from .see import run as see_run
+
+        out["see"] = see_run(root)
+    except Exception:
+        pass
+    return out
 
 
 def start(root: Path, *, portrait: str = "") -> dict[str, Any]:
@@ -381,6 +388,12 @@ def verify(root: Path) -> dict[str, Any]:
     out = status(root)
     out["verify"] = record
     out["verified_tree"] = task["verified_tree"]
+    try:
+        from .lift import run as lift_run
+
+        out["lift"] = lift_run(root)
+    except Exception:
+        pass
     return out
 
 

@@ -36,7 +36,10 @@ class LaneTests(unittest.TestCase):
                 "ag_finish",
                 "ag_abandon",
                 "ag_unenroll",
+                "ag_heal",
+                "ag_lift",
                 "ag_usage",
+                "ag_see",
             ],
             lane_names,
         )

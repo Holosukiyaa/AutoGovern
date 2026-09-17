@@ -7,10 +7,26 @@ ID = "heal"
 JOB = "治病"
 SETS_PRODUCT = False
 MAY_REFUSE_FINISH = False
-TOOLS: list[dict[str, Any]] = []
+TOOLS = [
+    {
+        "name": "ag_heal",
+        "description": "Run heal strategies as findings. Does not set product or refuse finish.",
+        "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}}, "required": ["root"]},
+    }
+]
+
+
+def run(root: Any) -> dict[str, Any]:
+    from pathlib import Path
+
+    from .advice import run_lane
+
+    return run_lane("heal", Path(root))
 
 
 def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     from .managed import ChainBroken
 
+    if name == "ag_heal":
+        return run(args.get("root"))
     raise ChainBroken(f"heal has no tool {name}")
