@@ -5,50 +5,32 @@ import json
 import sys
 from pathlib import Path
 
-from .queue import ChainBroken, add_exists, add_files, add_hash, add_item, add_unknown, load_queue, run_queue
+from .loop import abandon, enroll, finish, hook_main, start, status, unenroll, verify
+from .gui import write_dashboard
+from .see import usage
+from .managed import ChainBroken
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ag")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("mcp", help="stdio MCP server")
-    run = sub.add_parser("run", help="run the probe queue")
-    run.add_argument("root")
-    add = sub.add_parser("add", help="add a probe")
-    add.add_argument("root")
-    add.add_argument("--argv", nargs="+", required=True)
-    add.add_argument("--expect-exit", type=int, default=0)
-    add.add_argument("--red-argv", nargs="+", required=True)
-    add.add_argument("--red-expect-exit", type=int, required=True)
-    add.add_argument("--paths", nargs="+", required=True, help="files this command covers")
-    add.add_argument("--note", default="")
-    bundle = sub.add_parser("add-files", help="pin several files as one claim")
-    bundle.add_argument("root")
-    bundle.add_argument("paths", nargs="+")
-    bundle.add_argument("--note", default="")
-    ex = sub.add_parser("add-exists", help="add a high-trust exists fence")
-    ex.add_argument("root")
-    ex.add_argument("path")
-    ex.add_argument("--note", default="")
-    hx = sub.add_parser("add-hash", help="pin file bytes with sha256")
-    hx.add_argument("root")
-    hx.add_argument("path")
-    hx.add_argument("--note", default="")
-    unk = sub.add_parser("add-unknown", help="declare something that cannot be verified")
-    unk.add_argument("root")
-    unk.add_argument("note")
-    manage = sub.add_parser("manage", help="register another project")
-    manage.add_argument("root")
-    manage.add_argument("--note", default="")
-    sub.add_parser("projects", help="list managed projects")
-    sub.add_parser("gui", help="open local GUI for others' probes")
-    lst = sub.add_parser("list", help="print queue json")
-    lst.add_argument("root")
-    rep = sub.add_parser("report", help="which code has a problem, and where to blame")
-    rep.add_argument("root")
-    chk = sub.add_parser("checkup", help="reverse-dev scan; plants exists/hash probes by default")
-    chk.add_argument("root")
-    chk.add_argument("--no-insert", action="store_true", help="only list suggestions, do not plant probes")
+    sub.add_parser("mcp", help="stdio MCP server — main entry")
+    enroll_p = sub.add_parser("enroll", help="register a git checkout and install the hook")
+    enroll_p.add_argument("root")
+    enroll_p.add_argument("--test", nargs=argparse.REMAINDER, dest="test_argv")
+    enroll_p.add_argument("--note", default="")
+    sub.add_parser("status", help="hook / dirty / process vs product").add_argument("root")
+    start_p = sub.add_parser("start", help="open a worktree")
+    start_p.add_argument("root")
+    start_p.add_argument("--portrait", default="")
+    sub.add_parser("verify", help="run enrolled tests and pin the tree").add_argument("root")
+    sub.add_parser("finish", help="ff-only if digest matches").add_argument("root")
+    sub.add_parser("abandon", help="drop the open worktree").add_argument("root")
+    sub.add_parser("unenroll", help="remove the hook and restore previous hooksPath").add_argument("root")
+    sub.add_parser("usage", help="see lane: help/block counts per ship item").add_argument("root")
+    gui_p = sub.add_parser("gui", help="write a read-only HTML dashboard and open it")
+    gui_p.add_argument("root", nargs="?")
+    sub.add_parser("hook", help="git pre-commit helper")
     args = parser.parse_args(argv)
     try:
         if args.cmd == "mcp":
@@ -56,74 +38,37 @@ def main(argv: list[str] | None = None) -> int:
 
             serve()
             return 0
+        if args.cmd == "hook":
+            return hook_main()
         if args.cmd == "gui":
-            from .gui import serve as serve_gui
-
-            serve_gui()
-            return 0
-        if args.cmd == "manage":
-            from .managed import add_project
-
-            item = add_project(Path(args.root), note=args.note)
-            print(json.dumps(item, ensure_ascii=False, indent=2))
-            return 0
-        if args.cmd == "projects":
-            from .managed import load_managed, project_snapshot
-
-            blob = load_managed()
-            rows = []
-            for item in blob.get("projects") or []:
-                if not isinstance(item, dict):
-                    continue
-                snap = project_snapshot(Path(str(item.get("root") or "")))
-                rows.append(snap)
-            print(json.dumps({"schema": "ag.projects.v1", "projects": rows}, ensure_ascii=False, indent=2))
+            path = write_dashboard(Path(args.root) if args.root else None, browse=True)
+            print(str(path))
             return 0
         root = Path(args.root)
-        if args.cmd == "list":
-            print(json.dumps(load_queue(root), ensure_ascii=False, indent=2))
+        if args.cmd == "enroll":
+            print(json.dumps(enroll(root, test_argv=args.test_argv, note=args.note), ensure_ascii=False, indent=2))
             return 0
-        if args.cmd == "add":
-            item = add_item(
-                root,
-                argv=list(args.argv),
-                expect_exit=args.expect_exit,
-                red_argv=list(args.red_argv),
-                red_expect_exit=args.red_expect_exit,
-                paths=list(args.paths),
-                note=args.note,
-            )
-            print(json.dumps(item, ensure_ascii=False, indent=2))
+        if args.cmd == "status":
+            print(json.dumps(status(root), ensure_ascii=False, indent=2))
             return 0
-        if args.cmd == "add-exists":
-            item = add_exists(root, args.path, note=args.note)
-            print(json.dumps(item, ensure_ascii=False, indent=2))
+        if args.cmd == "start":
+            print(json.dumps(start(root, portrait=args.portrait), ensure_ascii=False, indent=2))
             return 0
-        if args.cmd == "add-files":
-            item = add_files(root, list(args.paths), note=args.note)
-            print(json.dumps(item, ensure_ascii=False, indent=2))
-            return 0
-        if args.cmd == "add-hash":
-            item = add_hash(root, args.path, note=args.note)
-            print(json.dumps(item, ensure_ascii=False, indent=2))
-            return 0
-        if args.cmd == "add-unknown":
-            item = add_unknown(root, note=args.note)
-            print(json.dumps(item, ensure_ascii=False, indent=2))
-            return 0
-        if args.cmd == "run":
-            result = run_queue(root)
+        if args.cmd == "verify":
+            result = verify(root)
             print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result.get("verified_tree") else 1
+        if args.cmd == "finish":
+            print(json.dumps(finish(root), ensure_ascii=False, indent=2))
             return 0
-        if args.cmd == "report":
-            from .report import problems
-
-            print(json.dumps(problems(root), ensure_ascii=False, indent=2))
+        if args.cmd == "abandon":
+            print(json.dumps(abandon(root), ensure_ascii=False, indent=2))
             return 0
-        if args.cmd == "checkup":
-            from .checkup import checkup
-
-            print(json.dumps(checkup(root, insert=not args.no_insert), ensure_ascii=False, indent=2))
+        if args.cmd == "unenroll":
+            print(json.dumps(unenroll(root), ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "usage":
+            print(json.dumps(usage(root), ensure_ascii=False, indent=2))
             return 0
     except ChainBroken as exc:
         print(str(exc), file=sys.stderr)

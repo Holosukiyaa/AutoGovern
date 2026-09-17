@@ -1,140 +1,29 @@
-"""stdio MCP: the queue is the only product surface."""
+"""stdio MCP. Four lanes; only ship tools are live."""
 from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .managed import add_project, load_managed, project_snapshot
-from .queue import ChainBroken, add_exists, add_files, add_hash, add_item, add_unknown, load_queue, run_queue
+from . import gui
+from .lanes import call as lane_call
+from .lanes import tools as lane_tools
+from .managed import ChainBroken
 
 PROTOCOL = "2024-11-05"
-TOOLS = [
-    {
-        "name": "ag_manage_list",
-        "description": "List other projects ag manages. ag does not probe itself.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "ag_manage_add",
-        "description": "Register another project root. Creates <root>/.ag/queue.json if needed.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"root": {"type": "string"}, "note": {"type": "string"}},
-            "required": ["root"],
-        },
-    },
-    {
-        "name": "ag_queue_list",
-        "description": "List probe queue items for a project root. Physical store: <root>/.ag/queue.json.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"root": {"type": "string", "description": "Project directory"}},
-            "required": ["root"],
-        },
-    },
-    {
-        "name": "ag_queue_add",
-        "description": "Add a probe. red_* must fail first (counterexample); argv/expect_exit is the green chain.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "root": {"type": "string"},
-                "argv": {"type": "array", "items": {"type": "string"}},
-                "expect_exit": {"type": "integer", "default": 0},
-                "red_argv": {"type": "array", "items": {"type": "string"}},
-                "red_expect_exit": {"type": "integer"},
-                "paths": {"type": "array", "items": {"type": "string"}},
-                "note": {"type": "string"},
-            },
-            "required": ["root", "argv", "red_argv", "red_expect_exit", "paths"],
-        },
-    },
-    {
-        "name": "ag_queue_add_files",
-        "description": "One claim over several files. Evidence pins every listed file. Directories are refused.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "root": {"type": "string"},
-                "paths": {"type": "array", "items": {"type": "string"}},
-                "note": {"type": "string"},
-            },
-            "required": ["root", "paths"],
-        },
-    },
-    {
-        "name": "ag_queue_add_exists",
-        "description": "Add a high-trust exists fence. Same predicate: ABSENT path must miss (red), given path must exist (green).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "root": {"type": "string"},
-                "path": {"type": "string"},
-                "note": {"type": "string"},
-            },
-            "required": ["root", "path"],
-        },
-    },
-    {
-        "name": "ag_queue_add_hash",
-        "description": "Pin a file's sha256. Same predicate: missing path must not match pin (red); file bytes must match pin (green).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "root": {"type": "string"},
-                "path": {"type": "string"},
-                "note": {"type": "string"},
-            },
-            "required": ["root", "path"],
-        },
-    },
-    {
-        "name": "ag_queue_add_unknown",
-        "description": "Declare a scope that cannot be verified. Lowers trust_rate. Does not stop the business.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "root": {"type": "string"},
-                "note": {"type": "string"},
-                "scope": {"type": "string"},
-            },
-            "required": ["root", "note"],
-        },
-    },
-    {
-        "name": "ag_queue_run",
-        "description": "Run every probe: red chain then green chain. Reports exit codes. Untrusted if red does not fail as expected.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"root": {"type": "string"}},
-            "required": ["root"],
-        },
-    },
-    {
-        "name": "ag_report",
-        "description": "Which declared paths have a problem, and where to blame (runs.jsonl, run_id, git_head, probe_id). Trust rate is not this.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"root": {"type": "string"}},
-            "required": ["root"],
-        },
-    },
-    {
-        "name": "ag_checkup",
-        "description": "Reverse-dev scan of fat/glue files and plant exists/hash probes. Not verification. Set insert false to only list.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "root": {"type": "string"},
-                "insert": {"type": "boolean", "default": True},
-            },
-            "required": ["root"],
-        },
-    },
-]
+INSTRUCTIONS = (
+    "ag has four lanes that must not mix: ship (交货), heal (治病), lift (抬正确率), see (看见). "
+    "Only ship may set product or refuse finish. "
+    "File-changing work: ag_status → ag_start → write ONLY in worktree.path → ag_verify → ag_finish. "
+    "ag_verify runs the enrolled test command. process complete is not product passed. "
+    "If no test command is enrolled, product stays undeclared. "
+    "Git hook refuses commits on canonical. "
+    "ag_usage (see) counts how often each ship item helped or blocked; it is not product green. "
+    "ag_gui writes a read-only HTML view; HTML is not a lane and not the core. "
+    "heal/lift have no tools yet; they must not become finish gates."
+)
+TOOLS = lane_tools() + gui.TOOLS
 
 
 def _ok(req_id: Any, result: Any) -> dict[str, Any]:
@@ -156,13 +45,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
                 "protocolVersion": PROTOCOL,
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "ag", "version": __version__},
-                "instructions": (
-                    "ag is a probe queue. AI output is untrusted. "
-                    "Each probe must fail its red chain then pass its green chain. "
-                    "High-trust fences run first. If a fence cannot bar its field, later items are skipped, never green. "
-                    "AI may propose probes; proposals are not evidence. Larger scope means broader speech. "
-                    "There is no honest whole-repo coverage percent."
-                ),
+                "instructions": INSTRUCTIONS,
             },
         )
     if method == "notifications/initialized":
@@ -188,54 +71,9 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
-    if name == "ag_manage_list":
-        return load_managed()
-    root = Path(str(args.get("root") or "")).expanduser()
-    if name == "ag_manage_add":
-        item = add_project(root, note=str(args.get("note") or ""))
-        return {"added": item, "managed": load_managed()}
-    if name == "ag_queue_list":
-        return project_snapshot(root)
-    if name == "ag_queue_add":
-        argv = [str(x) for x in (args.get("argv") or [])]
-        red_argv = [str(x) for x in (args.get("red_argv") or [])]
-        item = add_item(
-            root,
-            argv=argv,
-            expect_exit=int(args.get("expect_exit") or 0),
-            red_argv=red_argv,
-            red_expect_exit=int(args["red_expect_exit"]),
-            paths=[str(x) for x in (args.get("paths") or [])],
-            note=str(args.get("note") or ""),
-        )
-        return {"added": item, "queue": load_queue(root)}
-    if name == "ag_queue_add_files":
-        item = add_files(root, [str(x) for x in (args.get("paths") or [])], note=str(args.get("note") or ""))
-        return {"added": item, "queue": load_queue(root)}
-    if name == "ag_queue_add_exists":
-        item = add_exists(root, str(args.get("path") or ""), note=str(args.get("note") or ""))
-        return {"added": item, "queue": load_queue(root)}
-    if name == "ag_queue_add_hash":
-        item = add_hash(root, str(args.get("path") or ""), note=str(args.get("note") or ""))
-        return {"added": item, "queue": load_queue(root)}
-    if name == "ag_queue_add_unknown":
-        item = add_unknown(
-            root,
-            note=str(args.get("note") or ""),
-            scope=str(args.get("scope") or ""),
-        )
-        return {"added": item, "queue": load_queue(root)}
-    if name == "ag_queue_run":
-        return run_queue(root)
-    if name == "ag_report":
-        from .report import problems
-
-        return problems(root)
-    if name == "ag_checkup":
-        from .checkup import checkup
-
-        return checkup(root, insert=bool(args.get("insert", True)))
-    raise ChainBroken(f"unknown tool {name}")
+    if any(str(item["name"]) == name for item in gui.TOOLS):
+        return gui.call(name, args)
+    return lane_call(name, args)
 
 
 def _reconfigure_utf8(stream: Any) -> None:

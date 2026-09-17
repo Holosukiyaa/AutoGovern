@@ -1,17 +1,51 @@
-"""Registry of other projects. ag does not probe itself."""
+"""Enrolled projects. Identity is realpath so a junction is one checkout."""
 from __future__ import annotations
 
+import hashlib
 import json
+import os
+import re
 from pathlib import Path
 from typing import Any
-
-from .queue import ChainBroken, git_head, load_queue, queue_path, save_queue, speech
 
 SCHEMA = "ag.managed.v1"
 
 
+class ChainBroken(Exception):
+    """A physical check did not produce the expected result."""
+
+
+def ag_home() -> Path:
+    override = os.environ.get("AG_HOME")
+    if override:
+        return Path(override)
+    return Path.home() / ".ag"
+
+
 def managed_path() -> Path:
-    return Path.home() / ".ag" / "managed.json"
+    return ag_home() / "managed.json"
+
+
+def real_root(root: Path) -> Path:
+    return Path(os.path.realpath(root.expanduser()))
+
+
+def project_key(root: Path) -> str:
+    real = real_root(root)
+    digest = hashlib.sha256(str(real).replace("\\", "/").casefold().encode("utf-8")).hexdigest()[:12]
+    name = re.sub(r"[^a-z0-9]+", "-", real.name.casefold()).strip("-") or "repo"
+    return f"{name}-{digest}"
+
+
+def lookup_project(root: Path) -> dict[str, Any] | None:
+    wanted = str(real_root(root))
+    for item in load_managed()["projects"]:
+        if not isinstance(item, dict):
+            continue
+        stored = str(item.get("real") or item.get("root") or "")
+        if stored and str(real_root(Path(stored))) == wanted:
+            return item
+    return None
 
 
 def load_managed() -> dict[str, Any]:
@@ -32,67 +66,3 @@ def save_managed(blob: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(blob, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return path
-
-
-def add_project(root: Path, *, note: str = "") -> dict[str, Any]:
-    root = root.expanduser().resolve()
-    if not root.is_dir():
-        raise ChainBroken(f"not a directory: {root}")
-    blob = load_managed()
-    existing = {str(Path(str(item.get("root") or "")).resolve()) for item in blob["projects"] if isinstance(item, dict)}
-    if str(root) in existing:
-        raise ChainBroken(f"already managed: {root}")
-    save_queue(root, load_queue(root))
-    item = {"root": str(root), "note": str(note or "")}
-    blob["projects"].append(item)
-    save_managed(blob)
-    return item
-
-
-def project_snapshot(root: Path) -> dict[str, Any]:
-    root = root.expanduser().resolve()
-    queue = load_queue(root)
-    items = []
-    for item in queue.get("items") or []:
-        if not isinstance(item, dict):
-            continue
-        last = item.get("last") if isinstance(item.get("last"), dict) else {}
-        items.append(
-            {
-                "id": item.get("id"),
-                "kind": item.get("kind"),
-                "path": item.get("path"),
-                "note": item.get("note"),
-                "trusted": bool(last.get("trusted")),
-                "skipped": bool(last.get("skipped")),
-                "red_ok": last.get("red_ok"),
-                "green_ok": last.get("green_ok"),
-                "unverifiable": bool(last.get("unverifiable") or item.get("kind") == "unknown"),
-                "pin": item.get("pin"),
-                "speech": speech(item),
-            }
-        )
-    trusted_n = sum(1 for p in items if p.get("trusted"))
-    total = len(items)
-    declared = {"precise": 0, "broad": 0, "wide": 0}
-    for row in items:
-        b = str((row.get("speech") or {}).get("breadth") or "broad")
-        if b not in declared:
-            b = "broad"
-        declared[b] += 1
-    queue_blob = load_queue(root)
-    last_run = queue_blob.get("last_run") if isinstance(queue_blob.get("last_run"), dict) else {}
-    head = git_head(root)
-    stale = bool(last_run.get("git_head") and head and last_run.get("git_head") != head)
-    return {
-        "root": str(root),
-        "queue": str(queue_path(root)),
-        "items": items,
-        "trust_rate": None if total == 0 else round(trusted_n / total, 4),
-        "reminder": "trust_rate is a reminder; low rate does not stop the business",
-        "last_run": last_run,
-        "git_head": head,
-        "stale": stale,
-        "declared": declared,
-        "declared_note": "counts only declared probes; there is no honest coverage of the whole repo",
-    }
