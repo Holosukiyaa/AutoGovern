@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .catalog import list_lane
+from .catalog import enabled, list_lane
 from .managed import ag_home, load_managed, lookup_project, project_key, real_root
 from .see import note
 
@@ -20,11 +20,6 @@ FAT = 800
 def _git(cwd: Path, *args: str) -> str:
     ran = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=False)
     return (ran.stdout or "").strip()
-
-
-def _off(root: Path) -> set[str]:
-    item = lookup_project(root) or {}
-    return {str(x) for x in (item.get("off") or [])}
 
 
 def _task(root: Path) -> dict[str, Any] | None:
@@ -391,12 +386,15 @@ HANDLERS = {
 
 def run_lane(lane: str, root: Path) -> dict[str, Any]:
     root = real_root(root)
-    off = _off(root)
     findings = []
+    skipped = []
     for item in list_lane(lane):
         seq = int(item["seq"])
         code = str(item["code"])
-        if not item.get("live") or code in off:
+        if not item.get("live"):
+            continue
+        if not enabled(root, lane, seq):
+            skipped.append(code)
             continue
         fn = HANDLERS.get((lane, seq))
         if fn is None:
@@ -413,5 +411,6 @@ def run_lane(lane: str, root: Path) -> dict[str, Any]:
         "lane": lane,
         "root": str(root),
         "findings": findings,
+        "skipped": skipped,
         "reminder": "advice/findings only; cannot set product or refuse finish",
     }

@@ -9,9 +9,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from ag.catalog import plug
 from ag.heal import run as heal_run
 from ag.lift import run as lift_run
 from ag.loop import enroll, start
+from ag.managed import ChainBroken
 from ag.see import run as see_run
 
 PY = sys.executable
@@ -53,6 +55,17 @@ class AdviceTests(unittest.TestCase):
         seen = see_run(self.root)
         self.assertEqual(list(range(1, 10)), [row["seq"] for row in seen["findings"]])
         self.assertIn("cannot set product", lifted["reminder"])
+
+    def test_unplug_skips_handler_core_cannot_unplug(self) -> None:
+        plug(self.root, "lift-1", on=False)
+        lifted = lift_run(self.root)
+        self.assertIn("lift-1", lifted["skipped"])
+        self.assertNotIn(1, [row["seq"] for row in lifted["findings"]])
+        plug(self.root, "lift-1", on=True)
+        lifted = lift_run(self.root)
+        self.assertNotIn("lift-1", lifted["skipped"])
+        with self.assertRaises(ChainBroken):
+            plug(self.root, "ship-2", on=False)
 
 
 if __name__ == "__main__":

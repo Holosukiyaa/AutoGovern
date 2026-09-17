@@ -45,7 +45,7 @@ class LaneTests(unittest.TestCase):
         )
         self.assertNotIn("ag_gui", lane_names)
         self.assertEqual(["ag_gui"], [str(item["name"]) for item in GUI_TOOLS])
-        self.assertEqual(lane_names + ["ag_gui"], [str(item["name"]) for item in TOOLS])
+        self.assertEqual(lane_names + ["ag_gui", "ag_plug"], [str(item["name"]) for item in TOOLS])
 
     def test_strategies_are_numbered_per_lane(self) -> None:
         ship = list_lane("ship")

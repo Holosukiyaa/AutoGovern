@@ -525,6 +525,10 @@ def hook_main() -> int:
         usage_note(canonical, "ship", 4, "block", "worktree commit")
         sys.stderr.write("ag: only ag_finish can commit\n")
         return 1
+    from .catalog import enabled
+
+    if not enabled(canonical, "ship", 10):
+        return 0
     code = _run_previous_pre_commit(toplevel)
     previous = git(toplevel, "config", "--local", "--get", "ag.previousHooksPath", check=False)
     if previous and previous != PREV_UNSET:

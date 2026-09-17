@@ -123,6 +123,7 @@ class LoopTests(unittest.TestCase):
                 "ag_usage",
                 "ag_see",
                 "ag_gui",
+                "ag_plug",
             ],
             names,
         )

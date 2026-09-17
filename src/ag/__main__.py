@@ -11,6 +11,7 @@ from .heal import run as heal_run
 from .lift import run as lift_run
 from .see import run as see_run
 from .see import usage
+from .catalog import plug, plug_list
 from .managed import ChainBroken
 
 
@@ -36,6 +37,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("see", help="see snapshot; does not refuse finish").add_argument("root")
     gui_p = sub.add_parser("gui", help="write a read-only HTML dashboard and open it")
     gui_p.add_argument("root", nargs="?")
+    plug_p = sub.add_parser("plug", help="list/on/off a pluggable strategy by lane-seq")
+    plug_p.add_argument("action", choices=["list", "on", "off"])
+    plug_p.add_argument("root")
+    plug_p.add_argument("code", nargs="?")
     sub.add_parser("hook", help="git pre-commit helper")
     args = parser.parse_args(argv)
     try:
@@ -49,6 +54,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "gui":
             path = write_dashboard(Path(args.root) if args.root else None, browse=True)
             print(str(path))
+            return 0
+        if args.cmd == "plug":
+            root = Path(args.root)
+            if args.action == "list":
+                print(json.dumps(plug_list(root), ensure_ascii=False, indent=2))
+            else:
+                print(json.dumps(plug(root, str(args.code or ""), on=args.action == "on"), ensure_ascii=False, indent=2))
             return 0
         root = Path(args.root)
         if args.cmd == "enroll":
