@@ -103,6 +103,20 @@ def wipe_plug(root: Path, lane: str, seq: int) -> str:
     return ""
 
 
+def gc_plug(root: Path) -> list[str]:
+    """Delete plug folders whose lane-seq is no longer in the catalog."""
+    folder = ag_home() / "projects" / project_key(root) / "plug"
+    if not folder.is_dir():
+        return []
+    valid = {item["code"] for lane in ("ship", "lift", "heal", "see") for item in list_lane(lane)}
+    wiped: list[str] = []
+    for child in folder.iterdir():
+        if child.is_dir() and child.name not in valid:
+            shutil.rmtree(child)
+            wiped.append(child.name)
+    return wiped
+
+
 def enabled(root: Path, lane: str, seq: int) -> bool:
     item = get(lane, seq)
     if not item["pluggable"]:
@@ -138,7 +152,7 @@ def plug_list(root: Path) -> dict[str, Any]:
                     "on": on,
                 }
             )
-    return {"schema": "ag.plug.v1", "root": str(root), "items": rows}
+    return {"schema": "ag.plug.v1", "root": str(root), "items": rows, "gc": gc_plug(root)}
 
 
 def plug(root: Path, code: str, *, on: bool) -> dict[str, Any]:

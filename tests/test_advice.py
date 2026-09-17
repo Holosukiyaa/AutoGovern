@@ -77,6 +77,34 @@ class AdviceTests(unittest.TestCase):
         self.assertFalse(folder.exists())
         self.assertEqual(before, product.read_text(encoding="utf-8"))
 
+    def test_unplug_one_keeps_others_and_gc_drops_removed_strategy(self) -> None:
+        from ag.catalog import gc_plug, plug_list
+
+        heal_run(self.root)
+        see_run(self.root)
+        lift_run(self.root)
+        self.assertTrue(plug_dir(self.root, "heal", 1).is_dir())
+        self.assertTrue(plug_dir(self.root, "see", 2).is_dir())
+        plug(self.root, "heal-1", on=False)
+        self.assertFalse(plug_dir(self.root, "heal", 1).exists())
+        self.assertTrue(plug_dir(self.root, "see", 2).is_dir())
+        healed = heal_run(self.root)
+        self.assertIn("heal-1", healed["skipped"])
+        self.assertEqual([2, 3, 4], [row["seq"] for row in healed["findings"]])
+        plug(self.root, "heal-1", on=True)
+        healed = heal_run(self.root)
+        self.assertNotIn("heal-1", healed["skipped"])
+        self.assertTrue(plug_dir(self.root, "heal", 1).is_dir())
+        ghost = plug_dir(self.root, "gone", 99)
+        ghost.mkdir(parents=True)
+        (ghost / "dead.txt").write_text("x", encoding="utf-8")
+        wiped = gc_plug(self.root)
+        self.assertIn("gone-99", wiped)
+        self.assertFalse(ghost.exists())
+        self.assertTrue(plug_dir(self.root, "see", 2).is_dir())
+        listed = plug_list(self.root)
+        self.assertEqual([], listed.get("gc") or [])
+
 
 if __name__ == "__main__":
     unittest.main()
