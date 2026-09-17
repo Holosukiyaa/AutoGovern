@@ -5,11 +5,12 @@ Unplug writes managed.json off[] and never touches the product tree.
 """
 from __future__ import annotations
 
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Any
 
-from .managed import ChainBroken, load_managed, lookup_project, save_managed
+from .managed import ChainBroken, ag_home, load_managed, lookup_project, project_key, save_managed
 
 DB_PATH = Path(__file__).with_name("strategies.sqlite")
 
@@ -89,6 +90,19 @@ def parse_code(code: str) -> tuple[str, int]:
     return lane, seq
 
 
+def plug_dir(root: Path, lane: str, seq: int) -> Path:
+    """Only place a strategy may persist files. Unplug deletes this folder."""
+    return ag_home() / "projects" / project_key(root) / "plug" / f"{lane}-{seq}"
+
+
+def wipe_plug(root: Path, lane: str, seq: int) -> str:
+    folder = plug_dir(root, lane, seq)
+    if folder.is_dir():
+        shutil.rmtree(folder)
+        return str(folder)
+    return ""
+
+
 def enabled(root: Path, lane: str, seq: int) -> bool:
     item = get(lane, seq)
     if not item["pluggable"]:
@@ -137,8 +151,11 @@ def plug(root: Path, code: str, *, on: bool) -> dict[str, Any]:
         off = [x for x in off if x != item["code"]]
     elif item["code"] not in off:
         off.append(item["code"])
+        wipe_plug(root, lane, seq)
     _set_off(root, off)
-    return plug_list(root)
+    result = plug_list(root)
+    result["wiped"] = f"{lane}-{seq}" if not on else ""
+    return result
 
 
 def call(name: str, args: dict[str, Any]) -> dict[str, Any]:

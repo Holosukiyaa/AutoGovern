@@ -1,4 +1,8 @@
-"""Run lift/heal/see strategies. Advice only. Probes bind to lane-seq."""
+"""Run lift/heal/see strategies. Advice only. Probes bind to lane-seq.
+
+Handlers may persist only under catalog.plug_dir(root, lane, seq).
+Never write the product tree; unplug deletes that folder.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -9,8 +13,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .catalog import enabled, list_lane
-from .managed import ag_home, load_managed, lookup_project, project_key, real_root
+from .catalog import enabled, list_lane, plug_dir
+from .managed import load_managed, lookup_project, project_key, real_root
 from .see import note
 
 TTL = 7 * 86400
@@ -63,10 +67,6 @@ def _sha(path: Path) -> str:
         for chunk in iter(lambda: handle.read(65536), b""):
             digest.update(chunk)
     return digest.hexdigest()[:16]
-
-
-def _proj(root: Path) -> Path:
-    return ag_home() / "projects" / project_key(root)
 
 
 def _read_json(path: Path, default: Any) -> Any:
@@ -208,12 +208,12 @@ def _sick(root: Path) -> dict[str, Any]:
 
 def heal_1(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     blob = _sick(root)
-    _write_json(_proj(root) / "heal.json", {"t": time.time(), "items": blob})
+    _write_json(plug_dir(root, "heal", 1) / "findings.json", {"t": time.time(), "items": blob})
     return blob
 
 
 def heal_2(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    blob = _read_json(_proj(root) / "heal.json", {})
+    blob = _read_json(plug_dir(root, "heal", 1) / "findings.json", {})
     items = blob.get("items") if isinstance(blob, dict) else {}
     if not isinstance(items, dict):
         items = _sick(root)
@@ -222,19 +222,19 @@ def heal_2(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
 
 
 def heal_3(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    blob = _read_json(_proj(root) / "heal.json", {})
+    blob = _read_json(plug_dir(root, "heal", 1) / "findings.json", {})
     age = time.time() - float(blob.get("t") or 0) if isinstance(blob, dict) else TTL + 1
     return {"stale": age > TTL, "age_s": int(age), "ttl_s": TTL}
 
 
 def heal_4(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     repo = _repo(root)
-    path = _proj(root) / "probes.json"
+    path = plug_dir(root, "heal", 4) / "probes.json"
     store = _read_json(path, {})
     if not isinstance(store, dict):
         store = {}
     if not store:
-        sick = _read_json(_proj(root) / "heal.json", {}).get("items") or {}
+        sick = _read_json(plug_dir(root, "heal", 1) / "findings.json", {}).get("items") or {}
         fat = sick.get("fat") if isinstance(sick, dict) else []
         for row in (fat or [])[:5]:
             rel = str(row.get("file") or "")
@@ -278,7 +278,7 @@ def see_2(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
         and Path(p).name not in blob
         and Path(p).stem not in blob
     ]
-    _write_json(_proj(root) / "see.json", {"undeclared_n": len(undeclared), "t": time.time()})
+    _write_json(plug_dir(root, "see", 2) / "zone.json", {"undeclared_n": len(undeclared), "t": time.time()})
     return {"count": len(undeclared), "files": undeclared[:40]}
 
 
@@ -342,7 +342,7 @@ def see_7(_root: Path, _item: dict[str, Any]) -> dict[str, Any]:
 
 
 def see_8(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    prev = _read_json(_proj(root) / "see.json", {})
+    prev = _read_json(plug_dir(root, "see", 2) / "zone.json", {})
     now = see_2(root, _item)
     old = int(prev.get("undeclared_n") or now["count"])
     return {"was": old, "now": now["count"], "delta": now["count"] - old}

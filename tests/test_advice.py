@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ag.catalog import plug
+from ag.catalog import plug, plug_dir
 from ag.heal import run as heal_run
 from ag.lift import run as lift_run
 from ag.loop import enroll, start
@@ -66,6 +66,16 @@ class AdviceTests(unittest.TestCase):
         self.assertNotIn("lift-1", lifted["skipped"])
         with self.assertRaises(ChainBroken):
             plug(self.root, "ship-2", on=False)
+
+    def test_unplug_deletes_strategy_folder_not_product_tree(self) -> None:
+        heal_run(self.root)
+        folder = plug_dir(self.root, "heal", 1)
+        self.assertTrue(folder.is_dir())
+        product = self.root / "ok.py"
+        before = product.read_text(encoding="utf-8")
+        plug(self.root, "heal-1", on=False)
+        self.assertFalse(folder.exists())
+        self.assertEqual(before, product.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
