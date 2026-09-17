@@ -1,6 +1,7 @@
 """Green delivery loop: worktree, enrolled tests, hook, ff-only. No GUI."""
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import shutil
@@ -95,20 +96,49 @@ def _write_hook(key: str) -> Path:
         f"'{_posix(Path(sys.executable))}' -m ag hook\n"
         "exit $?\n"
     )
-    path = folder / "pre-commit"
-    path.write_text(body, encoding="utf-8")
-    try:
-        os.chmod(path, 0o755)
-    except OSError:
-        pass
+    for name in ("pre-commit", "prepare-commit-msg"):
+        path = folder / name
+        path.write_text(body, encoding="utf-8")
+        try:
+            os.chmod(path, 0o755)
+        except OSError:
+            pass
     return folder
+
+
+def _ensure_hook_files(key: str) -> Path:
+    folder = _hooks_dir(key)
+    if (folder / "pre-commit").is_file() and (folder / "prepare-commit-msg").is_file():
+        return folder
+    return _write_hook(key)
 
 
 def _hook_ok(root: Path, key: str) -> bool:
     configured = git(root, "config", "--local", "--get", "core.hooksPath", check=False)
     if not configured:
         return False
-    return Path(configured).resolve() == _hooks_dir(key).resolve() and (_hooks_dir(key) / "pre-commit").is_file()
+    folder = _hooks_dir(key)
+    return (
+        Path(configured).resolve() == folder.resolve()
+        and (folder / "pre-commit").is_file()
+        and (folder / "prepare-commit-msg").is_file()
+    )
+
+
+def _deliver_token_path(key: str) -> Path:
+    return ag_home() / "projects" / key / "deliver.token"
+
+
+def _deliver_token_ok(root: Path) -> bool:
+    key = git(root, "config", "--local", "--get", "ag.key", check=False) or project_key(root)
+    try:
+        expected = _deliver_token_path(key).read_text(encoding="utf-8").strip()
+    except OSError:
+        return False
+    got = os.environ.get("AG_DELIVER_TOKEN") or ""
+    if not expected or len(got) != len(expected):
+        return False
+    return hmac.compare_digest(got, expected)
 
 
 def _dirty(root: Path) -> bool:
@@ -162,9 +192,20 @@ def _run_previous_pre_commit(worktree: Path) -> int:
     script = Path(previous) / "pre-commit"
     if not script.is_file():
         return 0
+    suffix = script.suffix.lower()
     shell = _sh()
-    command = [shell, _posix(script)] if shell else [str(script)]
-    completed = subprocess.run(command, cwd=str(worktree), check=False)
+    if suffix in {".exe", ".bat", ".cmd"}:
+        command = [str(script)]
+    elif shell:
+        command = [shell, _posix(script)]
+    else:
+        sys.stderr.write("ag: previous pre-commit needs sh; refusing deliver\n")
+        return 1
+    try:
+        completed = subprocess.run(command, cwd=str(worktree), check=False)
+    except OSError as exc:
+        sys.stderr.write(f"ag: previous pre-commit could not run: {exc}\n")
+        return 1
     return int(completed.returncode)
 
 
@@ -177,22 +218,31 @@ def _restore_git_gate(root: Path, previous: str) -> None:
     git_run(root, "config", "--local", "--unset", "ag.previousHooksPath")
 
 
-def _undo_canary_commit(root: Path) -> None:
-    if git(root, "log", "-1", "--format=%s", check=False) == CANARY_MSG:
-        git(root, "reset", "--hard", "HEAD~1")
+def _reset_to(root: Path, sha: str) -> None:
+    if git(root, "rev-parse", "HEAD", check=False) != sha:
+        git(root, "reset", "--hard", sha)
+
+
+def _canary_attempt(root: Path, before: str, *, env: dict[str, str], extra: tuple[str, ...] = ()) -> None:
+    ran = git_run(root, "commit", "--allow-empty", "-m", CANARY_MSG, *extra, env=env)
+    _reset_to(root, before)
+    if ran.returncode == 0:
+        raise ChainBroken("hook did not refuse canonical commit")
+    text = f"{ran.stderr or ''}{ran.stdout or ''}"
+    if "canonical" not in text:
+        raise ChainBroken(text.strip() or "canonical commit refused for the wrong reason")
 
 
 def _canary(root: Path) -> None:
-    deliver = os.environ.copy()
+    before = git(root, "rev-parse", "HEAD")
+    clean = os.environ.copy()
+    clean.pop("AG_DELIVER", None)
+    clean.pop("AG_DELIVER_TOKEN", None)
+    deliver = clean.copy()
     deliver["AG_DELIVER"] = "1"
-    for env in (None, deliver):
-        ran = git_run(root, "commit", "--allow-empty", "-m", CANARY_MSG, env=env)
-        _undo_canary_commit(root)
-        if ran.returncode == 0:
-            raise ChainBroken("hook did not refuse canonical commit")
-        text = f"{ran.stderr or ''}{ran.stdout or ''}"
-        if "canonical" not in text:
-            raise ChainBroken(text.strip() or "canonical commit refused for the wrong reason")
+    _canary_attempt(root, before, env=clean)
+    _canary_attempt(root, before, env=deliver)
+    _canary_attempt(root, before, env=clean, extra=("--no-verify",))
 
 
 def _drop_project(key: str) -> None:
@@ -265,6 +315,7 @@ def status(root: Path) -> dict[str, Any]:
     if item is None:
         raise ChainBroken(f"not enrolled: {root}")
     key = str(item.get("key") or project_key(root))
+    _ensure_hook_files(key)
     test_argv = [str(x) for x in (item.get("test_argv") or [])]
     task = load_task(key)
     verify = task.get("verify") if isinstance(task, dict) else None
@@ -359,7 +410,18 @@ def verify(root: Path) -> dict[str, Any]:
     if not worktree.is_dir():
         raise ChainBroken(f"worktree missing: {worktree}")
     test_argv = [str(x) for x in (state.get("test_argv") or [])]
-    record: dict[str, Any] = {"exit": 0, "stdout": "", "stderr": "", "undeclared": not test_argv}
+    untracked = [
+        ln.strip()
+        for ln in git(worktree, "ls-files", "-o", "--exclude-standard", check=False).splitlines()
+        if ln.strip()
+    ]
+    record: dict[str, Any] = {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "",
+        "undeclared": not test_argv,
+        "untracked": untracked[:50],
+    }
     if test_argv:
         completed = subprocess.run(
             test_argv,
@@ -373,6 +435,7 @@ def verify(root: Path) -> dict[str, Any]:
             "stdout": (completed.stdout or "")[-4000:],
             "stderr": (completed.stderr or "")[-4000:],
             "undeclared": False,
+            "untracked": untracked[:50],
         }
     digest = tree_digest(worktree)
     task["verify"] = record
@@ -435,10 +498,21 @@ def finish(root: Path) -> dict[str, Any]:
     if git(worktree, "status", "--porcelain", check=False):
         first_line = (str(task.get("portrait") or "").strip().splitlines() or [""])[0][:70]
         title = first_line or f"ag {task.get('id')}"
-        deliver = os.environ.copy()
-        deliver["AG_DELIVER"] = "1"
-        git(worktree, "commit", "-m", title, env=deliver)
-        usage_note(root, "ship", 4, "help", "AG_DELIVER commit")
+        token_path = _deliver_token_path(key)
+        token = uuid.uuid4().hex
+        token_path.parent.mkdir(parents=True, exist_ok=True)
+        token_path.write_text(token, encoding="utf-8")
+        try:
+            deliver = os.environ.copy()
+            deliver["AG_DELIVER"] = "1"
+            deliver["AG_DELIVER_TOKEN"] = token
+            git(worktree, "commit", "-m", title, env=deliver)
+            usage_note(root, "ship", 4, "help", "AG_DELIVER commit")
+        finally:
+            try:
+                token_path.unlink()
+            except OSError:
+                pass
     try:
         git(root, "merge", "--ff-only", f"ag/{task.get('id')}")
     except ChainBroken:
@@ -514,9 +588,8 @@ def hook_main() -> int:
         toplevel = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
         canonical = _canonical_root(toplevel)
     except ChainBroken:
-        return 0
-    if lookup_project(canonical) is None:
-        return 0
+        sys.stderr.write("ag: hook cannot resolve git root; refusing commit\n")
+        return 1
     if _is_canonical(toplevel):
         usage_note(canonical, "ship", 3, "block", "canonical commit")
         sys.stderr.write("ag: canonical checkout is not a work site; use ag_start\n")
@@ -525,6 +598,12 @@ def hook_main() -> int:
         usage_note(canonical, "ship", 4, "block", "worktree commit")
         sys.stderr.write("ag: only ag_finish can commit\n")
         return 1
+    if not _deliver_token_ok(canonical):
+        usage_note(canonical, "ship", 4, "block", "deliver token")
+        sys.stderr.write("ag: deliver token mismatch; only ag_finish can commit\n")
+        return 1
+    if lookup_project(canonical) is None:
+        return 0
     from .catalog import enabled
 
     if not enabled(canonical, "ship", 10):
@@ -532,5 +611,5 @@ def hook_main() -> int:
     code = _run_previous_pre_commit(toplevel)
     previous = git(toplevel, "config", "--local", "--get", "ag.previousHooksPath", check=False)
     if previous and previous != PREV_UNSET:
-        usage_note(canonical, "ship", 10, "help", f"exit {code}")
+        usage_note(canonical, "ship", 10, "help" if code == 0 else "block", f"exit {code}")
     return code

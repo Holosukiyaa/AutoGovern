@@ -211,6 +211,64 @@ class LoopTests(unittest.TestCase):
         self.assertTrue(marker.is_file(), "previous pre-commit should run on ag_finish")
         self.assertEqual("ran", marker.read_text(encoding="utf-8"))
 
+    def test_canonical_commit_refused_without_managed_record(self) -> None:
+        enroll(self.root)
+        from ag.managed import save_managed
+
+        save_managed({"schema": "ag.managed.v1", "projects": []})
+        blocked = subprocess.run(
+            ["git", "-C", str(self.root), "commit", "--allow-empty", "-m", "nope"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(0, blocked.returncode)
+        self.assertIn("canonical", (blocked.stderr or "") + (blocked.stdout or ""))
+
+    def test_no_verify_refused_on_canonical(self) -> None:
+        enroll(self.root)
+        blocked = subprocess.run(
+            ["git", "-C", str(self.root), "commit", "--allow-empty", "--no-verify", "-m", "nope"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(0, blocked.returncode)
+        self.assertIn("canonical", (blocked.stderr or "") + (blocked.stdout or ""))
+
+    def test_worktree_ag_deliver_without_token_refused(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        worktree = Path(str(start(self.root)["worktree"]))
+        (worktree / "hello.txt").write_text("hi\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(worktree), "add", "hello.txt"],
+            capture_output=True,
+            check=True,
+        )
+        env = os.environ.copy()
+        env["AG_DELIVER"] = "1"
+        blocked = subprocess.run(
+            ["git", "-C", str(worktree), "commit", "-m", "nope"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        self.assertNotEqual(0, blocked.returncode)
+        self.assertIn("token", ((blocked.stderr or "") + (blocked.stdout or "")).lower())
+
+    def test_verify_lists_untracked_without_refusing(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        worktree = Path(str(start(self.root)["worktree"]))
+        (worktree / "hello.txt").write_text("hi\n", encoding="utf-8")
+        checked = verify(self.root)
+        self.assertEqual("passed", checked["product"])
+        names = [Path(str(x)).name for x in (checked.get("verify") or {}).get("untracked") or []]
+        self.assertIn("hello.txt", names)
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
+        self.assertEqual("hi", (self.root / "hello.txt").read_text(encoding="utf-8").strip())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,4 @@
-"""治病 lane. Findings only. Must not set product or refuse finish."""
+"""治病 lane. 叠门对症. Findings only. Must not set product or refuse finish."""
 from __future__ import annotations
 
 from typing import Any
@@ -10,7 +10,7 @@ MAY_REFUSE_FINISH = False
 TOOLS = [
     {
         "name": "ag_heal",
-        "description": "Run heal strategies as findings. Does not set product or refuse finish.",
+        "description": "Stacked-door prescription (typical: CF CSS 00-103 overlay). Not on the delivery path; run only after doors are found. Does not set product or refuse finish.",
         "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}}, "required": ["root"]},
     }
 ]

@@ -18,10 +18,12 @@ INSTRUCTIONS = (
     "File-changing work: ag_status → ag_start → write ONLY in worktree.path → ag_verify → ag_finish. "
     "ag_verify runs the enrolled test command. process complete is not product passed. "
     "If no test command is enrolled, product stays undeclared. "
-    "Git hook refuses commits on canonical. "
+    "Git hook refuses commits on canonical, including git commit --no-verify. "
+    "This server does not intercept host Write; edits on canonical dirty it and start/finish refuse. "
     "ag_usage (see) counts how often each ship item helped or blocked; it is not product green. "
     "ag_gui writes a read-only HTML view; HTML is not a lane and not the core. "
-    "ag_lift / ag_heal / ag_see are advice and findings; they must not become finish gates. "
+    "ag_lift / ag_see are advice. ag_heal is stacked-door treatment and is NOT on the delivery path: "
+    "do not run it until stacked doors are found; it must not become a finish gate. "
     "ag_plug on/off/list toggles pluggable lane-seq rows; ship core cannot be unplugged."
 )
 TOOLS = lane_tools() + gui.TOOLS + catalog.TOOLS

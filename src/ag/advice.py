@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -18,7 +19,11 @@ from .managed import load_managed, lookup_project, project_key, real_root
 from .see import note
 
 TTL = 7 * 86400
-FAT = 800
+_CSS_IMPORT = re.compile(r"""@import\s+(?:url\(\s*)?['"]([^'"]+)['"]""", re.I)
+_JS_BARREL = re.compile(r"""export\s+\*\s+from\s+['"]([^'"]+)['"]""")
+_CSS_CLASS = re.compile(r"""(?<![0-9A-Za-z_-])\.([A-Za-z_][\w-]{2,})""")
+_SKIP_DIR = {"node_modules", "dist", "__pycache__", ".git"}
+_DOOR_SUFFIX = {".css", ".py", ".js", ".mjs", ".ts", ".tsx"}
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -178,47 +183,131 @@ def lift_11(root: Path, item: dict[str, Any]) -> dict[str, Any]:
     return lift_4(root, item)
 
 
-def _sick(root: Path) -> dict[str, Any]:
-    repo = _repo(root)
-    fat, glue, orphans = [], [], []
-    files = [f for f in _git(repo, "ls-files").splitlines() if f.endswith(".py")][:400]
-    names = [Path(f).name for f in files]
-    for rel in files:
-        path = repo / rel
+def _tree(root: Path) -> Path:
+    return _wt(root) or _repo(root)
+
+
+def _rel_posix(rel: str) -> str:
+    return rel.replace("\\", "/").strip()
+
+
+def _skip_rel(rel: str) -> bool:
+    parts = {p.lower() for p in _rel_posix(rel).split("/")}
+    return bool(parts & _SKIP_DIR)
+
+
+def _resolve_spec(rel_file: str, spec: str) -> str | None:
+    spec = spec.split("?", 1)[0].split("#", 1)[0].strip()
+    if not spec or spec.startswith(("http://", "https://", "data:")):
+        return None
+    parts: list[str] = []
+    for piece in (_rel_posix(str(Path(rel_file).parent / spec))).split("/"):
+        if piece in ("", "."):
+            continue
+        if piece == "..":
+            if parts:
+                parts.pop()
+            continue
+        parts.append(piece)
+    return "/".join(parts) if parts else None
+
+
+def _py_reexport(text: str) -> bool:
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
+    if not lines:
+        return False
+    return all(
+        ln.startswith(("import ", "from ", "__all__")) or " import " in ln
+        for ln in lines
+    )
+
+
+def _scan_files(cwd: Path) -> list[str]:
+    names = _git(cwd, "ls-files").splitlines() + _git(cwd, "ls-files", "-o", "--exclude-standard").splitlines()
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in names:
+        rel = _rel_posix(raw)
+        if not rel or rel in seen or _skip_rel(rel):
+            continue
+        if Path(rel).suffix.lower() not in _DOOR_SUFFIX:
+            continue
+        seen.add(rel)
+        out.append(rel)
+        if len(out) >= 400:
+            break
+    return out
+
+
+def _doors(root: Path) -> dict[str, Any]:
+    cwd = _tree(root)
+    doors: list[dict[str, Any]] = []
+    guest_files: dict[str, list[str]] = {}
+    for rel in _scan_files(cwd):
+        path = cwd / rel
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        n = text.count("\n") + 1
-        if n >= FAT:
-            fat.append({"file": rel, "lines": n})
-        lines = [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
-        if lines and all(ln.startswith(("import ", "from ")) or ln.startswith(("__all__",)) or " import " in ln for ln in lines):
-            glue.append(rel)
-        base = Path(rel).name
-        if len(orphans) < 12 and names.count(base) == 1 and base not in ("__init__.py",):
-            others = _git(repo, "grep", "-l", "-I", Path(rel).stem).splitlines()
-            others = [o for o in others if o.replace("\\", "/") != rel.replace("\\", "/")]
-            if not others:
-                orphans.append(rel)
-        if len(fat) + len(glue) + len(orphans) > 40:
+        suffix = Path(rel).suffix.lower()
+        if suffix == ".css":
+            imported = []
+            for spec in _CSS_IMPORT.findall(text):
+                target = _resolve_spec(rel, spec)
+                if target:
+                    imported.append(target)
+            if imported:
+                doors.append({"kind": "css-import", "file": rel, "imports": imported[:24]})
+            for name in dict.fromkeys(_CSS_CLASS.findall(text)):
+                guest_files.setdefault(name, [])
+                if rel not in guest_files[name] and len(guest_files[name]) < 12:
+                    guest_files[name].append(rel)
+        elif suffix in {".js", ".mjs", ".ts", ".tsx"}:
+            barrels = []
+            for spec in _JS_BARREL.findall(text):
+                target = _resolve_spec(rel, spec)
+                if target:
+                    barrels.append(target)
+            if barrels:
+                doors.append({"kind": "js-barrel", "file": rel, "imports": barrels[:24]})
+        elif suffix == ".py" and Path(rel).name != "__init__.py" and _py_reexport(text):
+            doors.append({"kind": "py-reexport", "file": rel})
+    stack = []
+    for guest, files in guest_files.items():
+        if len(files) < 2:
+            continue
+        stack.append({"guest": guest, "kind": "css-selector", "doors": files})
+        if len(stack) >= 12:
             break
-    return {"fat": fat[:12], "glue": glue[:12], "orphans": orphans[:12]}
+    for row in doors:
+        if row.get("kind") == "py-reexport":
+            rel = str(row["file"])
+            stem = Path(rel).stem
+            callers = [
+                o
+                for o in _git(cwd, "grep", "-l", "-I", stem).splitlines()
+                if _rel_posix(o) != rel
+            ][:8]
+            if callers:
+                stack.append({"guest": stem, "kind": "py-reexport", "doors": [rel], "callers": callers})
+            if len(stack) >= 12:
+                break
+    return {"schema": "ag.heal.doors.v1", "doors": doors[:40], "stack": stack}
 
 
 def heal_1(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    blob = _sick(root)
-    _write_json(plug_dir(root, "heal", 1) / "findings.json", {"t": time.time(), "items": blob})
-    return blob
+    blob = _doors(root)
+    _write_json(plug_dir(root, "heal", 1) / "findings.json", {"t": time.time(), **blob})
+    return {"doors": len(blob["doors"]), "stack": len(blob["stack"]), "cases": blob["stack"][:8]}
 
 
 def heal_2(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     blob = _read_json(plug_dir(root, "heal", 1) / "findings.json", {})
-    items = blob.get("items") if isinstance(blob, dict) else {}
-    if not isinstance(items, dict):
-        items = _sick(root)
-    door = (items.get("fat") or items.get("glue") or items.get("orphans") or [None])[0]
-    return {"door": door, "next": "ag_start"}
+    stack = blob.get("stack") if isinstance(blob, dict) else None
+    if not isinstance(stack, list) or not stack:
+        stack = _doors(root).get("stack") or []
+    case = stack[0] if stack else None
+    return {"case": case, "next": "ag_start", "cut": False}
 
 
 def heal_3(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
@@ -228,23 +317,25 @@ def heal_3(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
 
 
 def heal_4(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    repo = _repo(root)
+    cwd = _tree(root)
     path = plug_dir(root, "heal", 4) / "probes.json"
     store = _read_json(path, {})
     if not isinstance(store, dict):
         store = {}
     if not store:
-        sick = _read_json(plug_dir(root, "heal", 1) / "findings.json", {}).get("items") or {}
-        fat = sick.get("fat") if isinstance(sick, dict) else []
-        for row in (fat or [])[:5]:
-            rel = str(row.get("file") or "")
-            file_path = repo / rel
-            if rel and file_path.is_file():
-                store[rel] = _sha(file_path)
+        blob = _read_json(plug_dir(root, "heal", 1) / "findings.json", {})
+        stack = blob.get("stack") if isinstance(blob, dict) else []
+        for case in (stack or [])[:4]:
+            if not isinstance(case, dict):
+                continue
+            for rel in (case.get("doors") or [])[:6]:
+                file_path = cwd / str(rel)
+                if str(rel) and file_path.is_file():
+                    store[str(rel)] = _sha(file_path)
         _write_json(path, store)
     red = []
     for rel, pin in list(store.items())[:20]:
-        file_path = repo / str(rel)
+        file_path = cwd / str(rel)
         if not file_path.is_file():
             red.append({"file": rel, "state": "missing"})
         elif _sha(file_path) != pin:

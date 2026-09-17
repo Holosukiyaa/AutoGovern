@@ -12,8 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ag.catalog import plug, plug_dir
 from ag.heal import run as heal_run
 from ag.lift import run as lift_run
-from ag.loop import enroll, start
-from ag.managed import ChainBroken
+from ag.loop import enroll, load_task, start
+from ag.managed import ChainBroken, lookup_project
 from ag.see import run as see_run
 
 PY = sys.executable
@@ -104,6 +104,23 @@ class AdviceTests(unittest.TestCase):
         self.assertTrue(plug_dir(self.root, "see", 2).is_dir())
         listed = plug_list(self.root)
         self.assertEqual([], listed.get("gc") or [])
+
+    def test_heal_lists_stacked_css_doors_without_cutting(self) -> None:
+        item = lookup_project(self.root) or {}
+        task = load_task(str(item.get("key") or ""))
+        self.assertTrue(task)
+        worktree = Path(str(task["worktree"]))
+        (worktree / "index.css").write_text("@import './a.css';\n@import './b.css';\n", encoding="utf-8")
+        (worktree / "a.css").write_text(".guest-widget { color: red; }\n", encoding="utf-8")
+        (worktree / "b.css").write_text(".guest-widget { color: blue; }\n", encoding="utf-8")
+        healed = heal_run(self.root)
+        by_seq = {row["seq"]: row for row in healed["findings"]}
+        guests = [case["guest"] for case in (by_seq[1].get("cases") or [])]
+        self.assertIn("guest-widget", guests)
+        self.assertGreaterEqual(int(by_seq[1].get("doors") or 0), 1)
+        self.assertFalse(by_seq[2].get("cut"))
+        self.assertEqual("ag_start", by_seq[2].get("next"))
+        self.assertIn("cannot set product", healed["reminder"])
 
 
 if __name__ == "__main__":

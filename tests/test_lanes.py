@@ -53,6 +53,13 @@ class LaneTests(unittest.TestCase):
         self.assertEqual(list(range(1, 12)), [item["seq"] for item in ship])
         self.assertEqual("ship-9", get("ship", 9)["code"])
         self.assertIn("金丝雀", get("ship", 9)["name"])
+        self.assertEqual("列门", get("heal", 1)["name"])
+        self.assertIn("多扇门", get("heal", 1)["story"])
+        self.assertEqual("一案一刀", get("heal", 2)["name"])
+        for seq in (1, 2, 3, 4):
+            story = get("heal", seq)["story"]
+            self.assertIn("CartridgeFlow", story, seq)
+            self.assertIn("自动", story + get("heal", seq)["how"] + get("heal", seq)["not"])
         self.assertTrue(get("ship", 10)["pluggable"])
         self.assertFalse(get("ship", 2)["pluggable"])
         for lane in ("heal", "lift", "see"):
