@@ -504,6 +504,15 @@ def verify(root: Path) -> dict[str, Any]:
     record["probe_red"] = [
         str(row.get("id") or "") for row in probe_results if row.get("verdict") == "red" and row.get("id")
     ]
+    record["probe_notes"] = [
+        (
+            str(row.get("id") or "")
+            + ": "
+            + (str(row.get("tail") or "").strip().splitlines() or ["red"])[0]
+        ).strip(": ")
+        for row in probe_results
+        if row.get("verdict") == "red"
+    ]
     from .critic import _configured, append_log, critic_run, load_config
 
     enrolled = Path(state["root"])
@@ -576,6 +585,7 @@ def verify(root: Path) -> dict[str, Any]:
     out["verified_tree"] = task["verified_tree"]
     out["probes"] = probe_results
     out["probe_red"] = list(record["probe_red"])
+    out["probe_notes"] = list(record["probe_notes"])
     out["critic"] = critic
     try:
         from .lift import run as lift_run

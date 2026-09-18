@@ -319,6 +319,11 @@ class LoopTests(unittest.TestCase):
         checked = verify(self.root)
         self.assertEqual("failed", checked["product"])
         self.assertIn("ok-pin", checked.get("probe_red") or [])
+        notes = checked.get("probe_notes") or []
+        self.assertTrue(any("ok-pin" in str(note) and "missing" in str(note).lower() for note in notes))
+        blob = json.dumps(checked.get("probes") or [])
+        self.assertNotIn("must_include", blob)
+        self.assertNotIn("observation", blob)
         self.assertTrue(checked["verified_tree"])
         with self.assertRaises(ChainBroken) as raised:
             finish(self.root)

@@ -164,6 +164,11 @@ class ProbeAndCriticTests(unittest.TestCase):
             )
         listed = call("ag_probe_list", {"root": str(self.root)})
         self.assertEqual(1, len(listed["probes"]))
+        self.assertNotIn("observation", listed["probes"][0])
+        self.assertNotIn("evidence", listed["probes"][0])
+        full = call("ag_probe_list", {"root": str(self.root), "full": True})
+        self.assertIn("observation", full["probes"][0])
+        self.assertIn("evidence", full["probes"][0])
 
     def test_command_and_text_in_file_green_and_red(self) -> None:
         green_cmd = call(
@@ -322,7 +327,7 @@ class ProbeAndCriticTests(unittest.TestCase):
                 "ttl_quiet_loops": 10,
             },
         )
-        before = call("ag_probe_list", {"root": str(self.root)})["probes"][0]
+        before = call("ag_probe_list", {"root": str(self.root), "full": True})["probes"][0]
         self.assertEqual("armed", before["state"])
         self.assertEqual(0, before["quiet_count"])
         (self.root / "ok.py").write_text("x = 1\n# pack-touch\n", encoding="utf-8")
@@ -341,7 +346,7 @@ class ProbeAndCriticTests(unittest.TestCase):
         second_pack = json.loads(second_out)
         self.assertEqual("armed", second_pack["probes"][0]["state"])
         self.assertEqual("green", second_pack["probes"][0]["verdict"])
-        after = call("ag_probe_list", {"root": str(self.root)})["probes"][0]
+        after = call("ag_probe_list", {"root": str(self.root), "full": True})["probes"][0]
         self.assertEqual(before["state"], after["state"])
         self.assertEqual(before["quiet_count"], after["quiet_count"])
         self.assertEqual(before["ttl_quiet_loops"], after["ttl_quiet_loops"])

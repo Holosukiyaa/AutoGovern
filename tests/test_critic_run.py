@@ -195,7 +195,7 @@ class CriticRunTests(unittest.TestCase):
                 "ttl_quiet_loops": 10,
             },
         )
-        before = call("ag_probe_list", {"root": str(self.root)})["probes"][0]
+        before = call("ag_probe_list", {"root": str(self.root), "full": True})["probes"][0]
         self.assertEqual(0, before["quiet_count"])
         (self.root / "ok.py").write_text("x = 1\n# run-touch\n", encoding="utf-8")
         verdict = {
@@ -207,7 +207,7 @@ class CriticRunTests(unittest.TestCase):
         with patch("urllib.request.urlopen", fake):
             ran = call("ag_critic_run", {"root": str(self.root), "exam": "user: keep x = 1"})
         self.assertEqual("passed", ran["outcome"])
-        after = call("ag_probe_list", {"root": str(self.root)})["probes"][0]
+        after = call("ag_probe_list", {"root": str(self.root), "full": True})["probes"][0]
         self.assertEqual(0, after["quiet_count"])
         self.assertEqual("armed", after["state"])
         self.assertEqual(before["observation"], after["observation"])

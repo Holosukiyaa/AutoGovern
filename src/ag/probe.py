@@ -63,10 +63,13 @@ TOOLS = [
     },
     {
         "name": "ag_probe_list",
-        "description": "List armed and archived probes (full fields). See lane; not a worker injection channel.",
+        "description": "List armed and archived probes. Default omits observation and evidence. full=true for a critic.",
         "inputSchema": {
             "type": "object",
-            "properties": {"root": {"type": "string"}},
+            "properties": {
+                "root": {"type": "string"},
+                "full": {"type": "boolean"},
+            },
             "required": ["root"],
         },
     },
@@ -282,7 +285,13 @@ def insert(
     }
 
 
-def list_probes(root: Path) -> dict[str, Any]:
+def _public_row(row: dict[str, Any], *, full: bool) -> dict[str, Any]:
+    if full:
+        return dict(row)
+    return {key: row[key] for key in ("id", "state", "quiet_count", "ttl_quiet_loops", "area", "exam_fragment") if key in row}
+
+
+def list_probes(root: Path, *, full: bool = False) -> dict[str, Any]:
     repo = real_root(root)
     path = store_path(repo)
     blob = _load(path)
@@ -290,7 +299,8 @@ def list_probes(root: Path) -> dict[str, Any]:
         "schema": LIST_SCHEMA,
         "root": str(repo),
         "store": str(path),
-        "probes": list(blob["probes"]),
+        "full": bool(full),
+        "probes": [_public_row(row, full=full) for row in blob["probes"]],
     }
 
 
@@ -452,5 +462,5 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         paths = _as_str_list(raw_paths, name="path") if raw_paths else []
         return run(root, paths=paths or None, awaken=bool(args.get("awaken")))
     if name == "ag_probe_list":
-        return list_probes(root)
+        return list_probes(root, full=bool(args.get("full")))
     raise ChainBroken(f"see has no tool {name}")

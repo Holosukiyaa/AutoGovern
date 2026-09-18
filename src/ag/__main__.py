@@ -46,7 +46,7 @@ def _probe_main(args: argparse.Namespace) -> int:
         )
         return 0
     if args.probe_cmd == "list":
-        print(json.dumps(list_probes(root), ensure_ascii=False, indent=2))
+        print(json.dumps(list_probes(root, full=bool(args.full)), ensure_ascii=False, indent=2))
         return 0
     return 2
 
@@ -102,8 +102,12 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("root")
     run_p.add_argument("--path", action="append", help="only run probes whose area hits these paths")
     run_p.add_argument("--awaken", action="store_true", help="also run archived probes whose area hits --path")
-    list_p = probe_sub.add_parser("list", help="list armed and archived probes")
+    list_p = probe_sub.add_parser(
+        "list",
+        help="list armed and archived probes; default hides observation and evidence",
+    )
     list_p.add_argument("root")
+    list_p.add_argument("--full", action="store_true", help="include observation and evidence (critic/human)")
     pack_p = sub.add_parser("critic-pack", help="read-only exam pack JSON; not a worker ticket")
     pack_p.add_argument("root")
     pack_exam = pack_p.add_mutually_exclusive_group(required=True)
