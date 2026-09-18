@@ -148,6 +148,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     log_c.add_argument("root")
     log_c.add_argument("--limit", type=int, default=20, help="newest last; default 20")
+    patrol_p = sub.add_parser(
+        "heal-patrol",
+        help="scan diseases, plant heal- needles, emit a repair portrait; does not refuse finish",
+    )
+    patrol_p.add_argument("root")
+    patrol_p.add_argument("--tree", default="", help="scan this tree (worktree); store still uses enrolled root")
+    patrol_p.add_argument("--max-lines", type=int, default=0, help="oversized threshold; default 800")
     sub.add_parser("critic-prompt", help="print the read-only critic startup prompt")
     sub.add_parser("hook", help="git pre-commit helper")
     args = parser.parse_args(argv)
@@ -214,6 +221,21 @@ def main(argv: list[str] | None = None) -> int:
             from .critic import list_log
 
             print(json.dumps(list_log(Path(args.root), limit=args.limit), ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "heal-patrol":
+            from .heal_patrol import patrol
+
+            print(
+                json.dumps(
+                    patrol(
+                        Path(args.root),
+                        tree=Path(args.tree) if args.tree else None,
+                        max_lines=args.max_lines or None,
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
             return 0
         if args.cmd == "probe":
             return _probe_main(args)

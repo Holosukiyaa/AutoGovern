@@ -152,6 +152,7 @@ class LoopTests(unittest.TestCase):
                 "ag_abandon",
                 "ag_unenroll",
                 "ag_heal",
+                "ag_heal_patrol",
                 "ag_lift",
                 "ag_usage",
                 "ag_see",

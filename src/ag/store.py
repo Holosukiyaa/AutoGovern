@@ -52,6 +52,17 @@ def connect(root: Path) -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS heal_event (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            needles_json TEXT NOT NULL DEFAULT '[]',
+            diseases_json TEXT NOT NULL DEFAULT '[]',
+            repair_portrait TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
     conn.commit()
     return conn
 
@@ -182,6 +193,27 @@ def list_probe_rows(root: Path) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+def insert_heal_event(root: Path, row: dict[str, Any]) -> str:
+    conn = connect(root)
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO heal_event (ts, needles_json, diseases_json, repair_portrait)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                str(row.get("ts") or ""),
+                json.dumps(row.get("needles") or [], ensure_ascii=False),
+                json.dumps(row.get("diseases") or [], ensure_ascii=False),
+                str(row.get("repair_portrait") or ""),
+            ),
+        )
+        conn.commit()
+        return f"hp-{int(cur.lastrowid or 0)}"
+    finally:
+        conn.close()
 
 
 def event_count(root: Path) -> int:

@@ -12,7 +12,20 @@ TOOLS = [
         "name": "ag_heal",
         "description": "Stacked-door prescription (typical: CF CSS 00-103 overlay). Not on the delivery path; run only after doors are found. Does not set product or refuse finish.",
         "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}}, "required": ["root"]},
-    }
+    },
+    {
+        "name": "ag_heal_patrol",
+        "description": "Read-only disease patrol: plant heal- needles and a repair portrait. Does not refuse finish or start a task.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "root": {"type": "string"},
+                "tree": {"type": "string"},
+                "max_lines": {"type": "integer"},
+            },
+            "required": ["root"],
+        },
+    },
 ]
 
 
@@ -29,4 +42,8 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
     if name == "ag_heal":
         return run(args.get("root"))
+    if name == "ag_heal_patrol":
+        from .heal_patrol import call as patrol_call
+
+        return patrol_call(name, args)
     raise ChainBroken(f"heal has no tool {name}")
