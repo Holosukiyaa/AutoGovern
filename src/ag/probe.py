@@ -371,9 +371,16 @@ def _should_run(row: dict[str, Any], paths: list[str] | None, awaken: bool) -> b
     return True
 
 
-def evaluate(root: Path, *, paths: list[str] | None = None, awaken: bool = False) -> dict[str, Any]:
+def evaluate(
+    root: Path,
+    *,
+    paths: list[str] | None = None,
+    awaken: bool = False,
+    tree: Path | None = None,
+) -> dict[str, Any]:
     """Red/green tails only. Does not change probe lifetime or write probes.json."""
     repo = real_root(root)
+    cwd = real_root(Path(tree)) if tree is not None else repo
     path = store_path(repo)
     wanted = [_posix(item) for item in (paths or []) if _posix(item)]
     path_filter = wanted or None
@@ -383,7 +390,7 @@ def evaluate(root: Path, *, paths: list[str] | None = None, awaken: bool = False
         if not _should_run(row, path_filter, awaken):
             continue
         observation = row.get("observation") if isinstance(row.get("observation"), dict) else {}
-        verdict, exit_code, tail = _eval(repo, observation)
+        verdict, exit_code, tail = _eval(cwd, observation)
         results.append(
             {
                 "id": str(row.get("id") or ""),
@@ -396,10 +403,16 @@ def evaluate(root: Path, *, paths: list[str] | None = None, awaken: bool = False
     return {"schema": RUN_SCHEMA, "root": str(repo), "results": results}
 
 
-def run(root: Path, *, paths: list[str] | None = None, awaken: bool = False) -> dict[str, Any]:
+def run(
+    root: Path,
+    *,
+    paths: list[str] | None = None,
+    awaken: bool = False,
+    tree: Path | None = None,
+) -> dict[str, Any]:
     repo = real_root(root)
     path = store_path(repo)
-    out = evaluate(repo, paths=paths, awaken=awaken)
+    out = evaluate(repo, paths=paths, awaken=awaken, tree=tree)
     by_id = {str(item.get("id") or ""): item for item in out["results"]}
     blob = _load(path)
     dirty = False

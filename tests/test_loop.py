@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ag.loop import abandon, enroll, finish, start, status, unenroll, verify
 from ag.managed import ChainBroken, project_key, real_root
 from ag.mcp import TOOLS, _call
+from ag.probe import insert
 
 PY = sys.executable
 
@@ -274,6 +275,81 @@ class LoopTests(unittest.TestCase):
         self.assertEqual("passed", done["product"])
         self.assertEqual("hi", (self.root / "hello.txt").read_text(encoding="utf-8").strip())
 
+    def test_path_hit_red_probe_fails_product_and_refuses_finish(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        insert(
+            self.root,
+            observation={"kind": "text_in_file", "path": "ok.py", "must_include": "x = 1"},
+            exam_fragment="ok.py contains x = 1",
+            evidence="already-seen observation text from this run",
+            area=["ok.py"],
+            id="ok-pin",
+        )
+        worktree = Path(str(start(self.root)["worktree"]))
+        (worktree / "ok.py").write_text("broken\n", encoding="utf-8")
+        before = _git(self.root, "rev-parse", "HEAD")
+        checked = verify(self.root)
+        self.assertEqual("failed", checked["product"])
+        self.assertIn("ok-pin", checked.get("probe_red") or [])
+        self.assertTrue(checked["verified_tree"])
+        with self.assertRaises(ChainBroken) as raised:
+            finish(self.root)
+        text = str(raised.exception)
+        self.assertIn("probe", text.lower())
+        self.assertIn("ok-pin", text)
+        self.assertEqual(before, _git(self.root, "rev-parse", "HEAD"))
+        self.assertFalse((self.root / "ok.py").read_text(encoding="utf-8").startswith("broken"))
+
+    def test_green_probe_after_fix_allows_finish(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        insert(
+            self.root,
+            observation={"kind": "text_in_file", "path": "ok.py", "must_include": "x = 1"},
+            exam_fragment="ok.py contains x = 1",
+            evidence="already-seen observation text from this run",
+            area=["ok.py"],
+            id="ok-pin",
+        )
+        worktree = Path(str(start(self.root)["worktree"]))
+        (worktree / "ok.py").write_text("broken\n", encoding="utf-8")
+        self.assertEqual("failed", verify(self.root)["product"])
+        (worktree / "ok.py").write_text("x = 1\n# fixed\n", encoding="utf-8")
+        checked = verify(self.root)
+        self.assertEqual("passed", checked["product"])
+        self.assertEqual([], checked.get("probe_red") or [])
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
+        self.assertIn("x = 1", (self.root / "ok.py").read_text(encoding="utf-8"))
+
+    def test_no_probes_tests_green_still_passed(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        worktree = Path(str(start(self.root)["worktree"]))
+        (worktree / "only.txt").write_text("n\n", encoding="utf-8")
+        checked = verify(self.root)
+        self.assertEqual("passed", checked["product"])
+        self.assertEqual([], checked.get("probe_red") or [])
+        self.assertEqual([], checked.get("probes") or [])
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
+
+    def test_critic_rejected_does_not_refuse_finish(self) -> None:
+        from ag.critic import report_path
+
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        path = report_path(self.root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"outcome": "rejected", "reason": "mock", "items": [], "summary": "no"}),
+            encoding="utf-8",
+        )
+        worktree = Path(str(start(self.root)["worktree"]))
+        (worktree / "keep.txt").write_text("k\n", encoding="utf-8")
+        self.assertEqual("passed", verify(self.root)["product"])
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
+        self.assertTrue((self.root / "keep.txt").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()
+

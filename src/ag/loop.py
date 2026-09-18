@@ -150,7 +150,39 @@ def _dirty(root: Path) -> bool:
     return False
 
 
+def _ticket_paths(worktree: Path, source_head: str) -> list[str]:
+    names: list[str] = []
+    if source_head:
+        for line in git(worktree, "diff", "--name-only", source_head, check=False).splitlines():
+            rel = line.replace("\\", "/").strip().strip('"')
+            if rel and rel not in names:
+                names.append(rel)
+    for line in git(worktree, "ls-files", "-o", "--exclude-standard", check=False).splitlines():
+        rel = line.replace("\\", "/").strip().strip('"')
+        if rel and rel not in names:
+            names.append(rel)
+    return names
+
+
+def _probe_red_ids(verify: dict[str, Any] | None) -> list[str]:
+    if not isinstance(verify, dict):
+        return []
+    listed = verify.get("probe_red")
+    if isinstance(listed, list) and listed:
+        return [str(item) for item in listed if str(item)]
+    results = verify.get("probes")
+    if not isinstance(results, list):
+        return []
+    return [
+        str(row.get("id") or "")
+        for row in results
+        if isinstance(row, dict) and row.get("verdict") == "red" and row.get("id")
+    ]
+
+
 def _product(test_argv: list[str], verify: dict[str, Any] | None) -> str:
+    if _probe_red_ids(verify):
+        return "failed"
     if not test_argv:
         return "undeclared"
     if not verify or "exit" not in verify:
@@ -437,6 +469,18 @@ def verify(root: Path) -> dict[str, Any]:
             "undeclared": False,
             "untracked": untracked[:50],
         }
+    paths = _ticket_paths(worktree, str(task.get("source_head") or ""))
+    probe_results: list[Any] = []
+    if paths:
+        from .probe import run as probe_run
+
+        probe_out = probe_run(Path(state["root"]), paths=paths, awaken=True, tree=worktree)
+        raw = probe_out.get("results") if isinstance(probe_out, dict) else []
+        probe_results = [row for row in raw if isinstance(row, dict)] if isinstance(raw, list) else []
+    record["probes"] = probe_results
+    record["probe_red"] = [
+        str(row.get("id") or "") for row in probe_results if row.get("verdict") == "red" and row.get("id")
+    ]
     digest = tree_digest(worktree)
     task["verify"] = record
     task["verified_tree"] = digest if record["exit"] == 0 else ""
@@ -451,6 +495,8 @@ def verify(root: Path) -> dict[str, Any]:
     out = status(root)
     out["verify"] = record
     out["verified_tree"] = task["verified_tree"]
+    out["probes"] = probe_results
+    out["probe_red"] = list(record["probe_red"])
     try:
         from .lift import run as lift_run
 
@@ -494,6 +540,11 @@ def finish(root: Path) -> dict[str, Any]:
     if digest != task.get("verified_tree"):
         usage_note(root, "ship", 7, "block", "mismatch")
         raise ChainBroken("tree digest mismatch; run ag_verify again")
+    verify_blob = task.get("verify") if isinstance(task.get("verify"), dict) else None
+    red = _probe_red_ids(verify_blob)
+    if red:
+        usage_note(root, "ship", 6, "block", "probe " + ",".join(red))
+        raise ChainBroken("probe red: " + ", ".join(red) + "; will not deliver")
     git(worktree, "add", "-A")
     if git(worktree, "status", "--porcelain", check=False):
         first_line = (str(task.get("portrait") or "").strip().splitlines() or [""])[0][:70]
