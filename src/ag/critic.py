@@ -32,6 +32,35 @@ DEFAULT_LOG_LIMIT = 20
 DEFAULT_TIMEOUT = 60
 DEFAULT_API_KEY_ENV = "AG_CRITIC_API_KEY"
 _EVIDENCE_REF = re.compile(r"[\w./\\-一-鿿]+:\d+|portrait:\S+|probe:\S+")
+_MODEL_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("openai", ("gpt", "o1", "o3", "o4", "openai", "chatgpt")),
+    ("anthropic", ("claude", "anthropic")),
+    ("google", ("gemini", "palm", "bard", "google")),
+    ("xai", ("grok", "xai")),
+    ("moonshot", ("kimi", "moonshot")),
+    ("deepseek", ("deepseek",)),
+    ("alibaba", ("qwen", "tongyi")),
+    ("meta", ("llama", "meta")),
+    ("mistral", ("mistral", "mixtral", "codestral")),
+    ("cohere", ("command", "cohere")),
+)
+
+
+def model_family(model: str) -> str:
+    normalized = model.strip().lower()
+    if "/" in normalized:
+        normalized = normalized.split("/")[-1]
+    token = re.split(r"[^a-z0-9]+", normalized)[0] if normalized else ""
+    for family, prefixes in _MODEL_FAMILIES:
+        if any(token.startswith(prefix) for prefix in prefixes):
+            return family
+    return token or "unknown"
+
+
+def same_family(regulator_model: str, worker_model: str) -> bool:
+    if not regulator_model.strip() or not worker_model.strip():
+        return False
+    return model_family(regulator_model) == model_family(worker_model)
 
 TOOLS = [
     {
@@ -303,6 +332,8 @@ def load_config(root: Path) -> dict[str, Any]:
         "model": "",
         "api_key_env": DEFAULT_API_KEY_ENV,
         "timeout": DEFAULT_TIMEOUT,
+        "worker_model": "",
+        "allow_same_family": False,
         "path": str(config_path(root)),
     }
     path = config_path(root)
@@ -326,6 +357,10 @@ def load_config(root: Path) -> dict[str, Any]:
                 cfg["timeout"] = int(blob["timeout"])
         except (TypeError, ValueError):
             return {"error": "invalid-config: timeout must be an int", "path": str(path)}
+        if blob.get("worker_model"):
+            cfg["worker_model"] = str(blob["worker_model"]).strip()
+        if "allow_same_family" in blob:
+            cfg["allow_same_family"] = bool(blob.get("allow_same_family"))
     enabled_env = os.environ.get("AG_CRITIC_ENABLED")
     if enabled_env is not None:
         cfg["enabled"] = _truthy(enabled_env)
@@ -341,6 +376,11 @@ def load_config(root: Path) -> dict[str, Any]:
             cfg["timeout"] = int(timeout_env)
         except ValueError:
             return {"error": "invalid-config: AG_CRITIC_TIMEOUT must be an int", "path": cfg["path"]}
+    if os.environ.get("AG_CRITIC_WORKER_MODEL", "").strip():
+        cfg["worker_model"] = os.environ["AG_CRITIC_WORKER_MODEL"].strip()
+    allow_env = os.environ.get("AG_CRITIC_ALLOW_SAME_FAMILY")
+    if allow_env is not None:
+        cfg["allow_same_family"] = _truthy(allow_env)
     return cfg
 
 
@@ -482,6 +522,7 @@ def append_log(
     task_id: str = "",
     model: str = "",
     probe_red: list[str] | None = None,
+    allow_same_family: bool = False,
 ) -> None:
     try:
         row: dict[str, Any] = {
@@ -501,6 +542,8 @@ def append_log(
             row["model"] = model
         if probe_red:
             row["probe_red"] = [str(item) for item in probe_red if str(item)]
+        if allow_same_family:
+            row["allow_same_family"] = True
         path = log_path(root)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
@@ -546,6 +589,7 @@ def _result(
     exam: str = "",
     task_id: str = "",
     probe_red: list[str] | None = None,
+    allow_same_family: bool = False,
 ) -> dict[str, Any]:
     blob: dict[str, Any] = {
         "schema": RUN_SCHEMA,
@@ -577,6 +621,7 @@ def _result(
         task_id=task_id,
         model=str(model or ""),
         probe_red=probe_red,
+        allow_same_family=bool(allow_same_family),
     )
     return blob
 
@@ -605,6 +650,17 @@ def critic_run(
         return _result(root, outcome="unavailable", reason=str(cfg["error"]), pack=packed, **extra)
     if not _configured(cfg):
         return _result(root, outcome="unavailable", reason="not-configured", pack=packed, **extra)
+    if same_family(str(cfg.get("model") or ""), str(cfg.get("worker_model") or "")):
+        if not cfg.get("allow_same_family"):
+            return _result(
+                root,
+                outcome="unavailable",
+                reason="andersen: same family",
+                pack=packed,
+                model=str(cfg.get("model") or ""),
+                **extra,
+            )
+        extra["allow_same_family"] = True
     messages = [
         {"role": "system", "content": prompt_text()},
         {"role": "user", "content": json.dumps(packed, ensure_ascii=False)},

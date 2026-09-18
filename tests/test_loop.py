@@ -383,22 +383,60 @@ class LoopTests(unittest.TestCase):
         self.assertEqual("passed", done["product"])
         self.assertTrue((self.root / "keep.txt").is_file())
 
-    def _enable_critic(self) -> None:
-        path = config_path(self.root)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
+    def test_andersen_blocks_verify_and_finish(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        self._enable_critic(model="gpt-4o", worker_model="gpt-4o-mini")
+        worktree = Path(str(start(self.root, portrait="keep file")["worktree"]))
+        (worktree / "keep.txt").write_text("k\n", encoding="utf-8")
+        fake = _FakeHTTP(_chat_payload({"verdict": "pass", "items": [{"name": "x", "status": "pass", "comment": "x"}]}))
+        with patch("urllib.request.urlopen", fake):
+            checked = verify(self.root)
+        critic = checked.get("critic") or {}
+        self.assertEqual("unavailable", critic.get("outcome"))
+        self.assertIn("andersen", str(critic.get("reason") or "").casefold())
+        self.assertTrue(critic.get("configured"))
+        self.assertEqual([], fake.requests)
+        self.assertEqual("failed", checked["product"])
+        with self.assertRaises(ChainBroken) as raised:
+            finish(self.root)
+        self.assertIn("unavailable", str(raised.exception).lower())
+
+    def test_andersen_exemption_verify_can_finish(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        self._enable_critic(model="gpt-4o", worker_model="gpt-4o-mini", allow_same_family=True)
+        worktree = Path(str(start(self.root, portrait="keep file")["worktree"]))
+        (worktree / "keep.txt").write_text("k\n", encoding="utf-8")
+        fake = _FakeHTTP(
+            _chat_payload(
                 {
-                    "enabled": True,
-                    "endpoint": "https://example.test/v1",
-                    "model": "unit-critic",
-                    "api_key_env": "AG_CRITIC_API_KEY",
-                    "timeout": 5,
+                    "verdict": "pass",
+                    "items": [{"name": "exam", "status": "pass", "comment": "ok"}],
+                    "summary": "pass",
                 }
             )
-            + "\n",
-            encoding="utf-8",
         )
+        with patch("urllib.request.urlopen", fake):
+            checked = verify(self.root)
+        self.assertEqual(1, len(fake.requests))
+        self.assertEqual("passed", (checked.get("critic") or {}).get("outcome"))
+        self.assertEqual("passed", checked["product"])
+        rows = [json.loads(line) for line in log_path(self.root).read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertTrue(rows[-1].get("allow_same_family"))
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
+
+    def _enable_critic(self, **extra: object) -> None:
+        path = config_path(self.root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        blob: dict = {
+            "enabled": True,
+            "endpoint": "https://example.test/v1",
+            "model": "unit-critic",
+            "api_key_env": "AG_CRITIC_API_KEY",
+            "timeout": 5,
+        }
+        blob.update(extra)
+        path.write_text(json.dumps(blob) + "\n", encoding="utf-8")
 
     def test_verify_calls_critic_run_with_worktree_pack(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])

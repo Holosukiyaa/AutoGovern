@@ -70,6 +70,8 @@ class CriticRunTests(unittest.TestCase):
             "AG_CRITIC_MODEL",
             "AG_CRITIC_API_KEY_ENV",
             "AG_CRITIC_TIMEOUT",
+            "AG_CRITIC_WORKER_MODEL",
+            "AG_CRITIC_ALLOW_SAME_FAMILY",
         ):
             os.environ.pop(key, None)
         self.root = Path(self._tmp.name) / "app"
@@ -86,22 +88,18 @@ class CriticRunTests(unittest.TestCase):
         os.environ.pop("AG_HOME", None)
         self._tmp.cleanup()
 
-    def _write_config(self) -> None:
+    def _write_config(self, **extra: object) -> None:
         path = config_path(self.root)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                {
-                    "enabled": True,
-                    "endpoint": "https://example.test/v1",
-                    "model": "unit-critic",
-                    "api_key_env": "AG_CRITIC_API_KEY",
-                    "timeout": 5,
-                }
-            )
-            + "\n",
-            encoding="utf-8",
-        )
+        blob: dict = {
+            "enabled": True,
+            "endpoint": "https://example.test/v1",
+            "model": "unit-critic",
+            "api_key_env": "AG_CRITIC_API_KEY",
+            "timeout": 5,
+        }
+        blob.update(extra)
+        path.write_text(json.dumps(blob) + "\n", encoding="utf-8")
 
     def test_unconfigured_is_unavailable_and_does_not_call_http(self) -> None:
         fake = _FakeHTTP(_chat_payload({"verdict": "pass", "items": [{"name": "x", "status": "pass", "comment": "ok"}]}))
@@ -218,7 +216,40 @@ class CriticRunTests(unittest.TestCase):
         text = out.lower()
         self.assertIn("critic.json", text)
         self.assertIn("ag_critic_endpoint", text)
+        self.assertIn("ag_critic_worker_model", text)
         self.assertIn("critic-last.json", text)
+
+    def test_andersen_same_family_skips_http(self) -> None:
+        self._write_config(model="gpt-4o", worker_model="gpt-4o-mini")
+        fake = _FakeHTTP(_chat_payload({"verdict": "pass", "items": [{"name": "x", "status": "pass", "comment": "ok"}]}))
+        with patch("urllib.request.urlopen", fake):
+            code, out, err = _cli(["critic-run", str(self.root), "--exam", "user: keep x = 1"])
+        self.assertEqual(0, code, err)
+        blob = json.loads(out)
+        self.assertEqual("unavailable", blob["outcome"])
+        self.assertTrue(blob.get("configured"))
+        self.assertIn("andersen", str(blob.get("reason") or "").casefold())
+        self.assertEqual([], fake.requests)
+
+    def test_andersen_exemption_posts_and_logs(self) -> None:
+        self._write_config(model="gpt-4o", worker_model="gpt-4o-mini", allow_same_family=True)
+        fake = _FakeHTTP(
+            _chat_payload(
+                {
+                    "verdict": "pass",
+                    "items": [{"name": "exam", "status": "pass", "comment": "ok"}],
+                    "summary": "pass",
+                }
+            )
+        )
+        with patch("urllib.request.urlopen", fake):
+            code, out, err = _cli(["critic-run", str(self.root), "--exam", "user: keep x = 1"])
+        self.assertEqual(0, code, err)
+        blob = json.loads(out)
+        self.assertEqual("passed", blob["outcome"])
+        self.assertEqual(1, len(fake.requests))
+        rows = [json.loads(line) for line in log_path(self.root).read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertTrue(rows[-1].get("allow_same_family"))
 
     def test_two_cli_runs_append_jsonl_and_overwrite_last(self) -> None:
         self._write_config()
