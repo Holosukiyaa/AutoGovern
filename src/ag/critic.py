@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .managed import ChainBroken, real_root
-from .probe import run as run_probes
+from .probe import evaluate as evaluate_probes
 
 PACK_SCHEMA = "ag.critic-pack.v1"
 MAX_FILE_CHARS = 100_000
@@ -214,7 +214,7 @@ def pack(
     diff_text, names = _changed_names(repo, str(base or "").strip(), str(head or "").strip())
     changed = [_file_entry(repo, rel) for rel in names]
     hops = neighbors(repo, changed)
-    probe_run = run_probes(repo, paths=names or None, awaken=False) if names else {"results": []}
+    probe_run = evaluate_probes(repo, paths=names or None, awaken=False) if names else {"results": []}
     results = probe_run.get("results") if isinstance(probe_run, dict) else []
     if not isinstance(results, list):
         results = []

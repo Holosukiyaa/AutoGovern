@@ -371,28 +371,19 @@ def _should_run(row: dict[str, Any], paths: list[str] | None, awaken: bool) -> b
     return True
 
 
-def run(root: Path, *, paths: list[str] | None = None, awaken: bool = False) -> dict[str, Any]:
+def evaluate(root: Path, *, paths: list[str] | None = None, awaken: bool = False) -> dict[str, Any]:
+    """Red/green tails only. Does not change probe lifetime or write probes.json."""
     repo = real_root(root)
     path = store_path(repo)
     wanted = [_posix(item) for item in (paths or []) if _posix(item)]
     path_filter = wanted or None
     results: list[dict[str, Any]] = []
     blob = _load(path)
-    dirty = False
     for row in blob["probes"]:
         if not _should_run(row, path_filter, awaken):
             continue
         observation = row.get("observation") if isinstance(row.get("observation"), dict) else {}
         verdict, exit_code, tail = _eval(repo, observation)
-        ttl = int(row.get("ttl_quiet_loops") or DEFAULT_TTL)
-        if verdict == "green":
-            quiet = int(row.get("quiet_count") or 0) + 1
-            row["quiet_count"] = quiet
-            row["state"] = "archived" if quiet >= ttl else "armed"
-        else:
-            row["quiet_count"] = 0
-            row["state"] = "armed"
-        dirty = True
         results.append(
             {
                 "id": str(row.get("id") or ""),
@@ -402,9 +393,33 @@ def run(root: Path, *, paths: list[str] | None = None, awaken: bool = False) -> 
                 "tail": tail,
             }
         )
+    return {"schema": RUN_SCHEMA, "root": str(repo), "results": results}
+
+
+def run(root: Path, *, paths: list[str] | None = None, awaken: bool = False) -> dict[str, Any]:
+    repo = real_root(root)
+    path = store_path(repo)
+    out = evaluate(repo, paths=paths, awaken=awaken)
+    by_id = {str(item.get("id") or ""): item for item in out["results"]}
+    blob = _load(path)
+    dirty = False
+    for row in blob["probes"]:
+        hit = by_id.get(str(row.get("id") or ""))
+        if hit is None:
+            continue
+        ttl = int(row.get("ttl_quiet_loops") or DEFAULT_TTL)
+        if hit["verdict"] == "green":
+            quiet = int(row.get("quiet_count") or 0) + 1
+            row["quiet_count"] = quiet
+            row["state"] = "archived" if quiet >= ttl else "armed"
+        else:
+            row["quiet_count"] = 0
+            row["state"] = "armed"
+        hit["state"] = str(row.get("state") or "armed")
+        dirty = True
     if dirty:
         _save(path, blob)
-    return {"schema": RUN_SCHEMA, "root": str(repo), "results": results}
+    return out
 
 
 def call(name: str, args: dict[str, Any]) -> dict[str, Any]:

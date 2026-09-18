@@ -309,6 +309,52 @@ class ProbeAndCriticTests(unittest.TestCase):
         self.assertIn("ag_probe_insert", prompt_out)
         self.assertIn("没有工地", prompt_out)
 
+    def test_critic_pack_does_not_change_probe_lifetime(self) -> None:
+        call(
+            "ag_probe_insert",
+            {
+                "root": str(self.root),
+                "observation": {"kind": "text_in_file", "path": "ok.py", "must_include": "x = 1"},
+                "exam_fragment": "ok.py contains x = 1",
+                "evidence": EVIDENCE,
+                "area": ["ok.py"],
+                "id": "ttl-ten",
+                "ttl_quiet_loops": 10,
+            },
+        )
+        before = call("ag_probe_list", {"root": str(self.root)})["probes"][0]
+        self.assertEqual("armed", before["state"])
+        self.assertEqual(0, before["quiet_count"])
+        (self.root / "ok.py").write_text("x = 1\n# pack-touch\n", encoding="utf-8")
+        first_code, first_out, first_err = _cli(
+            ["critic-pack", str(self.root), "--exam", "user: keep x = 1\nportrait: ok.py still has x = 1"]
+        )
+        self.assertEqual(0, first_code, first_err)
+        first_pack = json.loads(first_out)
+        self.assertEqual(1, len(first_pack["probes"]))
+        self.assertEqual("green", first_pack["probes"][0]["verdict"])
+        self.assertEqual("armed", first_pack["probes"][0]["state"])
+        second_code, second_out, second_err = _cli(
+            ["critic-pack", str(self.root), "--exam", "user: keep x = 1\nportrait: ok.py still has x = 1"]
+        )
+        self.assertEqual(0, second_code, second_err)
+        second_pack = json.loads(second_out)
+        self.assertEqual("armed", second_pack["probes"][0]["state"])
+        self.assertEqual("green", second_pack["probes"][0]["verdict"])
+        after = call("ag_probe_list", {"root": str(self.root)})["probes"][0]
+        self.assertEqual(before["state"], after["state"])
+        self.assertEqual(before["quiet_count"], after["quiet_count"])
+        self.assertEqual(before["ttl_quiet_loops"], after["ttl_quiet_loops"])
+        self.assertEqual(before["observation"], after["observation"])
+        self.assertEqual(before["exam_fragment"], after["exam_fragment"])
+        self.assertEqual(0, after["quiet_count"])
+        self.assertEqual("armed", after["state"])
+        ran = call("ag_probe_run", {"root": str(self.root)})
+        self.assertEqual("green", ran["results"][0]["verdict"])
+        self.assertEqual(1, call("ag_probe_list", {"root": str(self.root)})["probes"][0]["quiet_count"])
+        self.assertEqual("armed", call("ag_probe_list", {"root": str(self.root)})["probes"][0]["state"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
