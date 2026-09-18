@@ -238,13 +238,17 @@ def pack(
     exam_file: str | None = None,
     base: str = "",
     head: str = "",
+    tree: Path | None = None,
 ) -> dict[str, Any]:
-    repo = real_root(root)
+    store = real_root(root)
+    repo = real_root(Path(tree)) if tree is not None else store
     exam_text = _read_exam(exam, exam_file)
     diff_text, names = _changed_names(repo, str(base or "").strip(), str(head or "").strip())
     changed = [_file_entry(repo, rel) for rel in names]
     hops = neighbors(repo, changed)
-    probe_run = evaluate_probes(repo, paths=names or None, awaken=False) if names else {"results": []}
+    probe_run = (
+        evaluate_probes(store, paths=names or None, awaken=False, tree=repo) if names else {"results": []}
+    )
     results = probe_run.get("results") if isinstance(probe_run, dict) else []
     if not isinstance(results, list):
         results = []
@@ -454,8 +458,9 @@ def critic_run(
     exam_file: str | None = None,
     base: str = "",
     head: str = "",
+    tree: Path | None = None,
 ) -> dict[str, Any]:
-    packed = pack(root, exam=exam, exam_file=exam_file, base=base, head=head)
+    packed = pack(root, exam=exam, exam_file=exam_file, base=base, head=head, tree=tree)
     cfg = load_config(root)
     if cfg.get("error"):
         return _result(root, outcome="unavailable", reason=str(cfg["error"]), pack=packed)

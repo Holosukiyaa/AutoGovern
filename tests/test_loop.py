@@ -10,12 +10,39 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from unittest.mock import patch
+
+from ag.critic import config_path, report_path
 from ag.loop import abandon, enroll, finish, start, status, unenroll, verify
 from ag.managed import ChainBroken, project_key, real_root
 from ag.mcp import TOOLS, _call
-from ag.probe import insert
+from ag.probe import insert, list_probes
 
 PY = sys.executable
+PIN_EVIDENCE = "already-seen observation text from this run"
+
+
+class _FakeHTTP:
+    def __init__(self, payload: dict) -> None:
+        self._raw = json.dumps(payload).encode("utf-8")
+        self.requests: list[object] = []
+
+    def __call__(self, request: object, timeout: object = None) -> "_FakeHTTP":
+        self.requests.append(request)
+        return self
+
+    def __enter__(self) -> "_FakeHTTP":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._raw
+
+
+def _chat_payload(verdict: dict) -> dict:
+    return {"choices": [{"message": {"content": json.dumps(verdict, ensure_ascii=False)}}]}
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -349,7 +376,128 @@ class LoopTests(unittest.TestCase):
         self.assertEqual("passed", done["product"])
         self.assertTrue((self.root / "keep.txt").is_file())
 
+    def _enable_critic(self) -> None:
+        path = config_path(self.root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "endpoint": "https://example.test/v1",
+                    "model": "unit-critic",
+                    "api_key_env": "AG_CRITIC_API_KEY",
+                    "timeout": 5,
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def test_verify_calls_critic_run_with_worktree_pack(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        self._enable_critic()
+        worktree = Path(str(start(self.root, portrait="keep hello.txt")["worktree"]))
+        (worktree / "hello.txt").write_text("hi\n", encoding="utf-8")
+        fake = _FakeHTTP(
+            _chat_payload(
+                {
+                    "verdict": "pass",
+                    "items": [{"name": "exam", "status": "pass", "comment": "hello landed"}],
+                    "summary": "pass",
+                }
+            )
+        )
+        with patch("urllib.request.urlopen", fake):
+            checked = verify(self.root)
+        self.assertEqual("passed", checked["product"])
+        critic = checked.get("critic") or {}
+        self.assertEqual("passed", critic.get("outcome"))
+        self.assertEqual("ag.critic.v1", critic.get("prompt_version"))
+        self.assertEqual(1, len(fake.requests))
+        store = Path(str(critic.get("store") or ""))
+        self.assertTrue(store.is_file())
+        self.assertTrue(store.is_relative_to(self.home))
+        self.assertFalse((self.root / "critic-last.json").exists())
+        body = json.loads(fake.requests[0].data.decode("utf-8"))
+        user = json.loads(body["messages"][1]["content"])
+        self.assertEqual({"schema", "exam", "diff", "changed_files", "neighbors", "probes"}, set(user))
+        self.assertEqual("keep hello.txt", user["exam"])
+        names = [str(item.get("path") or "") for item in user.get("changed_files") or []]
+        self.assertIn("hello.txt", names)
+
+    def test_verify_empty_portrait_skips_http(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        self._enable_critic()
+        worktree = Path(str(start(self.root)["worktree"]))
+        (worktree / "hello.txt").write_text("hi\n", encoding="utf-8")
+        fake = _FakeHTTP(_chat_payload({"verdict": "pass", "items": [{"name": "x", "status": "pass", "comment": "x"}]}))
+        with patch("urllib.request.urlopen", fake):
+            checked = verify(self.root)
+        self.assertEqual("unavailable", (checked.get("critic") or {}).get("outcome"))
+        self.assertIn("no-exam", str((checked.get("critic") or {}).get("reason") or ""))
+        self.assertEqual([], fake.requests)
+
+    def test_verify_critic_reject_still_passed_and_finish(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        self._enable_critic()
+        worktree = Path(str(start(self.root, portrait="keep file")["worktree"]))
+        (worktree / "keep.txt").write_text("k\n", encoding="utf-8")
+        fake = _FakeHTTP(
+            _chat_payload(
+                {
+                    "verdict": "reject",
+                    "items": [
+                        {
+                            "name": "exam",
+                            "status": "fail",
+                            "evidence": "keep.txt:1",
+                            "comment": "not enough",
+                        }
+                    ],
+                    "summary": "reject",
+                }
+            )
+        )
+        with patch("urllib.request.urlopen", fake):
+            checked = verify(self.root)
+        self.assertEqual("rejected", (checked.get("critic") or {}).get("outcome"))
+        self.assertEqual("passed", checked["product"])
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
+        self.assertTrue((self.root / "keep.txt").is_file())
+
+    def test_verify_critic_does_not_double_count_quiet(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        self._enable_critic()
+        insert(
+            self.root,
+            observation={"kind": "text_in_file", "path": "ok.py", "must_include": "x = 1"},
+            exam_fragment="ok.py contains x = 1",
+            evidence=PIN_EVIDENCE,
+            area=["ok.py"],
+            id="ok-pin",
+            ttl_quiet_loops=10,
+        )
+        self.assertEqual(0, list_probes(self.root)["probes"][0]["quiet_count"])
+        worktree = Path(str(start(self.root, portrait="keep x = 1")["worktree"]))
+        (worktree / "ok.py").write_text("x = 1\n# v\n", encoding="utf-8")
+        fake = _FakeHTTP(
+            _chat_payload(
+                {
+                    "verdict": "pass",
+                    "items": [{"name": "exam", "status": "pass", "comment": "ok"}],
+                    "summary": "pass",
+                }
+            )
+        )
+        with patch("urllib.request.urlopen", fake):
+            checked = verify(self.root)
+        self.assertEqual("passed", checked["product"])
+        self.assertEqual(1, len(fake.requests))
+        self.assertEqual(1, list_probes(self.root)["probes"][0]["quiet_count"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

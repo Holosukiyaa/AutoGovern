@@ -481,6 +481,24 @@ def verify(root: Path) -> dict[str, Any]:
     record["probe_red"] = [
         str(row.get("id") or "") for row in probe_results if row.get("verdict") == "red" and row.get("id")
     ]
+    critic: dict[str, Any] = {"outcome": "unavailable", "reason": "no-exam", "store": ""}
+    portrait = str(task.get("portrait") or "").strip()
+    if portrait:
+        try:
+            from .critic import critic_run
+
+            raw = critic_run(Path(state["root"]), exam=portrait, tree=worktree)
+            critic = {
+                "outcome": str(raw.get("outcome") or "unavailable"),
+                "reason": str(raw.get("reason") or ""),
+                "store": str(raw.get("store") or ""),
+                "prompt_version": str(raw.get("prompt_version") or ""),
+            }
+            if raw.get("model"):
+                critic["model"] = raw["model"]
+        except Exception as exc:
+            critic = {"outcome": "unavailable", "reason": f"failed: {exc}", "store": ""}
+    record["critic"] = critic
     digest = tree_digest(worktree)
     task["verify"] = record
     task["verified_tree"] = digest if record["exit"] == 0 else ""
@@ -497,6 +515,7 @@ def verify(root: Path) -> dict[str, Any]:
     out["verified_tree"] = task["verified_tree"]
     out["probes"] = probe_results
     out["probe_red"] = list(record["probe_red"])
+    out["critic"] = critic
     try:
         from .lift import run as lift_run
 
