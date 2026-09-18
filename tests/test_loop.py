@@ -436,12 +436,16 @@ class LoopTests(unittest.TestCase):
         self.assertEqual("unavailable", (checked.get("critic") or {}).get("outcome"))
         self.assertIn("no-exam", str((checked.get("critic") or {}).get("reason") or ""))
         self.assertEqual([], fake.requests)
+        self.assertEqual("passed", checked["product"])
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
 
-    def test_verify_critic_reject_still_passed_and_finish(self) -> None:
+    def test_verify_critic_reject_fails_product_and_refuses_finish(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
         self._enable_critic()
         worktree = Path(str(start(self.root, portrait="keep file")["worktree"]))
         (worktree / "keep.txt").write_text("k\n", encoding="utf-8")
+        before = _git(self.root, "rev-parse", "HEAD")
         fake = _FakeHTTP(
             _chat_payload(
                 {
@@ -461,10 +465,61 @@ class LoopTests(unittest.TestCase):
         with patch("urllib.request.urlopen", fake):
             checked = verify(self.root)
         self.assertEqual("rejected", (checked.get("critic") or {}).get("outcome"))
+        self.assertEqual("failed", checked["product"])
+        self.assertTrue(checked["verified_tree"])
+        with self.assertRaises(ChainBroken) as raised:
+            finish(self.root)
+        text = str(raised.exception).lower()
+        self.assertIn("critic", text)
+        self.assertIn("rejected", text)
+        self.assertEqual(before, _git(self.root, "rev-parse", "HEAD"))
+        self.assertFalse((self.root / "keep.txt").exists())
+
+    def test_verify_critic_network_fail_still_passed_and_finish(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        self._enable_critic()
+        worktree = Path(str(start(self.root, portrait="keep file")["worktree"]))
+        (worktree / "keep.txt").write_text("k\n", encoding="utf-8")
+        with patch("urllib.request.urlopen", side_effect=OSError("down")):
+            checked = verify(self.root)
+        critic = checked.get("critic") or {}
+        self.assertEqual("unavailable", critic.get("outcome"))
+        self.assertIn("failed", str(critic.get("reason") or ""))
         self.assertEqual("passed", checked["product"])
         done = finish(self.root)
         self.assertEqual("passed", done["product"])
         self.assertTrue((self.root / "keep.txt").is_file())
+
+    def test_probe_red_fails_even_if_critic_passed(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        self._enable_critic()
+        insert(
+            self.root,
+            observation={"kind": "text_in_file", "path": "ok.py", "must_include": "x = 1"},
+            exam_fragment="ok.py contains x = 1",
+            evidence=PIN_EVIDENCE,
+            area=["ok.py"],
+            id="ok-pin",
+        )
+        worktree = Path(str(start(self.root, portrait="keep x = 1")["worktree"]))
+        (worktree / "ok.py").write_text("broken\n", encoding="utf-8")
+        fake = _FakeHTTP(
+            _chat_payload(
+                {
+                    "verdict": "pass",
+                    "items": [{"name": "exam", "status": "pass", "comment": "ok"}],
+                    "summary": "pass",
+                }
+            )
+        )
+        with patch("urllib.request.urlopen", fake):
+            checked = verify(self.root)
+        self.assertEqual("passed", (checked.get("critic") or {}).get("outcome"))
+        self.assertEqual("failed", checked["product"])
+        self.assertIn("ok-pin", checked.get("probe_red") or [])
+        with self.assertRaises(ChainBroken) as raised:
+            finish(self.root)
+        self.assertIn("probe", str(raised.exception).lower())
 
     def test_verify_critic_does_not_double_count_quiet(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])

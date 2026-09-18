@@ -180,8 +180,19 @@ def _probe_red_ids(verify: dict[str, Any] | None) -> list[str]:
     ]
 
 
+def _critic_rejected(verify: dict[str, Any] | None) -> bool:
+    if not isinstance(verify, dict):
+        return False
+    critic = verify.get("critic")
+    if not isinstance(critic, dict):
+        return False
+    return str(critic.get("outcome") or "").strip().casefold() == "rejected"
+
+
 def _product(test_argv: list[str], verify: dict[str, Any] | None) -> str:
     if _probe_red_ids(verify):
+        return "failed"
+    if _critic_rejected(verify):
         return "failed"
     if not test_argv:
         return "undeclared"
@@ -564,6 +575,9 @@ def finish(root: Path) -> dict[str, Any]:
     if red:
         usage_note(root, "ship", 6, "block", "probe " + ",".join(red))
         raise ChainBroken("probe red: " + ", ".join(red) + "; will not deliver")
+    if _critic_rejected(verify_blob):
+        usage_note(root, "ship", 6, "block", "critic rejected")
+        raise ChainBroken("critic rejected; will not deliver")
     git(worktree, "add", "-A")
     if git(worktree, "status", "--porcelain", check=False):
         first_line = (str(task.get("portrait") or "").strip().splitlines() or [""])[0][:70]
