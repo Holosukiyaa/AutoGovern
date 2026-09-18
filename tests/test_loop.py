@@ -424,6 +424,24 @@ class LoopTests(unittest.TestCase):
         self.assertEqual("keep hello.txt", user["exam"])
         names = [str(item.get("path") or "") for item in user.get("changed_files") or []]
         self.assertIn("hello.txt", names)
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
+
+    def test_unconfigured_portrait_still_passed_and_finish(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        worktree = Path(str(start(self.root, portrait="keep hello.txt")["worktree"]))
+        (worktree / "hello.txt").write_text("hi\n", encoding="utf-8")
+        fake = _FakeHTTP(_chat_payload({"verdict": "pass", "items": [{"name": "x", "status": "pass", "comment": "x"}]}))
+        with patch("urllib.request.urlopen", fake):
+            checked = verify(self.root)
+        critic = checked.get("critic") or {}
+        self.assertEqual("unavailable", critic.get("outcome"))
+        self.assertEqual("not-configured", critic.get("reason"))
+        self.assertFalse(critic.get("configured"))
+        self.assertEqual([], fake.requests)
+        self.assertEqual("passed", checked["product"])
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
 
     def test_verify_empty_portrait_skips_http(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
@@ -435,10 +453,12 @@ class LoopTests(unittest.TestCase):
             checked = verify(self.root)
         self.assertEqual("unavailable", (checked.get("critic") or {}).get("outcome"))
         self.assertIn("no-exam", str((checked.get("critic") or {}).get("reason") or ""))
+        self.assertTrue((checked.get("critic") or {}).get("configured"))
         self.assertEqual([], fake.requests)
-        self.assertEqual("passed", checked["product"])
-        done = finish(self.root)
-        self.assertEqual("passed", done["product"])
+        self.assertEqual("failed", checked["product"])
+        with self.assertRaises(ChainBroken) as raised:
+            finish(self.root)
+        self.assertIn("unavailable", str(raised.exception).lower())
 
     def test_verify_critic_reject_fails_product_and_refuses_finish(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
@@ -475,7 +495,7 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(before, _git(self.root, "rev-parse", "HEAD"))
         self.assertFalse((self.root / "keep.txt").exists())
 
-    def test_verify_critic_network_fail_still_passed_and_finish(self) -> None:
+    def test_verify_critic_network_fail_fails_product_and_refuses_finish(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
         self._enable_critic()
         worktree = Path(str(start(self.root, portrait="keep file")["worktree"]))
@@ -485,10 +505,43 @@ class LoopTests(unittest.TestCase):
         critic = checked.get("critic") or {}
         self.assertEqual("unavailable", critic.get("outcome"))
         self.assertIn("failed", str(critic.get("reason") or ""))
-        self.assertEqual("passed", checked["product"])
-        done = finish(self.root)
-        self.assertEqual("passed", done["product"])
-        self.assertTrue((self.root / "keep.txt").is_file())
+        self.assertTrue(critic.get("configured"))
+        self.assertEqual("failed", checked["product"])
+        with self.assertRaises(ChainBroken) as raised:
+            finish(self.root)
+        self.assertIn("unavailable", str(raised.exception).lower())
+        self.assertFalse((self.root / "keep.txt").exists())
+
+    def test_verify_critic_void_fails_product_and_refuses_finish(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        self._enable_critic()
+        worktree = Path(str(start(self.root, portrait="keep file")["worktree"]))
+        (worktree / "keep.txt").write_text("k\n", encoding="utf-8")
+        fake = _FakeHTTP(
+            _chat_payload(
+                {
+                    "verdict": "reject",
+                    "items": [
+                        {
+                            "name": "exam",
+                            "status": "fail",
+                            "evidence": "见上文",
+                            "comment": "no locator",
+                        }
+                    ],
+                    "summary": "void",
+                }
+            )
+        )
+        with patch("urllib.request.urlopen", fake):
+            checked = verify(self.root)
+        critic = checked.get("critic") or {}
+        self.assertEqual("unavailable", critic.get("outcome"))
+        self.assertIn("作废", str(critic.get("reason") or ""))
+        self.assertEqual("failed", checked["product"])
+        with self.assertRaises(ChainBroken) as raised:
+            finish(self.root)
+        self.assertIn("unavailable", str(raised.exception).lower())
 
     def test_probe_red_fails_even_if_critic_passed(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])

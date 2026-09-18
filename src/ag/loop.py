@@ -180,19 +180,31 @@ def _probe_red_ids(verify: dict[str, Any] | None) -> list[str]:
     ]
 
 
-def _critic_rejected(verify: dict[str, Any] | None) -> bool:
+def _critic_record(verify: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(verify, dict):
-        return False
+        return {}
     critic = verify.get("critic")
-    if not isinstance(critic, dict):
-        return False
-    return str(critic.get("outcome") or "").strip().casefold() == "rejected"
+    return critic if isinstance(critic, dict) else {}
+
+
+def _critic_block_message(verify: dict[str, Any] | None) -> str:
+    critic = _critic_record(verify)
+    if not critic:
+        return ""
+    outcome = str(critic.get("outcome") or "").strip().casefold()
+    if outcome == "rejected":
+        return "critic rejected; will not deliver"
+    if outcome == "unavailable" and bool(critic.get("configured")):
+        reason = str(critic.get("reason") or "").strip()
+        if reason != "not-configured":
+            return "critic unavailable; will not deliver"
+    return ""
 
 
 def _product(test_argv: list[str], verify: dict[str, Any] | None) -> str:
     if _probe_red_ids(verify):
         return "failed"
-    if _critic_rejected(verify):
+    if _critic_block_message(verify):
         return "failed"
     if not test_argv:
         return "undeclared"
@@ -492,23 +504,40 @@ def verify(root: Path) -> dict[str, Any]:
     record["probe_red"] = [
         str(row.get("id") or "") for row in probe_results if row.get("verdict") == "red" and row.get("id")
     ]
-    critic: dict[str, Any] = {"outcome": "unavailable", "reason": "no-exam", "store": ""}
-    portrait = str(task.get("portrait") or "").strip()
-    if portrait:
-        try:
-            from .critic import critic_run
+    from .critic import _configured, critic_run, load_config
 
-            raw = critic_run(Path(state["root"]), exam=portrait, tree=worktree)
+    enrolled = Path(state["root"])
+    cfg = load_config(enrolled)
+    configured = bool(cfg.get("error") or _configured(cfg))
+    portrait = str(task.get("portrait") or "").strip()
+    critic: dict[str, Any] = {
+        "outcome": "unavailable",
+        "reason": "not-configured",
+        "store": "",
+        "configured": configured,
+    }
+    if not portrait:
+        if configured:
+            critic["reason"] = str(cfg.get("error") or "no-exam")
+    elif configured:
+        try:
+            raw = critic_run(enrolled, exam=portrait, tree=worktree)
             critic = {
                 "outcome": str(raw.get("outcome") or "unavailable"),
                 "reason": str(raw.get("reason") or ""),
                 "store": str(raw.get("store") or ""),
                 "prompt_version": str(raw.get("prompt_version") or ""),
+                "configured": True,
             }
             if raw.get("model"):
                 critic["model"] = raw["model"]
         except Exception as exc:
-            critic = {"outcome": "unavailable", "reason": f"failed: {exc}", "store": ""}
+            critic = {
+                "outcome": "unavailable",
+                "reason": f"failed: {exc}",
+                "store": "",
+                "configured": True,
+            }
     record["critic"] = critic
     digest = tree_digest(worktree)
     task["verify"] = record
@@ -575,9 +604,10 @@ def finish(root: Path) -> dict[str, Any]:
     if red:
         usage_note(root, "ship", 6, "block", "probe " + ",".join(red))
         raise ChainBroken("probe red: " + ", ".join(red) + "; will not deliver")
-    if _critic_rejected(verify_blob):
-        usage_note(root, "ship", 6, "block", "critic rejected")
-        raise ChainBroken("critic rejected; will not deliver")
+    critic_block = _critic_block_message(verify_blob)
+    if critic_block:
+        usage_note(root, "ship", 6, "block", critic_block)
+        raise ChainBroken(critic_block)
     git(worktree, "add", "-A")
     if git(worktree, "status", "--porcelain", check=False):
         first_line = (str(task.get("portrait") or "").strip().splitlines() or [""])[0][:70]
