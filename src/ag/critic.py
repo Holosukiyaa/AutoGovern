@@ -395,7 +395,12 @@ def complete_chat(config: dict[str, Any], messages: list[dict[str, str]]) -> str
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
     payload = json.dumps(
-        {"model": config["model"], "messages": messages, "temperature": 0},
+        {
+            "model": config["model"],
+            "messages": messages,
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+        },
         ensure_ascii=False,
     ).encode("utf-8")
     request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
@@ -406,31 +411,46 @@ def complete_chat(config: dict[str, Any], messages: list[dict[str, str]]) -> str
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, json.JSONDecodeError, ValueError) as exc:
         raise RuntimeError(f"failed: {exc}") from exc
     try:
-        content = body["choices"][0]["message"]["content"]
+        message = body["choices"][0]["message"]
     except (KeyError, IndexError, TypeError) as exc:
         raise RuntimeError("failed: response has no message content") from exc
-    if not isinstance(content, str) or not content.strip():
+    if not isinstance(message, dict):
+        raise RuntimeError("failed: response has no message content")
+    content = message.get("content") if isinstance(message.get("content"), str) else ""
+    reasoning = message.get("reasoning_content") if isinstance(message.get("reasoning_content"), str) else ""
+    if not content.strip() and not reasoning.strip():
         raise RuntimeError("failed: empty message")
-    return content
+    return content, reasoning
+
+
+def _extract_json_object(text: str) -> dict[str, Any]:
+    candidate = (text or "").strip()
+    if not candidate:
+        raise ValueError("critic output is not JSON")
+    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", candidate, re.S)
+    if fence:
+        candidate = fence.group(1).strip()
+    decoder = json.JSONDecoder()
+    found: list[dict[str, Any]] = []
+    for index, char in enumerate(candidate):
+        if char != "{":
+            continue
+        try:
+            value, _ = decoder.raw_decode(candidate[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            found.append(value)
+    for value in found:
+        if "verdict" in value or "items" in value:
+            return value
+    if found:
+        return found[0]
+    raise ValueError("critic output is not JSON")
 
 
 def parse_verdict(text: str) -> dict[str, Any]:
-    candidate = text.strip()
-    fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", candidate, re.S)
-    if fence:
-        candidate = fence.group(1)
-    elif not candidate.startswith("{"):
-        start, end = candidate.find("{"), candidate.rfind("}")
-        if start == -1 or end <= start:
-            raise ValueError("critic output is not JSON")
-        candidate = candidate[start : end + 1]
-    try:
-        value = json.loads(candidate)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"critic output is not JSON: {exc}") from exc
-    if not isinstance(value, dict):
-        raise ValueError("critic output must be a JSON object")
-    return value
+    return _extract_json_object(text)
 
 
 def _item_status(item: dict[str, Any]) -> str:
@@ -447,15 +467,19 @@ def verdict_problems(verdict: dict[str, Any]) -> list[str]:
     raw = str(verdict.get("verdict") or verdict.get("outcome") or "").strip().casefold()
     if raw in {"pass", "passed"}:
         outcome = "pass"
-    elif raw in {"reject", "rejected"}:
+    elif raw in {"reject", "rejected", "fail", "failed"}:
         outcome = "reject"
+    elif raw in {"unproven", "unknown", "uncertain", "unavailable"}:
+        outcome = "unproven"
     else:
         problems.append(f"verdict must be pass|reject, got {raw!r}")
         outcome = ""
     items = verdict.get("items")
-    if not isinstance(items, list) or not items:
-        problems.append("items must be a non-empty list")
-        items = [] if not isinstance(items, list) else items
+    if items is None:
+        items = []
+    if not isinstance(items, list):
+        problems.append("items must be a list")
+        items = []
     fails = 0
     for index, item in enumerate(items):
         if not isinstance(item, dict):
@@ -666,8 +690,7 @@ def critic_run(
         {"role": "user", "content": json.dumps(packed, ensure_ascii=False)},
     ]
     try:
-        raw = complete_chat(cfg, messages)
-        verdict = parse_verdict(raw)
+        content, reasoning = complete_chat(cfg, messages)
     except RuntimeError as exc:
         return _result(
             root,
@@ -677,11 +700,21 @@ def critic_run(
             model=str(cfg.get("model") or ""),
             **extra,
         )
-    except ValueError as exc:
+    verdict: dict[str, Any] | None = None
+    parse_error: ValueError | None = None
+    for blob in (content, reasoning):
+        if not str(blob or "").strip():
+            continue
+        try:
+            verdict = parse_verdict(blob)
+            break
+        except ValueError as exc:
+            parse_error = exc
+    if verdict is None:
         return _result(
             root,
             outcome="unavailable",
-            reason=f"void: {exc} (作废)",
+            reason=f"void: {parse_error or 'critic output is not JSON'} (作废)",
             pack=packed,
             model=str(cfg.get("model") or ""),
             **extra,
@@ -702,7 +735,13 @@ def critic_run(
             **extra,
         )
     raw_verdict = str(verdict.get("verdict") or verdict.get("outcome") or "").strip().casefold()
-    outcome = "passed" if raw_verdict in {"pass", "passed"} else "rejected"
+    has_fail = any(
+        isinstance(item, dict) and _item_status(item) == "fail" for item in items
+    )
+    if raw_verdict in {"reject", "rejected", "fail", "failed"} or has_fail:
+        outcome = "rejected"
+    else:
+        outcome = "passed"
     return _result(
         root,
         outcome=outcome,

@@ -149,6 +149,8 @@ class CriticRunTests(unittest.TestCase):
         request = fake.requests[0]
         body = json.loads(request.data.decode("utf-8"))
         self.assertEqual(0, body["temperature"])
+        self.assertNotIn("thinking", body)
+        self.assertEqual("json_object", (body.get("response_format") or {}).get("type"))
         self.assertEqual("unit-critic", body["model"])
         self.assertEqual("system", body["messages"][0]["role"])
         user = json.loads(body["messages"][1]["content"])
@@ -178,6 +180,60 @@ class CriticRunTests(unittest.TestCase):
         self.assertEqual("unavailable", blob["outcome"])
         self.assertIn("作废", blob["reason"])
         self.assertNotEqual("rejected", blob["outcome"])
+
+    def test_fenced_nested_json_parses(self) -> None:
+        self._write_config()
+        verdict = {
+            "verdict": "reject",
+            "items": [{"name": "x", "status": "fail", "evidence": "ok.py:1", "comment": "bad"}],
+            "summary": "fix ok.py",
+        }
+        wrapped = "here\n```json\n" + json.dumps(verdict) + "\n```\n"
+        fake = _FakeHTTP({"choices": [{"message": {"content": wrapped}}]})
+        with patch("urllib.request.urlopen", fake):
+            code, out, err = _cli(["critic-run", str(self.root), "--exam", "user: keep x = 1"])
+        self.assertEqual(0, code, err)
+        blob = json.loads(out)
+        self.assertEqual("rejected", blob["outcome"])
+
+    def test_reasoning_content_used_when_content_is_not_json(self) -> None:
+        self._write_config()
+        verdict = {
+            "verdict": "pass",
+            "items": [{"name": "exam", "status": "pass", "comment": "ok"}],
+            "summary": "ok",
+        }
+        fake = _FakeHTTP(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": "I will inspect the diff first.",
+                            "reasoning_content": json.dumps(verdict),
+                        }
+                    }
+                ]
+            }
+        )
+        with patch("urllib.request.urlopen", fake):
+            code, out, err = _cli(["critic-run", str(self.root), "--exam", "user: keep x = 1"])
+        self.assertEqual(0, code, err)
+        blob = json.loads(out)
+        self.assertEqual("passed", blob["outcome"])
+
+    def test_unproven_without_fail_items_is_passed(self) -> None:
+        self._write_config()
+        verdict = {
+            "verdict": "UNPROVEN",
+            "items": [{"name": "exam", "status": "pass", "comment": "not sure, no fail"}],
+            "summary": "uncertain",
+        }
+        fake = _FakeHTTP(_chat_payload(verdict))
+        with patch("urllib.request.urlopen", fake):
+            code, out, err = _cli(["critic-run", str(self.root), "--exam", "user: keep x = 1"])
+        self.assertEqual(0, code, err)
+        blob = json.loads(out)
+        self.assertEqual("passed", blob["outcome"])
 
     def test_critic_run_does_not_change_probe_quiet_count(self) -> None:
         self._write_config()
