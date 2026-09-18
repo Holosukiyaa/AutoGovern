@@ -285,10 +285,24 @@ def insert(
     }
 
 
+_WORKER_KEYS = ("id", "state", "quiet_count", "ttl_quiet_loops", "area", "exam_fragment")
+
+
 def _public_row(row: dict[str, Any], *, full: bool) -> dict[str, Any]:
     if full:
         return dict(row)
-    return {key: row[key] for key in ("id", "state", "quiet_count", "ttl_quiet_loops", "area", "exam_fragment") if key in row}
+    return {key: row[key] for key in _WORKER_KEYS if key in row}
+
+
+def missing_fragments(root: Path, red_ids: list[str]) -> list[str]:
+    blob = _load(store_path(real_root(root)))
+    by_id = {str(item.get("id") or ""): item for item in blob["probes"]}
+    out: list[str] = []
+    for rid in red_ids:
+        row = by_id.get(str(rid) or "") or {}
+        frag = str(row.get("exam_fragment") or "").strip()
+        out.append(frag or str(rid))
+    return out
 
 
 def list_probes(root: Path, *, full: bool = False) -> dict[str, Any]:

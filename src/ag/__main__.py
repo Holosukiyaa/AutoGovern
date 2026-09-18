@@ -107,7 +107,11 @@ def main(argv: list[str] | None = None) -> int:
         help="list armed and archived probes; default hides observation and evidence",
     )
     list_p.add_argument("root")
-    list_p.add_argument("--full", action="store_true", help="include observation and evidence (critic/human)")
+    list_p.add_argument(
+        "--full",
+        action="store_true",
+        help="include observation and evidence; for a person or critic, not a worker channel",
+    )
     pack_p = sub.add_parser("critic-pack", help="read-only exam pack JSON; not a worker ticket")
     pack_p.add_argument("root")
     pack_exam = pack_p.add_mutually_exclusive_group(required=True)

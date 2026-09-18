@@ -318,11 +318,11 @@ class LoopTests(unittest.TestCase):
         before = _git(self.root, "rev-parse", "HEAD")
         checked = verify(self.root)
         self.assertEqual("failed", checked["product"])
-        self.assertIn("ok-pin", checked.get("probe_red") or [])
-        notes = checked.get("probe_notes") or []
-        self.assertTrue(any("ok-pin" in str(note) and "missing" in str(note).lower() for note in notes))
+        self.assertEqual(["ok-pin"], checked.get("probe_red") or [])
+        self.assertEqual(["ok.py contains x = 1"], checked.get("missing") or [])
+        dumped = json.dumps(checked)
+        self.assertNotIn("must_include", dumped)
         blob = json.dumps(checked.get("probes") or [])
-        self.assertNotIn("must_include", blob)
         self.assertNotIn("observation", blob)
         self.assertTrue(checked["verified_tree"])
         with self.assertRaises(ChainBroken) as raised:
@@ -361,6 +361,7 @@ class LoopTests(unittest.TestCase):
         checked = verify(self.root)
         self.assertEqual("passed", checked["product"])
         self.assertEqual([], checked.get("probe_red") or [])
+        self.assertEqual([], checked.get("missing") or [])
         self.assertEqual([], checked.get("probes") or [])
         done = finish(self.root)
         self.assertEqual("passed", done["product"])
