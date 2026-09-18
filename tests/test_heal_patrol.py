@@ -176,6 +176,52 @@ class HealPatrolTests(unittest.TestCase):
         self.assertIn("glue.py", out["repair_portrait"])
         self.assertIn("UNPROVEN", out["repair_portrait"])
 
+    def test_gear_mess_configured_uses_chat_tuple(self) -> None:
+        (self.root / "glue.py").write_text("from ok import *\n", encoding="utf-8")
+        _git(self.root, "add", ".")
+        _git(self.root, "commit", "-m", "glue")
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        from ag.critic import config_path
+
+        path = config_path(self.root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "enabled": True,
+                    "endpoint": "https://example.test/v1",
+                    "model": "unit-critic",
+                    "api_key_env": "AG_CRITIC_API_KEY",
+                    "timeout": 5,
+                }
+            ),
+            encoding="utf-8",
+        )
+        payload = {"choices": [{"message": {"content": json.dumps({"repair_portrait": "Done looks like: barrel gone"})}}]}
+
+        class Fake:
+            n = 0
+
+            def __call__(self, request, timeout=None):
+                Fake.n += 1
+                self._raw = json.dumps(payload).encode()
+                return self
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return None
+
+            def read(self):
+                return self._raw
+
+        with patch("urllib.request.urlopen", Fake()):
+            out = patrol(self.root, gear="mess", max_lines=800)
+        self.assertEqual(1, Fake.n)
+        self.assertIn("barrel gone", out["repair_portrait"])
+        self.assertNotIn("critic call failed", out["repair_portrait"])
+
 
 if __name__ == "__main__":
     unittest.main()

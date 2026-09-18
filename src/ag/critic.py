@@ -389,7 +389,7 @@ def _configured(cfg: dict[str, Any]) -> bool:
     return bool(cfg.get("enabled") and str(cfg.get("endpoint") or "").strip() and str(cfg.get("model") or "").strip())
 
 
-def complete_chat(config: dict[str, Any], messages: list[dict[str, str]]) -> str:
+def complete_chat(config: dict[str, Any], messages: list[dict[str, str]]) -> tuple[str, str]:
     url = str(config["endpoint"]).rstrip("/") + "/chat/completions"
     headers = {"Content-Type": "application/json"}
     api_key = os.environ.get(str(config.get("api_key_env") or DEFAULT_API_KEY_ENV), "").strip()

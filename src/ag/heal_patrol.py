@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -317,6 +318,26 @@ def _mess_excerpt(tree: Path, diseases: list[dict[str, Any]]) -> str:
     return "\n\n".join(chunks)
 
 
+def _mess_text(content: str, reasoning: str) -> str:
+    for blob in (content, reasoning):
+        text = str(blob or "").strip()
+        if not text:
+            continue
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            return text[:4000]
+        if isinstance(value, dict):
+            portrait = value.get("repair_portrait") or value.get("portrait") or value.get("summary")
+            if isinstance(portrait, str) and portrait.strip():
+                return portrait.strip()[:4000]
+            return json.dumps(value, ensure_ascii=False)[:4000]
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:4000]
+        return text[:4000]
+    return ""
+
+
 def _mess_portrait(enrolled: Path, scan_root: Path, summaries: list[dict[str, str]], diseases: list[dict[str, Any]]) -> str:
     base = _portrait(summaries)
     from .critic import _configured, complete_chat, load_config
@@ -330,20 +351,21 @@ def _mess_portrait(enrolled: Path, scan_root: Path, summaries: list[dict[str, st
         {
             "role": "system",
             "content": (
-                "Write a short repair portrait from the disease list and excerpts only. "
+                "Return JSON {\"repair_portrait\": \"...\"} only. "
+                "The portrait is a short Done-looks-like repair brief from the disease list and excerpts. "
                 "Do not insert probes. Do not use worker diary or critic-last."
             ),
         },
         {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
     ]
     try:
-        extra = complete_chat(cfg, messages)
+        content, reasoning = complete_chat(cfg, messages)
     except Exception:
         return base + "\nUNPROVEN architecture judgment: critic call failed."
-    text = (extra or "").strip()
+    text = _mess_text(content, reasoning)
     if not text:
         return base + "\nUNPROVEN architecture judgment: empty critic reply."
-    return base + "\n" + text[:4000]
+    return base + "\n" + text
 
 
 def patrol(
