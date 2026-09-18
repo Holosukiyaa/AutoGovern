@@ -7,7 +7,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ag.catalog import get, list_lane
-from ag.gui import TOOLS as GUI_TOOLS
 from ag.lanes import LANES, strategy_fields, tools
 from ag.mcp import TOOLS
 
@@ -25,7 +24,7 @@ class LaneTests(unittest.TestCase):
                 self.assertFalse(lane.SETS_PRODUCT)
                 self.assertFalse(lane.MAY_REFUSE_FINISH)
 
-    def test_mcp_tools_lanes_then_gui(self) -> None:
+    def test_mcp_tools_lanes_then_plug(self) -> None:
         lane_names = [str(item["name"]) for item in tools()]
         self.assertEqual(
             [
@@ -50,8 +49,7 @@ class LaneTests(unittest.TestCase):
             lane_names,
         )
         self.assertNotIn("ag_gui", lane_names)
-        self.assertEqual(["ag_gui"], [str(item["name"]) for item in GUI_TOOLS])
-        self.assertEqual(lane_names + ["ag_gui", "ag_plug"], [str(item["name"]) for item in TOOLS])
+        self.assertEqual(lane_names + ["ag_plug"], [str(item["name"]) for item in TOOLS])
 
     def test_strategies_are_numbered_per_lane(self) -> None:
         ship = list_lane("ship")

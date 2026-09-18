@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 from .loop import abandon, enroll, finish, hook_main, start, status, unenroll, verify
-from .gui import write_dashboard
 from .heal import run as heal_run
 from .lift import run as lift_run
 from .see import run as see_run
@@ -74,8 +73,6 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("lift", help="lift advice; does not refuse finish").add_argument("root")
     sub.add_parser("heal", help="heal findings; does not refuse finish").add_argument("root")
     sub.add_parser("see", help="see snapshot; does not refuse finish").add_argument("root")
-    gui_p = sub.add_parser("gui", help="write a read-only HTML dashboard and open it")
-    gui_p.add_argument("root", nargs="?")
     plug_p = sub.add_parser("plug", help="list/on/off a pluggable strategy by lane-seq")
     plug_p.add_argument("action", choices=["list", "on", "off"])
     plug_p.add_argument("root")
@@ -159,10 +156,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "hook":
             return hook_main()
-        if args.cmd == "gui":
-            path = write_dashboard(Path(args.root) if args.root else None, browse=True)
-            print(str(path))
-            return 0
         if args.cmd == "plug":
             root = Path(args.root)
             if args.action == "list":

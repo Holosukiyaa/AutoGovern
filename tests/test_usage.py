@@ -11,7 +11,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ag.loop import enroll, finish, start, verify
 from ag.catalog import list_lane
-from ag.gui import write_dashboard
 from ag.see import usage
 
 PY = sys.executable
@@ -66,31 +65,6 @@ class UsageTests(unittest.TestCase):
         self.assertGreaterEqual(by_code["ship-3"]["block"], 1)
         self.assertIn("ship-11", report["never_used"])
         self.assertIn("ship-10", report["never_used"])
-
-    def test_dashboard_html_is_a_view_not_core(self) -> None:
-        path = write_dashboard(None, browse=False)
-        text = path.read_text(encoding="utf-8")
-        self.assertIn("只读", text)
-        self.assertIn("流程≠产品", text)
-        self.assertIn("参考什么故事", text)
-        self.assertIn("这个策略怎么做", text)
-        self.assertIn("预期能解决什么", text)
-        self.assertIn("大街上盖房子", text)
-        self.assertIn("1. 流程≠产品", text)
-        self.assertIn("#ship-1", text)
-        self.assertIn("ship-序号", text)
-        self.assertIn("策略图", text)
-        self.assertIn("真实帮助", text)
-        self.assertIn("<details", text)
-        self.assertIn("id='dim-ship'", text)
-        self.assertIn("已落地", text)
-        self.assertIn("<svg", text)
-        self.assertTrue(str(path).endswith("dashboard.html"))
-        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
-        with_root = write_dashboard(self.root, browse=False)
-        body = with_root.read_text(encoding="utf-8")
-        self.assertIn("这个仓的账", body)
-        self.assertIn("金丝雀", body)
 
 
 if __name__ == "__main__":

@@ -160,7 +160,6 @@ class LoopTests(unittest.TestCase):
                 "ag_critic_pack",
                 "ag_critic_run",
                 "ag_critic_log",
-                "ag_gui",
                 "ag_plug",
             ],
             names,

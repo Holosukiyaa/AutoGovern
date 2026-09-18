@@ -6,7 +6,7 @@ import sys
 from typing import Any
 
 from . import __version__
-from . import catalog, gui
+from . import catalog
 from .lanes import call as lane_call
 from .lanes import tools as lane_tools
 from .managed import ChainBroken
@@ -20,18 +20,18 @@ INSTRUCTIONS = (
     "If no test command is enrolled, product stays undeclared. "
     "Git hook refuses commits on canonical, including git commit --no-verify. "
     "This server does not intercept host Write; edits on canonical dirty it and start/finish refuse. "
+    "While a task is open, tracked canonical files are read-only. "
     "ag_usage (see) counts how often each ship item helped or blocked; it is not product green. "
-    "ag_gui writes a read-only HTML view; HTML is not a lane and not the core. "
     "ag_lift / ag_see are advice. ag_heal is stacked-door treatment and is NOT on the delivery path: "
     "do not run it until stacked doors are found; it must not become a finish gate. "
     "ag_plug on/off/list toggles pluggable lane-seq rows; ship core cannot be unplugged. "
     "Read-only critic: do not write product files, do not finish, do not git commit, and do not open a worktree. "
     "Insert a probe only via ag_probe_insert with already-seen evidence; ag_critic_pack is an exam pack, not a worker ticket. "
     "ag_critic_run does one read-only chat on that pack (no tools). "
-    "unavailable or rejected does not refuse finish. "
-    "ag_verify may attach one read-only critic; it does not refuse finish."
+    "Path-hit probe red, critic rejected, or configured critic unavailable (other than not-configured) refuse finish. "
+    "ag_verify may attach one read-only critic."
 )
-TOOLS = lane_tools() + gui.TOOLS + catalog.TOOLS
+TOOLS = lane_tools() + catalog.TOOLS
 
 
 def _ok(req_id: Any, result: Any) -> dict[str, Any]:
@@ -79,8 +79,6 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
-    if any(str(item["name"]) == name for item in gui.TOOLS):
-        return gui.call(name, args)
     if any(str(item["name"]) == name for item in catalog.TOOLS):
         return catalog.call(name, args)
     return lane_call(name, args)
