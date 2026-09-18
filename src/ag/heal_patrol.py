@@ -16,7 +16,7 @@ from typing import Any
 
 from .managed import ChainBroken, lookup_project, real_root
 from .probe import evaluate, insert, missing_fragments
-from .store import insert_heal_event
+from .store import enqueue_repair, insert_heal_event
 
 SCHEMA = "ag.heal-patrol.v1"
 DEFAULT_MAX_LINES = 800
@@ -261,16 +261,39 @@ def _plant(enrolled: Path, diseases: list[dict[str, Any]], limit: int) -> tuple[
     return needles, summaries
 
 
+def _empty_repair(portrait: str, needles: list[str]) -> bool:
+    if needles:
+        return False
+    text = portrait.casefold()
+    return (
+        "do not open a repair ticket" in text
+        or "no patrol diseases" in text
+        or "不必开修票" in text
+    )
+
+
 def _emit(enrolled: Path, scan_root: Path, gear: str, needles: list[str], diseases: list[dict[str, Any]], portrait: str) -> dict[str, Any]:
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     heal_report_id = insert_heal_event(
         enrolled,
         {
-            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "ts": ts,
             "needles": needles,
             "diseases": diseases,
             "repair_portrait": portrait,
         },
     )
+    if gear == "mess" and not _empty_repair(portrait, needles):
+        enqueue_repair(
+            enrolled,
+            {
+                "ts": ts,
+                "heal_report_id": heal_report_id,
+                "needles": list(needles),
+                "repair_portrait": portrait,
+                "gear": "mess",
+            },
+        )
     return {
         "schema": SCHEMA,
         "root": str(enrolled),

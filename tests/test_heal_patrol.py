@@ -16,9 +16,10 @@ from unittest.mock import patch
 from ag.__main__ import main
 from ag.gui import write_dashboard
 from ag.heal_patrol import patrol
-from ag.loop import enroll, finish, start, thaw_canonical, verify
+from ag.loop import abandon, enroll, finish, start, status, thaw_canonical, verify
 from ag.managed import ChainBroken
 from ag.probe import insert, list_probes, plant_from_reject
+from ag.store import load_pending, pending_path
 
 PY = sys.executable
 
@@ -222,7 +223,54 @@ class HealPatrolTests(unittest.TestCase):
         self.assertIn("barrel gone", out["repair_portrait"])
         self.assertNotIn("critic call failed", out["repair_portrait"])
 
+    def test_mess_enqueues_and_start_pops(self) -> None:
+        (self.root / "glue.py").write_text("from ok import *\n", encoding="utf-8")
+        _git(self.root, "add", ".")
+        _git(self.root, "commit", "-m", "glue")
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        out = patrol(self.root, gear="mess", max_lines=800)
+        self.assertTrue(out["needles"])
+        seen = status(self.root)["pending_repairs"]
+        self.assertEqual(1, seen["count"])
+        self.assertIn("hp-", str(seen.get("head", {}).get("heal_report_id") or ""))
+        self.assertFalse((self.root / "pending_repairs.json").exists())
+        self.assertTrue(pending_path(self.root).is_file())
+        opened = start(self.root)
+        self.assertIn("glue.py", str(opened.get("portrait") or ""))
+        self.assertEqual(0, status(self.root)["pending_repairs"]["count"])
+        listed = list_probes(self.root, full=False)
+        self.assertTrue(all("observation" not in row for row in listed["probes"]))
+        abandon(self.root)
+
+    def test_start_skip_pending_keeps_queue(self) -> None:
+        (self.root / "glue.py").write_text("from ok import *\n", encoding="utf-8")
+        _git(self.root, "add", ".")
+        _git(self.root, "commit", "-m", "glue")
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        patrol(self.root, gear="mess", max_lines=800)
+        self.assertEqual(1, len(load_pending(self.root)))
+        opened = start(self.root, portrait="keep file", skip_pending=True)
+        self.assertEqual("keep file", opened.get("portrait"))
+        self.assertEqual(1, status(self.root)["pending_repairs"]["count"])
+        abandon(self.root)
+
+    def test_repo_and_probes_do_not_enqueue(self) -> None:
+        (self.root / "glue.py").write_text("from ok import *\n", encoding="utf-8")
+        _git(self.root, "add", ".")
+        _git(self.root, "commit", "-m", "glue")
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        patrol(self.root, gear="repo", max_lines=800)
+        self.assertEqual(0, status(self.root)["pending_repairs"]["count"])
+        patrol(self.root, gear="probes")
+        self.assertEqual(0, status(self.root)["pending_repairs"]["count"])
+
+    def test_heal_patrol_module_never_starts(self) -> None:
+        src = (Path(__file__).resolve().parents[1] / "src" / "ag" / "heal_patrol.py").read_text(encoding="utf-8")
+        self.assertNotIn("from .loop import start", src)
+        self.assertNotIn("start(", src)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

@@ -9,6 +9,7 @@ from typing import Any
 from .managed import ag_home, project_key, real_root
 
 DB_NAME = "ag.sqlite"
+PENDING_NAME = "pending_repairs.json"
 
 
 def db_path(root: Path) -> Path:
@@ -214,6 +215,59 @@ def insert_heal_event(root: Path, row: dict[str, Any]) -> str:
         return f"hp-{int(cur.lastrowid or 0)}"
     finally:
         conn.close()
+
+
+def pending_path(root: Path) -> Path:
+    return ag_home() / "projects" / project_key(real_root(root)) / PENDING_NAME
+
+
+def load_pending(root: Path) -> list[dict[str, Any]]:
+    path = pending_path(root)
+    if not path.is_file():
+        return []
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(blob, list):
+        return []
+    return [item for item in blob if isinstance(item, dict)]
+
+
+def save_pending(root: Path, items: list[dict[str, Any]]) -> None:
+    path = pending_path(root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(items, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def enqueue_repair(root: Path, item: dict[str, Any]) -> None:
+    rows = load_pending(root)
+    rows.append(item)
+    save_pending(root, rows)
+
+
+def pop_pending(root: Path) -> dict[str, Any] | None:
+    rows = load_pending(root)
+    if not rows:
+        return None
+    head = rows.pop(0)
+    save_pending(root, rows)
+    return head
+
+
+def pending_summary(root: Path) -> dict[str, Any]:
+    rows = load_pending(root)
+    out: dict[str, Any] = {"count": len(rows)}
+    if not rows:
+        return out
+    head = rows[0]
+    line = str(head.get("repair_portrait") or "").splitlines()
+    first = (line[0] if line else "")[:80]
+    out["head"] = {
+        "heal_report_id": str(head.get("heal_report_id") or ""),
+        "portrait_line": first,
+    }
+    return out
 
 
 def event_count(root: Path) -> int:

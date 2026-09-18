@@ -5,13 +5,14 @@ import hmac
 import json
 import os
 import shutil
-import stat
 import subprocess
 import sys
 import uuid
 from pathlib import Path
 from typing import Any
 
+from .freeze import freeze_canonical, thaw_canonical
+from .hook import hook_main
 from .managed import ChainBroken, ag_home, lookup_project, project_key, real_root, load_managed, save_managed
 from .see import note as usage_note
 
@@ -422,6 +423,12 @@ def status(root: Path) -> dict[str, Any]:
         "critic_report_id": _critic_report_id(verify if isinstance(verify, dict) else None),
     }
     try:
+        from .store import pending_summary
+
+        out["pending_repairs"] = pending_summary(root)
+    except Exception:
+        out["pending_repairs"] = {"count": 0}
+    try:
         from .see import run as see_run
 
         out["see"] = see_run(root)
@@ -430,43 +437,7 @@ def status(root: Path) -> dict[str, Any]:
     return out
 
 
-def _tracked_files(root: Path) -> list[Path]:
-    out: list[Path] = []
-    for line in git(root, "ls-files", check=False).splitlines():
-        rel = line.strip().strip('"')
-        if not rel:
-            continue
-        path = root / rel.replace("/", os.sep)
-        if not path.is_file():
-            continue
-        parts = set(path.resolve().parts)
-        if ".git" in parts:
-            continue
-        out.append(path)
-    return out
-
-
-def freeze_canonical(root: Path) -> None:
-    """Make tracked canonical files read-only. Does not touch .git, worktree, or AG_HOME."""
-    root = Path(root)
-    for path in _tracked_files(root):
-        try:
-            path.chmod(path.stat().st_mode & ~stat.S_IWRITE)
-        except OSError:
-            continue
-
-
-def thaw_canonical(root: Path) -> None:
-    """Restore user-write on tracked canonical files."""
-    root = Path(root)
-    for path in _tracked_files(root):
-        try:
-            path.chmod(path.stat().st_mode | stat.S_IWRITE)
-        except OSError:
-            continue
-
-
-def start(root: Path, *, portrait: str = "") -> dict[str, Any]:
+def start(root: Path, *, portrait: str = "", skip_pending: bool = False) -> dict[str, Any]:
     """Open a worktree. Tracked canonical files become read-only until finish or abandon."""
     state = status(root)
     root = Path(state["root"])
@@ -496,6 +467,13 @@ def start(root: Path, *, portrait: str = "") -> dict[str, Any]:
     worktree = ag_home() / "worktrees" / key / task_id
     worktree.parent.mkdir(parents=True, exist_ok=True)
     git(root, "worktree", "add", "-b", f"ag/{task_id}", str(worktree), "HEAD")
+    chosen = str(portrait or "")
+    if not skip_pending:
+        from .store import pop_pending
+
+        head = pop_pending(root)
+        if isinstance(head, dict) and str(head.get("repair_portrait") or "").strip():
+            chosen = str(head.get("repair_portrait") or "")
     save_task(
         key,
         {
@@ -503,7 +481,7 @@ def start(root: Path, *, portrait: str = "") -> dict[str, Any]:
             "branch": branch,
             "source_head": git(root, "rev-parse", "HEAD"),
             "worktree": str(worktree),
-            "portrait": str(portrait or ""),
+            "portrait": chosen,
             "verified_tree": "",
             "verify": None,
         },
@@ -812,35 +790,3 @@ def unenroll(root: Path) -> dict[str, Any]:
         "unenrolled": True,
         "restored_hooksPath": None if previous == PREV_UNSET else previous,
     }
-
-
-def hook_main() -> int:
-    try:
-        toplevel = Path(git(Path.cwd(), "rev-parse", "--show-toplevel"))
-        canonical = _canonical_root(toplevel)
-    except ChainBroken:
-        sys.stderr.write("ag: hook cannot resolve git root; refusing commit\n")
-        return 1
-    if _is_canonical(toplevel):
-        usage_note(canonical, "ship", 3, "block", "canonical commit")
-        sys.stderr.write("ag: canonical checkout is not a work site; use ag_start\n")
-        return 1
-    if os.environ.get("AG_DELIVER") != "1":
-        usage_note(canonical, "ship", 4, "block", "worktree commit")
-        sys.stderr.write("ag: only ag_finish can commit\n")
-        return 1
-    if not _deliver_token_ok(canonical):
-        usage_note(canonical, "ship", 4, "block", "deliver token")
-        sys.stderr.write("ag: deliver token mismatch; only ag_finish can commit\n")
-        return 1
-    if lookup_project(canonical) is None:
-        return 0
-    from .catalog import enabled
-
-    if not enabled(canonical, "ship", 10):
-        return 0
-    code = _run_previous_pre_commit(toplevel)
-    previous = git(toplevel, "config", "--local", "--get", "ag.previousHooksPath", check=False)
-    if previous and previous != PREV_UNSET:
-        usage_note(canonical, "ship", 10, "help" if code == 0 else "block", f"exit {code}")
-    return code

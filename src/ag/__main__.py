@@ -66,6 +66,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     start_p.add_argument("root")
     start_p.add_argument("--portrait", default="")
+    start_p.add_argument(
+        "--skip-pending",
+        action="store_true",
+        help="do not pop a mess repair ticket; use --portrait as given",
+    )
     sub.add_parser("verify", help="run enrolled tests and pin the tree").add_argument("root")
     sub.add_parser("finish", help="ff-only if digest matches").add_argument("root")
     sub.add_parser("abandon", help="drop the open worktree").add_argument("root")
@@ -256,7 +261,13 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(status(root), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "start":
-            print(json.dumps(start(root, portrait=args.portrait), ensure_ascii=False, indent=2))
+            print(
+                json.dumps(
+                    start(root, portrait=args.portrait, skip_pending=bool(args.skip_pending)),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
             return 0
         if args.cmd == "verify":
             result = verify(root)

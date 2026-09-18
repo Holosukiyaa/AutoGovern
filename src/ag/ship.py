@@ -31,10 +31,14 @@ TOOLS = [
     },
     {
         "name": "ag_start",
-        "description": "Open a worktree. Write only there. Optional portrait is 'done looks like'.",
+        "description": "Open a worktree. Write only there. Optional portrait is 'done looks like'. skip_pending ignores the mess repair queue.",
         "inputSchema": {
             "type": "object",
-            "properties": {"root": {"type": "string"}, "portrait": {"type": "string"}},
+            "properties": {
+                "root": {"type": "string"},
+                "portrait": {"type": "string"},
+                "skip_pending": {"type": "boolean"},
+            },
             "required": ["root"],
         },
     },
@@ -70,7 +74,11 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         test_argv = [str(x) for x in raw] if isinstance(raw, list) else None
         return enroll(root, test_argv=test_argv, note=str(args.get("note") or ""))
     if name == "ag_start":
-        return start(root, portrait=str(args.get("portrait") or ""))
+        return start(
+            root,
+            portrait=str(args.get("portrait") or ""),
+            skip_pending=bool(args.get("skip_pending")),
+        )
     if name == "ag_verify":
         return verify(root)
     if name == "ag_finish":
