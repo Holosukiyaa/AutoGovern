@@ -150,9 +150,16 @@ def main(argv: list[str] | None = None) -> int:
     log_c.add_argument("--limit", type=int, default=20, help="newest last; default 20")
     patrol_p = sub.add_parser(
         "heal-patrol",
-        help="scan diseases, plant heal- needles, emit a repair portrait; does not refuse finish",
+        help="patrol at a human-chosen gear; does not refuse finish",
     )
     patrol_p.add_argument("root")
+    patrol_p.add_argument(
+        "--gear",
+        required=True,
+        choices=["probes", "local", "repo", "mess"],
+        help="probes=run existing needles; local=scan --path only; repo=full scan; mess=repo needles plus optional short chat",
+    )
+    patrol_p.add_argument("--path", action="append", dest="paths", help="local gear: repository-relative path; repeatable")
     patrol_p.add_argument("--tree", default="", help="scan this tree (worktree); store still uses enrolled root")
     patrol_p.add_argument("--max-lines", type=int, default=0, help="oversized threshold; default 800")
     sub.add_parser("critic-prompt", help="print the read-only critic startup prompt")
@@ -229,8 +236,10 @@ def main(argv: list[str] | None = None) -> int:
                 json.dumps(
                     patrol(
                         Path(args.root),
+                        gear=args.gear,
                         tree=Path(args.tree) if args.tree else None,
                         max_lines=args.max_lines or None,
+                        paths=args.paths,
                     ),
                     ensure_ascii=False,
                     indent=2,

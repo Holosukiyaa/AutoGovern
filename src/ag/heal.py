@@ -15,15 +15,17 @@ TOOLS = [
     },
     {
         "name": "ag_heal_patrol",
-        "description": "Read-only disease patrol: plant heal- needles and a repair portrait. Does not refuse finish or start a task.",
+        "description": "Read-only disease patrol with required gear probes|local|repo|mess. Does not refuse finish or start a task.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "root": {"type": "string"},
+                "gear": {"type": "string"},
                 "tree": {"type": "string"},
                 "max_lines": {"type": "integer"},
+                "paths": {"type": "array", "items": {"type": "string"}},
             },
-            "required": ["root"],
+            "required": ["root", "gear"],
         },
     },
 ]
