@@ -44,6 +44,7 @@ class LaneTests(unittest.TestCase):
                 "ag_probe_run",
                 "ag_probe_list",
                 "ag_critic_pack",
+                "ag_critic_run",
             ],
             lane_names,
         )

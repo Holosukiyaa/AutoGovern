@@ -111,6 +111,24 @@ def main(argv: list[str] | None = None) -> int:
     pack_exam.add_argument("--exam-file", help="path to exam text")
     pack_p.add_argument("--base", default="", help="diff base ref; default is working tree vs HEAD")
     pack_p.add_argument("--head", default="", help="diff head ref; requires --base")
+    run_c = sub.add_parser(
+        "critic-run",
+        help="one read-only critic chat; does not refuse finish",
+        description=(
+            "One read-only critic chat; does not refuse finish. "
+            "Config file: AG_HOME/projects/<key>/critic.json "
+            "(enabled, endpoint, model, api_key_env, timeout). "
+            "Env overrides: AG_CRITIC_ENABLED, AG_CRITIC_ENDPOINT, AG_CRITIC_MODEL, "
+            "AG_CRITIC_API_KEY_ENV, AG_CRITIC_TIMEOUT. "
+            "Missing file is not-configured. Report: AG_HOME/projects/<key>/critic-last.json"
+        ),
+    )
+    run_c.add_argument("root")
+    run_exam = run_c.add_mutually_exclusive_group(required=True)
+    run_exam.add_argument("--exam", help="exam text (user words + portrait)")
+    run_exam.add_argument("--exam-file", help="path to exam text")
+    run_c.add_argument("--base", default="", help="diff base ref; default is working tree vs HEAD")
+    run_c.add_argument("--head", default="", help="diff head ref; requires --base")
     sub.add_parser("critic-prompt", help="print the read-only critic startup prompt")
     sub.add_parser("hook", help="git pre-commit helper")
     args = parser.parse_args(argv)
@@ -145,6 +163,23 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 json.dumps(
                     pack(
+                        Path(args.root),
+                        exam=args.exam,
+                        exam_file=args.exam_file,
+                        base=args.base,
+                        head=args.head,
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        if args.cmd == "critic-run":
+            from .critic import critic_run
+
+            print(
+                json.dumps(
+                    critic_run(
                         Path(args.root),
                         exam=args.exam,
                         exam_file=args.exam_file,

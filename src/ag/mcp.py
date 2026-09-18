@@ -26,7 +26,9 @@ INSTRUCTIONS = (
     "do not run it until stacked doors are found; it must not become a finish gate. "
     "ag_plug on/off/list toggles pluggable lane-seq rows; ship core cannot be unplugged. "
     "Read-only critic: do not write product files, do not finish, do not git commit, and do not open a worktree. "
-    "Insert a probe only via ag_probe_insert with already-seen evidence; ag_critic_pack is an exam pack, not a worker ticket."
+    "Insert a probe only via ag_probe_insert with already-seen evidence; ag_critic_pack is an exam pack, not a worker ticket. "
+    "ag_critic_run does one read-only chat on that pack (no tools). "
+    "unavailable or rejected does not refuse finish."
 )
 TOOLS = lane_tools() + gui.TOOLS + catalog.TOOLS
 
