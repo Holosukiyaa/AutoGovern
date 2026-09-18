@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from unittest.mock import patch
 
 from ag.critic import config_path, log_path, report_path
-from ag.loop import abandon, enroll, finish, start, status, unenroll, verify
+from ag.loop import abandon, enroll, finish, start, status, thaw_canonical, unenroll, verify
 from ag.managed import ChainBroken, project_key, real_root
 from ag.mcp import TOOLS, _call
 from ag.probe import insert, list_probes
@@ -72,6 +72,10 @@ class LoopTests(unittest.TestCase):
         self.root = _repo(self._tmp.name)
 
     def tearDown(self) -> None:
+        try:
+            thaw_canonical(self.root)
+        except Exception:
+            pass
         os.environ.pop("AG_HOME", None)
         self._tmp.cleanup()
 
@@ -659,8 +663,58 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(1, len(fake.requests))
         self.assertEqual(1, list_probes(self.root)["probes"][0]["quiet_count"])
 
+    def test_start_freezes_canonical_tracked_file_worktree_writable(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        worktree = Path(str(start(self.root)["worktree"]))
+        with self.assertRaises(OSError):
+            (self.root / "ok.py").write_text("blocked\n", encoding="utf-8")
+        (worktree / "ok.py").write_text("x = 1\n# wt\n", encoding="utf-8")
+        self.assertIn("# wt", (worktree / "ok.py").read_text(encoding="utf-8"))
+        listed = _call("ag_probe_list", {"root": str(self.root)})
+        self.assertTrue(all("observation" not in row for row in listed.get("probes") or []))
+        abandon(self.root)
+        (self.root / "ok.py").write_text("x = 1\n", encoding="utf-8")
+
+    def test_finish_thaws_canonical(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        worktree = Path(str(start(self.root)["worktree"]))
+        (worktree / "hello.txt").write_text("hi\n", encoding="utf-8")
+        self.assertEqual("passed", verify(self.root)["product"])
+        finish(self.root)
+        (self.root / "ok.py").write_text("x = 1\n# after-finish\n", encoding="utf-8")
+        self.assertIn("after-finish", (self.root / "ok.py").read_text(encoding="utf-8"))
+
+    def test_abandon_thaws_canonical(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        start(self.root)
+        with self.assertRaises(OSError):
+            (self.root / "ok.py").write_text("blocked\n", encoding="utf-8")
+        abandon(self.root)
+        (self.root / "ok.py").write_text("x = 1\n# after-abandon\n", encoding="utf-8")
+
+    def test_probe_red_finish_keeps_freeze_until_abandon(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        insert(
+            self.root,
+            observation={"kind": "text_in_file", "path": "ok.py", "must_include": "x = 1"},
+            exam_fragment="ok.py contains x = 1",
+            evidence=PIN_EVIDENCE,
+            area=["ok.py"],
+            id="ok-pin",
+        )
+        worktree = Path(str(start(self.root)["worktree"]))
+        (worktree / "ok.py").write_text("broken\n", encoding="utf-8")
+        self.assertEqual("failed", verify(self.root)["product"])
+        with self.assertRaises(ChainBroken):
+            finish(self.root)
+        with self.assertRaises(OSError):
+            (self.root / "ok.py").write_text("still-frozen\n", encoding="utf-8")
+        abandon(self.root)
+        (self.root / "ok.py").write_text("x = 1\n# thawed\n", encoding="utf-8")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

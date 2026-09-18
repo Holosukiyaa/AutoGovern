@@ -60,7 +60,10 @@ def main(argv: list[str] | None = None) -> int:
     enroll_p.add_argument("--test", nargs=argparse.REMAINDER, dest="test_argv")
     enroll_p.add_argument("--note", default="")
     sub.add_parser("status", help="hook / dirty / process vs product").add_argument("root")
-    start_p = sub.add_parser("start", help="open a worktree")
+    start_p = sub.add_parser(
+        "start",
+        help="open a worktree; tracked canonical files are read-only until finish or abandon",
+    )
     start_p.add_argument("root")
     start_p.add_argument("--portrait", default="")
     sub.add_parser("verify", help="run enrolled tests and pin the tree").add_argument("root")

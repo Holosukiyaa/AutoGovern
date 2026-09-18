@@ -5,6 +5,7 @@ import hmac
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import uuid
@@ -415,7 +416,44 @@ def status(root: Path) -> dict[str, Any]:
     return out
 
 
+def _tracked_files(root: Path) -> list[Path]:
+    out: list[Path] = []
+    for line in git(root, "ls-files", check=False).splitlines():
+        rel = line.strip().strip('"')
+        if not rel:
+            continue
+        path = root / rel.replace("/", os.sep)
+        if not path.is_file():
+            continue
+        parts = set(path.resolve().parts)
+        if ".git" in parts:
+            continue
+        out.append(path)
+    return out
+
+
+def freeze_canonical(root: Path) -> None:
+    """Make tracked canonical files read-only. Does not touch .git, worktree, or AG_HOME."""
+    root = Path(root)
+    for path in _tracked_files(root):
+        try:
+            path.chmod(path.stat().st_mode & ~stat.S_IWRITE)
+        except OSError:
+            continue
+
+
+def thaw_canonical(root: Path) -> None:
+    """Restore user-write on tracked canonical files."""
+    root = Path(root)
+    for path in _tracked_files(root):
+        try:
+            path.chmod(path.stat().st_mode | stat.S_IWRITE)
+        except OSError:
+            continue
+
+
 def start(root: Path, *, portrait: str = "") -> dict[str, Any]:
+    """Open a worktree. Tracked canonical files become read-only until finish or abandon."""
     state = status(root)
     root = Path(state["root"])
     key = str(state["key"])
@@ -427,6 +465,11 @@ def start(root: Path, *, portrait: str = "") -> dict[str, Any]:
         raise ChainBroken("hook is not installed; re-enroll")
     existing = load_task(key)
     if existing and Path(str(existing.get("worktree") or "")).is_dir():
+        try:
+            freeze_canonical(root)
+        except Exception:
+            thaw_canonical(root)
+            raise
         return status(root)
     if existing:
         save_task(key, None)
@@ -451,6 +494,11 @@ def start(root: Path, *, portrait: str = "") -> dict[str, Any]:
             "verify": None,
         },
     )
+    try:
+        freeze_canonical(root)
+    except Exception:
+        thaw_canonical(root)
+        raise
     usage_note(root, "ship", 2, "help", "opened")
     return status(root)
 
@@ -633,6 +681,23 @@ def finish(root: Path) -> dict[str, Any]:
     if critic_block:
         usage_note(root, "ship", 6, "block", critic_block)
         raise ChainBroken(critic_block)
+    # Probe/critic refuse keeps freeze (task still open). Thaw only once git must write canonical.
+    thaw_canonical(root)
+    try:
+        return _finish_after_thaw(root, key, state, task, worktree)
+    except Exception:
+        if load_task(key):
+            freeze_canonical(root)
+        raise
+
+
+def _finish_after_thaw(
+    root: Path,
+    key: str,
+    state: dict[str, Any],
+    task: dict[str, Any],
+    worktree: Path,
+) -> dict[str, Any]:
     git(worktree, "add", "-A")
     if git(worktree, "status", "--porcelain", check=False):
         first_line = (str(task.get("portrait") or "").strip().splitlines() or [""])[0][:70]
@@ -691,10 +756,14 @@ def abandon(root: Path) -> dict[str, Any]:
     root = Path(state["root"])
     key = str(state["key"])
     task = load_task(key)
+    thaw_canonical(root)
     if not task:
         return status(root)
-    _cleanup(root, task)
-    save_task(key, None)
+    try:
+        _cleanup(root, task)
+        save_task(key, None)
+    finally:
+        thaw_canonical(root)
     return status(root)
 
 
