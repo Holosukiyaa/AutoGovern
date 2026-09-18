@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -275,6 +276,12 @@ def insert(
     }
     blob["probes"].append(row)
     _save(path, blob)
+    try:
+        from .store import upsert_probe
+
+        upsert_probe(repo, _public_row(row, full=False))
+    except Exception:
+        pass
     return {
         "schema": SCHEMA,
         "id": probe_id,
@@ -292,6 +299,66 @@ def _public_row(row: dict[str, Any], *, full: bool) -> dict[str, Any]:
     if full:
         return dict(row)
     return {key: row[key] for key in _WORKER_KEYS if key in row}
+
+
+_PATH_LINE = re.compile(r"([\w./\\-]+):(\d+)")
+
+
+def _line_at(tree: Path, rel: str, lineno: int) -> str:
+    path = Path(tree) / rel.replace("\\", "/")
+    if not path.is_file():
+        return ""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    if lineno < 1 or lineno > len(lines):
+        return ""
+    return str(lines[lineno - 1] or "").strip()
+
+
+def plant_from_reject(root: Path, *, items: Any, tree: Path) -> list[str]:
+    """Ship autonomy: critic reject with path:line becomes a must_exclude pin. Heal does not call this."""
+    planted: list[str] = []
+    if not isinstance(items, list):
+        return planted
+    repo = real_root(root)
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status") or "").strip().casefold()
+        if status not in {"fail", "failed"}:
+            continue
+        evidence = str(item.get("evidence") or "").strip()
+        match = _PATH_LINE.search(evidence)
+        if not match:
+            continue
+        rel = match.group(1).replace("\\", "/")
+        lineno = int(match.group(2))
+        snippet = _line_at(Path(tree), rel, lineno)
+        if not snippet:
+            continue
+        comment = str(item.get("comment") or "").strip()
+        fragment = comment or f"{rel}:{lineno} must not keep this defect"
+        evidence_text = f"{evidence} {comment} critic-reject auto-plant".strip()
+        if len(evidence_text) < MIN_EVIDENCE:
+            evidence_text = (evidence_text + " " + "observed-in-worktree")[:].strip()
+            if len(evidence_text) < MIN_EVIDENCE:
+                evidence_text = evidence_text + " " * (MIN_EVIDENCE - len(evidence_text))
+        probe_id = "auto-" + hashlib.sha256(f"{rel}:{lineno}:{snippet}".encode("utf-8")).hexdigest()[:12]
+        try:
+            insert(
+                repo,
+                observation={"kind": "text_in_file", "path": rel, "must_exclude": snippet},
+                exam_fragment=fragment,
+                evidence=evidence_text,
+                area=[rel],
+                id=probe_id,
+            )
+        except ChainBroken:
+            continue
+        planted.append(probe_id)
+    return planted
 
 
 def missing_fragments(root: Path, red_ids: list[str]) -> list[str]:

@@ -592,6 +592,12 @@ def verify(root: Path) -> dict[str, Any]:
             }
             if raw.get("model"):
                 critic["model"] = raw["model"]
+            if str(raw.get("outcome") or "") == "rejected":
+                from .probe import plant_from_reject
+
+                record["probes_planted"] = plant_from_reject(
+                    enrolled, items=raw.get("items"), tree=worktree
+                )
         except Exception as exc:
             critic = {
                 "outcome": "unavailable",
@@ -629,6 +635,7 @@ def verify(root: Path) -> dict[str, Any]:
     out["probe_red"] = list(record["probe_red"])
     out["missing"] = list(record["missing"])
     out["critic"] = critic
+    out["probes_planted"] = list(record.get("probes_planted") or [])
     try:
         from .lift import run as lift_run
 

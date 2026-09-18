@@ -16,6 +16,7 @@ from ag.critic import config_path, log_path, report_path
 from ag.loop import abandon, enroll, finish, start, status, thaw_canonical, unenroll, verify
 from ag.managed import ChainBroken, project_key, real_root
 from ag.mcp import TOOLS, _call
+from ag.gui import write_dashboard
 from ag.probe import insert, list_probes
 
 PY = sys.executable
@@ -553,6 +554,43 @@ class LoopTests(unittest.TestCase):
         self.assertIn("rejected", text)
         self.assertEqual(before, _git(self.root, "rev-parse", "HEAD"))
         self.assertFalse((self.root / "keep.txt").exists())
+
+    def test_reject_plants_probe_and_gui_lists_fragment(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
+        self._enable_critic()
+        worktree = Path(str(start(self.root, portrait="keep file")["worktree"]))
+        (worktree / "keep.txt").write_text("bad-marker-line\n", encoding="utf-8")
+        fake = _FakeHTTP(
+            _chat_payload(
+                {
+                    "verdict": "reject",
+                    "items": [
+                        {
+                            "name": "exam",
+                            "status": "fail",
+                            "evidence": "keep.txt:1",
+                            "comment": "drop the bad marker",
+                        }
+                    ],
+                    "summary": "reject",
+                }
+            )
+        )
+        with patch("urllib.request.urlopen", fake):
+            checked = verify(self.root)
+        planted = checked.get("probes_planted") or []
+        self.assertTrue(planted)
+        listed = list_probes(self.root, full=False)
+        public = json.dumps(listed)
+        self.assertNotIn("must_exclude", public)
+        self.assertNotIn("observation", public)
+        self.assertIn("drop the bad marker", [row.get("exam_fragment") for row in listed["probes"]])
+        page = write_dashboard(self.root, browse=False).read_text(encoding="utf-8")
+        self.assertIn("drop the bad marker", page)
+        self.assertIn("<h1>probes</h1>", page)
+        self.assertNotIn("must_exclude", page)
+        with self.assertRaises(ChainBroken):
+            finish(self.root)
 
     def test_verify_critic_network_fail_fails_product_and_refuses_finish(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])

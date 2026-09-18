@@ -40,6 +40,18 @@ def connect(root: Path) -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS probe (
+            id TEXT PRIMARY KEY,
+            state TEXT NOT NULL DEFAULT 'armed',
+            quiet_count INTEGER NOT NULL DEFAULT 0,
+            ttl_quiet_loops INTEGER NOT NULL DEFAULT 10,
+            area_json TEXT NOT NULL DEFAULT '[]',
+            exam_fragment TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
     conn.commit()
     return conn
 
@@ -116,6 +128,58 @@ def list_critic_events(root: Path, limit: int = 20) -> list[dict[str, Any]]:
     if cap > 0:
         return events[-cap:]
     return events
+
+
+def upsert_probe(root: Path, row: dict[str, Any]) -> None:
+    conn = connect(root)
+    try:
+        conn.execute(
+            """
+            INSERT INTO probe (id, state, quiet_count, ttl_quiet_loops, area_json, exam_fragment)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                state=excluded.state,
+                quiet_count=excluded.quiet_count,
+                ttl_quiet_loops=excluded.ttl_quiet_loops,
+                area_json=excluded.area_json,
+                exam_fragment=excluded.exam_fragment
+            """,
+            (
+                str(row.get("id") or ""),
+                str(row.get("state") or "armed"),
+                int(row.get("quiet_count") or 0),
+                int(row.get("ttl_quiet_loops") or 10),
+                json.dumps(row.get("area") or [], ensure_ascii=False),
+                str(row.get("exam_fragment") or ""),
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_probe_rows(root: Path) -> list[dict[str, Any]]:
+    conn = connect(root)
+    try:
+        rows = conn.execute(
+            "SELECT id, state, quiet_count, ttl_quiet_loops, area_json, exam_fragment FROM probe ORDER BY id"
+        ).fetchall()
+    finally:
+        conn.close()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        area = json.loads(row["area_json"] or "[]")
+        out.append(
+            {
+                "id": row["id"],
+                "state": row["state"],
+                "quiet_count": int(row["quiet_count"]),
+                "ttl_quiet_loops": int(row["ttl_quiet_loops"]),
+                "area": area if isinstance(area, list) else [],
+                "exam_fragment": row["exam_fragment"],
+            }
+        )
+    return out
 
 
 def event_count(root: Path) -> int:
