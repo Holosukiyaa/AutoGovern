@@ -548,7 +548,7 @@ def append_log(
     model: str = "",
     probe_red: list[str] | None = None,
     allow_same_family: bool = False,
-) -> None:
+) -> str:
     try:
         row: dict[str, Any] = {
             "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -571,14 +571,18 @@ def append_log(
             row["allow_same_family"] = True
         path = log_path(root)
         path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            row_id = insert_critic_event(root, row)
+            report_id = f"cr-{row_id}" if row_id else ""
+        except Exception:
+            report_id = "cr-" + _sha256_text(row["ts"] + row["outcome"] + row.get("exam_sha256", ""))[:12]
+        if report_id:
+            row["report_id"] = report_id
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-        try:
-            insert_critic_event(root, row)
-        except Exception:
-            pass
+        return report_id
     except OSError:
-        return
+        return ""
 
 
 def list_log(root: Path, limit: int = DEFAULT_LOG_LIMIT) -> dict[str, Any]:
@@ -647,7 +651,7 @@ def _result(
         blob["store"] = _write_report(root, blob)
     except OSError:
         blob["store"] = ""
-    append_log(
+    blob["report_id"] = append_log(
         root,
         outcome=outcome,
         reason=reason,

@@ -188,17 +188,26 @@ def _critic_record(verify: dict[str, Any] | None) -> dict[str, Any]:
     return critic if isinstance(critic, dict) else {}
 
 
+def _critic_report_id(verify: dict[str, Any] | None) -> str:
+    critic = _critic_record(verify)
+    if not critic:
+        return ""
+    return str(critic.get("report_id") or "").strip()
+
+
 def _critic_block_message(verify: dict[str, Any] | None) -> str:
     critic = _critic_record(verify)
     if not critic:
         return ""
+    rid = _critic_report_id(verify)
+    suffix = f"; report_id={rid}" if rid else ""
     outcome = str(critic.get("outcome") or "").strip().casefold()
     if outcome == "rejected":
-        return "critic rejected; will not deliver"
+        return "critic rejected; will not deliver" + suffix
     if outcome == "unavailable" and bool(critic.get("configured")):
         reason = str(critic.get("reason") or "").strip()
         if reason != "not-configured":
-            return "critic unavailable; will not deliver"
+            return "critic unavailable; will not deliver" + suffix
     return ""
 
 
@@ -403,9 +412,14 @@ def status(root: Path) -> dict[str, Any]:
         "process": process,
         "product": product,
         "reminder": "process complete is not product passed",
+        "worker_note": (
+            "After ag_verify you receive critic.report_id (passed, rejected, or unavailable). "
+            "Cite that id when you close the round. You do not receive the critic report body."
+        ),
         "task": task,
         "portrait": (task or {}).get("portrait") if task else "",
         "worktree": (task or {}).get("worktree") if task else "",
+        "critic_report_id": _critic_report_id(verify if isinstance(verify, dict) else None),
     }
     try:
         from .see import run as see_run
@@ -589,6 +603,7 @@ def verify(root: Path) -> dict[str, Any]:
                 "store": str(raw.get("store") or ""),
                 "prompt_version": str(raw.get("prompt_version") or ""),
                 "configured": True,
+                "report_id": str(raw.get("report_id") or ""),
             }
             if raw.get("model"):
                 critic["model"] = raw["model"]
@@ -606,7 +621,7 @@ def verify(root: Path) -> dict[str, Any]:
                 "configured": True,
             }
     if not logged:
-        append_log(
+        critic["report_id"] = append_log(
             enrolled,
             outcome=str(critic.get("outcome") or "unavailable"),
             reason=str(critic.get("reason") or ""),
@@ -753,6 +768,7 @@ def _finish_after_thaw(
         "product": product,
         "reminder": "process complete is not product passed",
         "portrait": portrait,
+        "critic_report_id": _critic_report_id(task.get("verify") if isinstance(task.get("verify"), dict) else None),
         "head": git(root, "rev-parse", "HEAD"),
         "hazards": status(root)["hazards"],
     }

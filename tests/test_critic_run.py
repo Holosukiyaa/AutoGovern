@@ -351,6 +351,8 @@ class CriticRunTests(unittest.TestCase):
         listed = json.loads(out)
         self.assertEqual(1, len(listed["entries"]))
         self.assertEqual("rejected", listed["entries"][0]["outcome"])
+        self.assertTrue(str(listed["entries"][0].get("report_id") or "").startswith("cr-"))
+        self.assertTrue(str(second.get("report_id") or "").startswith("cr-"))
         self.assertEqual(2, event_count(self.root))
         db = db_path(self.root)
         self.assertTrue(db.is_relative_to(self.home))

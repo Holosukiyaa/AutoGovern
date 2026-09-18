@@ -494,8 +494,12 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(1, len(rows))
         self.assertEqual("unavailable", rows[0]["outcome"])
         self.assertEqual("not-configured", rows[0]["reason"])
+        self.assertTrue(str(rows[0].get("report_id") or "").startswith("cr-"))
+        rid = str(critic.get("report_id") or "")
+        self.assertTrue(rid.startswith("cr-"), rid)
         done = finish(self.root)
         self.assertEqual("passed", done["product"])
+        self.assertEqual(rid, done.get("critic_report_id"))
 
     def test_verify_empty_portrait_skips_http(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
@@ -542,6 +546,8 @@ class LoopTests(unittest.TestCase):
         with patch("urllib.request.urlopen", fake):
             checked = verify(self.root)
         self.assertEqual("rejected", (checked.get("critic") or {}).get("outcome"))
+        rid = str((checked.get("critic") or {}).get("report_id") or "")
+        self.assertTrue(rid.startswith("cr-"), rid)
         self.assertEqual("failed", checked["product"])
         self.assertTrue(checked["verified_tree"])
         rows = [json.loads(line) for line in log_path(self.root).read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -552,6 +558,7 @@ class LoopTests(unittest.TestCase):
         text = str(raised.exception).lower()
         self.assertIn("critic", text)
         self.assertIn("rejected", text)
+        self.assertIn(rid.lower(), text)
         self.assertEqual(before, _git(self.root, "rev-parse", "HEAD"))
         self.assertFalse((self.root / "keep.txt").exists())
 
@@ -703,7 +710,9 @@ class LoopTests(unittest.TestCase):
 
     def test_start_freezes_canonical_tracked_file_worktree_writable(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
-        worktree = Path(str(start(self.root)["worktree"]))
+        opened = start(self.root)
+        self.assertIn("critic.report_id", str(opened.get("worker_note") or ""))
+        worktree = Path(str(opened["worktree"]))
         with self.assertRaises(OSError):
             (self.root / "ok.py").write_text("blocked\n", encoding="utf-8")
         (worktree / "ok.py").write_text("x = 1\n# wt\n", encoding="utf-8")

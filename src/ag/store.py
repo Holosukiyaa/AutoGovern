@@ -56,10 +56,10 @@ def connect(root: Path) -> sqlite3.Connection:
     return conn
 
 
-def insert_critic_event(root: Path, row: dict[str, Any]) -> None:
+def insert_critic_event(root: Path, row: dict[str, Any]) -> int:
     conn = connect(root)
     try:
-        conn.execute(
+        cur = conn.execute(
             """
             INSERT INTO critic_event (
                 ts, outcome, reason, configured, prompt_version, store,
@@ -84,6 +84,7 @@ def insert_critic_event(root: Path, row: dict[str, Any]) -> None:
             ),
         )
         conn.commit()
+        return int(cur.lastrowid or 0)
     finally:
         conn.close()
 
@@ -92,6 +93,7 @@ def _row_to_event(row: sqlite3.Row) -> dict[str, Any]:
     items = json.loads(row["items_json"] or "[]")
     probe_red = json.loads(row["probe_red_json"] or "[]")
     out: dict[str, Any] = {
+        "report_id": f"cr-{row['id']}",
         "ts": row["ts"],
         "outcome": row["outcome"],
         "reason": row["reason"],

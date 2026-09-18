@@ -38,6 +38,7 @@ def write_dashboard(root: Path, *, browse: bool = True) -> Path:
         )
         rows.append(
             "<tr>"
+            f"<td>{_cell(event.get('report_id'))}</td>"
             f"<td>{_cell(event.get('ts'))}</td>"
             f"<td>{_cell(event.get('outcome'))}</td>"
             f"<td>{_cell(event.get('model'))}</td>"
@@ -46,7 +47,7 @@ def write_dashboard(root: Path, *, browse: bool = True) -> Path:
             f"<td>{_cell(item_txt)}</td>"
             "</tr>"
         )
-    body = "\n".join(rows) or "<tr><td colspan='6'>no critic_event rows</td></tr>"
+    body = "\n".join(rows) or "<tr><td colspan='7'>no critic_event rows</td></tr>"
     listed = list_probes(repo, full=False)
     for probe in listed.get("probes") or []:
         if isinstance(probe, dict) and probe.get("id"):
@@ -80,7 +81,7 @@ th {{ background: #f4f4f4; }}
 <h1>ag critic log</h1>
 <p class="meta">root={_cell(repo)} db={_cell(db_path(repo))} — sqlite critic_event + probes, not the old strategy poster</p>
 <table>
-<thead><tr><th>ts</th><th>outcome</th><th>model</th><th>task</th><th>reason</th><th>items</th></tr></thead>
+<thead><tr><th>report_id</th><th>ts</th><th>outcome</th><th>model</th><th>task</th><th>reason</th><th>items</th></tr></thead>
 <tbody>
 {body}
 </tbody>
