@@ -6,7 +6,7 @@ import sys
 from typing import Any
 
 from . import __version__
-from . import catalog
+from . import catalog, gui
 from .lanes import call as lane_call
 from .lanes import tools as lane_tools
 from .managed import ChainBroken
@@ -29,9 +29,10 @@ INSTRUCTIONS = (
     "Insert a probe only via ag_probe_insert with already-seen evidence; ag_critic_pack is an exam pack, not a worker ticket. "
     "ag_critic_run does one read-only chat on that pack (no tools). "
     "Path-hit probe red, critic rejected, or configured critic unavailable (other than not-configured) refuse finish. "
-    "ag_verify may attach one read-only critic."
+    "ag_verify may attach one read-only critic. "
+    "ag_gui writes HTML from AG_HOME sqlite critic_event rows, not the old strategy poster."
 )
-TOOLS = lane_tools() + catalog.TOOLS
+TOOLS = lane_tools() + gui.TOOLS + catalog.TOOLS
 
 
 def _ok(req_id: Any, result: Any) -> dict[str, Any]:
@@ -79,6 +80,8 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    if any(str(item["name"]) == name for item in gui.TOOLS):
+        return gui.call(name, args)
     if any(str(item["name"]) == name for item in catalog.TOOLS):
         return catalog.call(name, args)
     return lane_call(name, args)

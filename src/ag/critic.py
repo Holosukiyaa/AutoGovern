@@ -18,6 +18,7 @@ from typing import Any
 
 from .managed import ChainBroken, ag_home, project_key, real_root
 from .probe import evaluate as evaluate_probes
+from .store import event_count, insert_critic_event, list_critic_events
 
 PACK_SCHEMA = "ag.critic-pack.v1"
 RUN_SCHEMA = "ag.critic-run.v1"
@@ -572,32 +573,46 @@ def append_log(
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        try:
+            insert_critic_event(root, row)
+        except Exception:
+            pass
     except OSError:
         return
 
 
 def list_log(root: Path, limit: int = DEFAULT_LOG_LIMIT) -> dict[str, Any]:
     repo = real_root(root)
-    path = log_path(repo)
-    entries: list[dict[str, Any]] = []
-    if path.is_file():
-        try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            lines = []
-        for line in lines:
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(row, dict):
-                entries.append(row)
     cap = int(limit) if limit else DEFAULT_LOG_LIMIT
-    if cap > 0:
-        entries = entries[-cap:]
+    try:
+        if event_count(repo) == 0:
+            _backfill_jsonl(repo)
+        entries = list_critic_events(repo, limit=cap)
+    except Exception:
+        entries = []
     return {"schema": LOG_SCHEMA, "root": str(repo), "entries": entries}
+
+
+def _backfill_jsonl(root: Path) -> None:
+    path = log_path(root)
+    if not path.is_file():
+        return
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict):
+            try:
+                insert_critic_event(root, row)
+            except OSError:
+                return
 
 
 def _result(

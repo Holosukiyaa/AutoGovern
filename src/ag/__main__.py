@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from .loop import abandon, enroll, finish, hook_main, start, status, unenroll, verify
+from .gui import write_dashboard
 from .heal import run as heal_run
 from .lift import run as lift_run
 from .see import run as see_run
@@ -73,6 +74,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("lift", help="lift advice; does not refuse finish").add_argument("root")
     sub.add_parser("heal", help="heal findings; does not refuse finish").add_argument("root")
     sub.add_parser("see", help="see snapshot; does not refuse finish").add_argument("root")
+    gui_p = sub.add_parser("gui", help="open HTML table of critic sqlite rows")
+    gui_p.add_argument("root")
     plug_p = sub.add_parser("plug", help="list/on/off a pluggable strategy by lane-seq")
     plug_p.add_argument("action", choices=["list", "on", "off"])
     plug_p.add_argument("root")
@@ -141,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
     log_c = sub.add_parser(
         "critic-log",
         help="read-only critic audit log; newest last",
-        description="Read-only. Newest last. Default --limit 20. Log: AG_HOME/projects/<key>/critic.jsonl",
+        description="Read-only. Newest last. Default --limit 20. SQLite AG_HOME/projects/<key>/ag.sqlite plus jsonl backup.",
     )
     log_c.add_argument("root")
     log_c.add_argument("--limit", type=int, default=20, help="newest last; default 20")
@@ -156,6 +159,10 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "hook":
             return hook_main()
+        if args.cmd == "gui":
+            path = write_dashboard(Path(args.root), browse=True)
+            print(str(path))
+            return 0
         if args.cmd == "plug":
             root = Path(args.root)
             if args.action == "list":

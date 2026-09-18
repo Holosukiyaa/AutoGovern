@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ag.__main__ import main
 from ag.critic import config_path, log_path, report_path
+from ag.store import db_path, event_count, list_critic_events
 from ag.see import call
 
 EVIDENCE = "already-seen observation text from this run"
@@ -350,6 +351,21 @@ class CriticRunTests(unittest.TestCase):
         listed = json.loads(out)
         self.assertEqual(1, len(listed["entries"]))
         self.assertEqual("rejected", listed["entries"][0]["outcome"])
+        self.assertEqual(2, event_count(self.root))
+        db = db_path(self.root)
+        self.assertTrue(db.is_relative_to(self.home))
+        self.assertFalse(any(path.suffix == ".sqlite" for path in self.root.rglob("*")))
+        sql_rows = list_critic_events(self.root, limit=10)
+        self.assertEqual(["passed", "rejected"], [row["outcome"] for row in sql_rows])
+        from ag.gui import write_dashboard
+
+        html_path = write_dashboard(self.root, browse=False)
+        html = html_path.read_text(encoding="utf-8")
+        self.assertIn("rejected", html)
+        self.assertIn("passed", html)
+        self.assertIn("critic_event", html)
+        self.assertNotIn("大街上盖房子", html)
+        self.assertTrue(html_path.is_relative_to(self.home))
 
 
 if __name__ == "__main__":
