@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from unittest.mock import patch
 
-from ag.critic import config_path, report_path
+from ag.critic import config_path, log_path, report_path
 from ag.loop import abandon, enroll, finish, start, status, unenroll, verify
 from ag.managed import ChainBroken, project_key, real_root
 from ag.mcp import TOOLS, _call
@@ -155,6 +155,7 @@ class LoopTests(unittest.TestCase):
                 "ag_probe_list",
                 "ag_critic_pack",
                 "ag_critic_run",
+                "ag_critic_log",
                 "ag_gui",
                 "ag_plug",
             ],
@@ -440,6 +441,10 @@ class LoopTests(unittest.TestCase):
         self.assertFalse(critic.get("configured"))
         self.assertEqual([], fake.requests)
         self.assertEqual("passed", checked["product"])
+        rows = [json.loads(line) for line in log_path(self.root).read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertEqual(1, len(rows))
+        self.assertEqual("unavailable", rows[0]["outcome"])
+        self.assertEqual("not-configured", rows[0]["reason"])
         done = finish(self.root)
         self.assertEqual("passed", done["product"])
 
@@ -456,6 +461,9 @@ class LoopTests(unittest.TestCase):
         self.assertTrue((checked.get("critic") or {}).get("configured"))
         self.assertEqual([], fake.requests)
         self.assertEqual("failed", checked["product"])
+        rows = [json.loads(line) for line in log_path(self.root).read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertEqual(1, len(rows))
+        self.assertIn("no-exam", rows[0]["reason"])
         with self.assertRaises(ChainBroken) as raised:
             finish(self.root)
         self.assertIn("unavailable", str(raised.exception).lower())
@@ -487,6 +495,9 @@ class LoopTests(unittest.TestCase):
         self.assertEqual("rejected", (checked.get("critic") or {}).get("outcome"))
         self.assertEqual("failed", checked["product"])
         self.assertTrue(checked["verified_tree"])
+        rows = [json.loads(line) for line in log_path(self.root).read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertEqual(1, len(rows))
+        self.assertEqual("rejected", rows[0]["outcome"])
         with self.assertRaises(ChainBroken) as raised:
             finish(self.root)
         text = str(raised.exception).lower()

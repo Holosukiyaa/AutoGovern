@@ -5,12 +5,14 @@ Not a worker ticket. Does not write product files or refuse finish.
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import os
 import re
 import subprocess
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +26,9 @@ PROMPT_NAME = "critic_prompt.md"
 PROMPT_VERSION = "ag.critic.v1"
 CONFIG_NAME = "critic.json"
 REPORT_NAME = "critic-last.json"
+LOG_NAME = "critic.jsonl"
+LOG_SCHEMA = "ag.critic-log.v1"
+DEFAULT_LOG_LIMIT = 20
 DEFAULT_TIMEOUT = 60
 DEFAULT_API_KEY_ENV = "AG_CRITIC_API_KEY"
 _EVIDENCE_REF = re.compile(r"[\w./\\-一-鿿]+:\d+|portrait:\S+|probe:\S+")
@@ -61,6 +66,18 @@ TOOLS = [
                 "exam_file": {"type": "string"},
                 "base": {"type": "string"},
                 "head": {"type": "string"},
+            },
+            "required": ["root"],
+        },
+    },
+    {
+        "name": "ag_critic_log",
+        "description": "Read-only critic audit log. Newest last. Does not delete or refuse finish.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "root": {"type": "string"},
+                "limit": {"type": "integer"},
             },
             "required": ["root"],
         },
@@ -270,6 +287,10 @@ def report_path(root: Path) -> Path:
     return ag_home() / "projects" / project_key(real_root(root)) / REPORT_NAME
 
 
+def log_path(root: Path) -> Path:
+    return ag_home() / "projects" / project_key(real_root(root)) / LOG_NAME
+
+
 def _truthy(raw: str) -> bool:
     return raw.strip().casefold() in {"1", "true", "yes", "on"}
 
@@ -425,6 +446,93 @@ def _write_report(root: Path, blob: dict[str, Any]) -> str:
     return str(path)
 
 
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def _trim_items(items: Any) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    if not isinstance(items, list):
+        return out
+    for item in items[:20]:
+        if not isinstance(item, dict):
+            continue
+        out.append(
+            {
+                "name": str(item.get("name") or ""),
+                "status": str(item.get("status") or ""),
+                "evidence": str(item.get("evidence") or ""),
+                "comment": str(item.get("comment") or ""),
+            }
+        )
+    return out
+
+
+def append_log(
+    root: Path,
+    *,
+    outcome: str,
+    reason: str,
+    configured: bool,
+    prompt_version: str = PROMPT_VERSION,
+    store: str = "",
+    exam: str = "",
+    pack: dict[str, Any] | None = None,
+    items: Any = None,
+    task_id: str = "",
+    model: str = "",
+    probe_red: list[str] | None = None,
+) -> None:
+    try:
+        row: dict[str, Any] = {
+            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "outcome": outcome,
+            "reason": reason,
+            "configured": bool(configured),
+            "prompt_version": prompt_version or PROMPT_VERSION,
+            "store": store,
+            "exam_sha256": _sha256_text(exam),
+            "pack_sha256": _sha256_text(json.dumps(pack, ensure_ascii=False, sort_keys=True)) if pack is not None else "",
+            "items": _trim_items(items),
+        }
+        if task_id:
+            row["task_id"] = task_id
+        if model:
+            row["model"] = model
+        if probe_red:
+            row["probe_red"] = [str(item) for item in probe_red if str(item)]
+        path = log_path(root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except OSError:
+        return
+
+
+def list_log(root: Path, limit: int = DEFAULT_LOG_LIMIT) -> dict[str, Any]:
+    repo = real_root(root)
+    path = log_path(repo)
+    entries: list[dict[str, Any]] = []
+    if path.is_file():
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, dict):
+                entries.append(row)
+    cap = int(limit) if limit else DEFAULT_LOG_LIMIT
+    if cap > 0:
+        entries = entries[-cap:]
+    return {"schema": LOG_SCHEMA, "root": str(repo), "entries": entries}
+
+
 def _result(
     root: Path,
     *,
@@ -434,6 +542,10 @@ def _result(
     items: list[Any] | None = None,
     summary: str = "",
     model: str | None = None,
+    configured: bool = False,
+    exam: str = "",
+    task_id: str = "",
+    probe_red: list[str] | None = None,
 ) -> dict[str, Any]:
     blob: dict[str, Any] = {
         "schema": RUN_SCHEMA,
@@ -444,10 +556,28 @@ def _result(
         "prompt_version": PROMPT_VERSION,
         "pack": pack,
         "store": "",
+        "configured": bool(configured),
     }
     if model:
         blob["model"] = model
-    blob["store"] = _write_report(root, blob)
+    try:
+        blob["store"] = _write_report(root, blob)
+    except OSError:
+        blob["store"] = ""
+    append_log(
+        root,
+        outcome=outcome,
+        reason=reason,
+        configured=bool(configured),
+        prompt_version=PROMPT_VERSION,
+        store=str(blob.get("store") or ""),
+        exam=exam,
+        pack=pack,
+        items=items,
+        task_id=task_id,
+        model=str(model or ""),
+        probe_red=probe_red,
+    )
     return blob
 
 
@@ -459,13 +589,22 @@ def critic_run(
     base: str = "",
     head: str = "",
     tree: Path | None = None,
+    task_id: str = "",
+    probe_red: list[str] | None = None,
 ) -> dict[str, Any]:
     packed = pack(root, exam=exam, exam_file=exam_file, base=base, head=head, tree=tree)
     cfg = load_config(root)
+    configured = bool(cfg.get("error") or _configured(cfg))
+    extra = {
+        "configured": configured,
+        "exam": str(packed.get("exam") or ""),
+        "task_id": task_id,
+        "probe_red": probe_red,
+    }
     if cfg.get("error"):
-        return _result(root, outcome="unavailable", reason=str(cfg["error"]), pack=packed)
+        return _result(root, outcome="unavailable", reason=str(cfg["error"]), pack=packed, **extra)
     if not _configured(cfg):
-        return _result(root, outcome="unavailable", reason="not-configured", pack=packed)
+        return _result(root, outcome="unavailable", reason="not-configured", pack=packed, **extra)
     messages = [
         {"role": "system", "content": prompt_text()},
         {"role": "user", "content": json.dumps(packed, ensure_ascii=False)},
@@ -474,7 +613,14 @@ def critic_run(
         raw = complete_chat(cfg, messages)
         verdict = parse_verdict(raw)
     except RuntimeError as exc:
-        return _result(root, outcome="unavailable", reason=str(exc), pack=packed, model=str(cfg.get("model") or ""))
+        return _result(
+            root,
+            outcome="unavailable",
+            reason=str(exc),
+            pack=packed,
+            model=str(cfg.get("model") or ""),
+            **extra,
+        )
     except ValueError as exc:
         return _result(
             root,
@@ -482,6 +628,7 @@ def critic_run(
             reason=f"void: {exc} (作废)",
             pack=packed,
             model=str(cfg.get("model") or ""),
+            **extra,
         )
     problems = verdict_problems(verdict)
     items = verdict.get("items") if isinstance(verdict.get("items"), list) else []
@@ -496,6 +643,7 @@ def critic_run(
             items=items,
             summary=summary,
             model=model,
+            **extra,
         )
     raw_verdict = str(verdict.get("verdict") or verdict.get("outcome") or "").strip().casefold()
     outcome = "passed" if raw_verdict in {"pass", "passed"} else "rejected"
@@ -507,6 +655,7 @@ def critic_run(
         items=items,
         summary=summary,
         model=model,
+        **extra,
     )
 
 
@@ -522,5 +671,8 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return pack(root, **common)
     if name == "ag_critic_run":
         return critic_run(root, **common)
+    if name == "ag_critic_log":
+        limit = args.get("limit")
+        return list_log(root, limit=int(limit) if limit not in (None, "") else DEFAULT_LOG_LIMIT)
     raise ChainBroken(f"see has no tool {name}")
 

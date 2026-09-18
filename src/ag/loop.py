@@ -504,24 +504,34 @@ def verify(root: Path) -> dict[str, Any]:
     record["probe_red"] = [
         str(row.get("id") or "") for row in probe_results if row.get("verdict") == "red" and row.get("id")
     ]
-    from .critic import _configured, critic_run, load_config
+    from .critic import _configured, append_log, critic_run, load_config
 
     enrolled = Path(state["root"])
     cfg = load_config(enrolled)
     configured = bool(cfg.get("error") or _configured(cfg))
     portrait = str(task.get("portrait") or "").strip()
+    task_id = str(task.get("id") or "")
+    probe_red = list(record["probe_red"])
     critic: dict[str, Any] = {
         "outcome": "unavailable",
         "reason": "not-configured",
         "store": "",
         "configured": configured,
     }
+    logged = False
     if not portrait:
         if configured:
             critic["reason"] = str(cfg.get("error") or "no-exam")
     elif configured:
         try:
-            raw = critic_run(enrolled, exam=portrait, tree=worktree)
+            raw = critic_run(
+                enrolled,
+                exam=portrait,
+                tree=worktree,
+                task_id=task_id,
+                probe_red=probe_red,
+            )
+            logged = True
             critic = {
                 "outcome": str(raw.get("outcome") or "unavailable"),
                 "reason": str(raw.get("reason") or ""),
@@ -538,6 +548,17 @@ def verify(root: Path) -> dict[str, Any]:
                 "store": "",
                 "configured": True,
             }
+    if not logged:
+        append_log(
+            enrolled,
+            outcome=str(critic.get("outcome") or "unavailable"),
+            reason=str(critic.get("reason") or ""),
+            configured=bool(critic.get("configured")),
+            store=str(critic.get("store") or ""),
+            exam=portrait,
+            task_id=task_id,
+            probe_red=probe_red,
+        )
     record["critic"] = critic
     digest = tree_digest(worktree)
     task["verify"] = record

@@ -129,6 +129,13 @@ def main(argv: list[str] | None = None) -> int:
     run_exam.add_argument("--exam-file", help="path to exam text")
     run_c.add_argument("--base", default="", help="diff base ref; default is working tree vs HEAD")
     run_c.add_argument("--head", default="", help="diff head ref; requires --base")
+    log_c = sub.add_parser(
+        "critic-log",
+        help="read-only critic audit log; newest last",
+        description="Read-only. Newest last. Default --limit 20. Log: AG_HOME/projects/<key>/critic.jsonl",
+    )
+    log_c.add_argument("root")
+    log_c.add_argument("--limit", type=int, default=20, help="newest last; default 20")
     sub.add_parser("critic-prompt", help="print the read-only critic startup prompt")
     sub.add_parser("hook", help="git pre-commit helper")
     args = parser.parse_args(argv)
@@ -190,6 +197,11 @@ def main(argv: list[str] | None = None) -> int:
                     indent=2,
                 )
             )
+            return 0
+        if args.cmd == "critic-log":
+            from .critic import list_log
+
+            print(json.dumps(list_log(Path(args.root), limit=args.limit), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "probe":
             return _probe_main(args)

@@ -13,7 +13,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ag.__main__ import main
-from ag.critic import config_path, report_path
+from ag.critic import config_path, log_path, report_path
 from ag.see import call
 
 EVIDENCE = "already-seen observation text from this run"
@@ -219,6 +219,50 @@ class CriticRunTests(unittest.TestCase):
         self.assertIn("critic.json", text)
         self.assertIn("ag_critic_endpoint", text)
         self.assertIn("critic-last.json", text)
+
+    def test_two_cli_runs_append_jsonl_and_overwrite_last(self) -> None:
+        self._write_config()
+        pass_v = {
+            "verdict": "pass",
+            "items": [{"name": "exam", "status": "pass", "comment": "ok"}],
+            "summary": "pass",
+        }
+        reject_v = {
+            "verdict": "reject",
+            "items": [{"name": "exam", "status": "fail", "evidence": "ok.py:1", "comment": "no"}],
+            "summary": "reject",
+        }
+        fake1 = _FakeHTTP(_chat_payload(pass_v))
+        with patch("urllib.request.urlopen", fake1):
+            code1, out1, err1 = _cli(["critic-run", str(self.root), "--exam", "first exam"])
+        self.assertEqual(0, code1, err1)
+        first = json.loads(out1)
+        fake2 = _FakeHTTP(_chat_payload(reject_v))
+        with patch("urllib.request.urlopen", fake2):
+            code2, out2, err2 = _cli(["critic-run", str(self.root), "--exam", "second exam"])
+        self.assertEqual(0, code2, err2)
+        second = json.loads(out2)
+        log = log_path(self.root)
+        last = report_path(self.root)
+        self.assertTrue(log.is_relative_to(self.home))
+        self.assertFalse(any(path.name == "critic.jsonl" for path in self.root.rglob("*")))
+        rows = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines() if line.strip()]
+        self.assertEqual(2, len(rows))
+        self.assertEqual("passed", rows[0]["outcome"])
+        self.assertEqual("rejected", rows[1]["outcome"])
+        self.assertEqual(64, len(rows[0]["exam_sha256"]))
+        last_blob = json.loads(last.read_text(encoding="utf-8"))
+        self.assertEqual(second["outcome"], last_blob["outcome"])
+        self.assertEqual("rejected", last_blob["outcome"])
+        self.assertNotEqual(first["outcome"], last_blob["outcome"])
+        help_code, help_out, _err = _cli(["critic-log", "--help"])
+        self.assertEqual(0, help_code)
+        self.assertIn("newest last", help_out.lower())
+        code, out, err = _cli(["critic-log", str(self.root), "--limit", "1"])
+        self.assertEqual(0, code, err)
+        listed = json.loads(out)
+        self.assertEqual(1, len(listed["entries"]))
+        self.assertEqual("rejected", listed["entries"][0]["outcome"])
 
 
 if __name__ == "__main__":
