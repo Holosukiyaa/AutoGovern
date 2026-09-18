@@ -24,7 +24,9 @@ INSTRUCTIONS = (
     "ag_gui writes a read-only HTML view; HTML is not a lane and not the core. "
     "ag_lift / ag_see are advice. ag_heal is stacked-door treatment and is NOT on the delivery path: "
     "do not run it until stacked doors are found; it must not become a finish gate. "
-    "ag_plug on/off/list toggles pluggable lane-seq rows; ship core cannot be unplugged."
+    "ag_plug on/off/list toggles pluggable lane-seq rows; ship core cannot be unplugged. "
+    "Read-only critic: do not write product files, do not finish, do not git commit, and do not open a worktree. "
+    "Insert a probe only via ag_probe_insert with already-seen evidence; ag_critic_pack is an exam pack, not a worker ticket."
 )
 TOOLS = lane_tools() + gui.TOOLS + catalog.TOOLS
 

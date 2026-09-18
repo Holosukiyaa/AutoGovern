@@ -15,6 +15,42 @@ from .catalog import plug, plug_list
 from .managed import ChainBroken
 
 
+def _probe_main(args: argparse.Namespace) -> int:
+    from .probe import insert, list_probes, run
+
+    root = Path(args.root)
+    if args.probe_cmd == "insert":
+        print(
+            json.dumps(
+                insert(
+                    root,
+                    observation=args.observation,
+                    exam_fragment=args.exam_fragment,
+                    evidence=args.evidence,
+                    area=args.area,
+                    id=args.id,
+                    ttl_quiet_loops=args.ttl_quiet_loops,
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if args.probe_cmd == "run":
+        print(
+            json.dumps(
+                run(root, paths=args.path, awaken=bool(args.awaken)),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if args.probe_cmd == "list":
+        print(json.dumps(list_probes(root), ensure_ascii=False, indent=2))
+        return 0
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ag")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -41,6 +77,41 @@ def main(argv: list[str] | None = None) -> int:
     plug_p.add_argument("action", choices=["list", "on", "off"])
     plug_p.add_argument("root")
     plug_p.add_argument("code", nargs="?")
+    probe_p = sub.add_parser("probe", help="out-of-tree observation probes (see lane)")
+    probe_sub = probe_p.add_subparsers(dest="probe_cmd", required=True)
+    insert_p = probe_sub.add_parser(
+        "insert",
+        help="insert a probe; duplicate id is refused and the store is left unchanged",
+    )
+    insert_p.add_argument("root")
+    insert_p.add_argument(
+        "--observation",
+        required=True,
+        help="JSON object; kind=command (argv, expect_exit, optional stdout_contains/stderr_contains) or kind=text_in_file (path, must_include and/or must_exclude)",
+    )
+    insert_p.add_argument("--exam-fragment", required=True, help="the exam sentence this probe pins")
+    insert_p.add_argument(
+        "--evidence",
+        required=True,
+        help="already-seen observation text, at least 20 characters; missing or short evidence refuses and writes nothing",
+    )
+    insert_p.add_argument("--area", action="append", required=True, help="repository-relative path; repeatable")
+    insert_p.add_argument("--id", help="optional id; omitted id is content-addressed; duplicate id is refused")
+    insert_p.add_argument("--ttl-quiet-loops", type=int, default=10)
+    run_p = probe_sub.add_parser("run", help="run armed probes; no LLM; archived stay cold unless --awaken and --path hits")
+    run_p.add_argument("root")
+    run_p.add_argument("--path", action="append", help="only run probes whose area hits these paths")
+    run_p.add_argument("--awaken", action="store_true", help="also run archived probes whose area hits --path")
+    list_p = probe_sub.add_parser("list", help="list armed and archived probes")
+    list_p.add_argument("root")
+    pack_p = sub.add_parser("critic-pack", help="read-only exam pack JSON; not a worker ticket")
+    pack_p.add_argument("root")
+    pack_exam = pack_p.add_mutually_exclusive_group(required=True)
+    pack_exam.add_argument("--exam", help="exam text (user words + portrait)")
+    pack_exam.add_argument("--exam-file", help="path to exam text")
+    pack_p.add_argument("--base", default="", help="diff base ref; default is working tree vs HEAD")
+    pack_p.add_argument("--head", default="", help="diff head ref; requires --base")
+    sub.add_parser("critic-prompt", help="print the read-only critic startup prompt")
     sub.add_parser("hook", help="git pre-commit helper")
     args = parser.parse_args(argv)
     try:
@@ -62,6 +133,31 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(json.dumps(plug(root, str(args.code or ""), on=args.action == "on"), ensure_ascii=False, indent=2))
             return 0
+        if args.cmd == "critic-prompt":
+            from .critic import prompt_text
+
+            text = prompt_text()
+            sys.stdout.write(text if text.endswith("\n") else text + "\n")
+            return 0
+        if args.cmd == "critic-pack":
+            from .critic import pack
+
+            print(
+                json.dumps(
+                    pack(
+                        Path(args.root),
+                        exam=args.exam,
+                        exam_file=args.exam_file,
+                        base=args.base,
+                        head=args.head,
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        if args.cmd == "probe":
+            return _probe_main(args)
         root = Path(args.root)
         if args.cmd == "enroll":
             print(json.dumps(enroll(root, test_argv=args.test_argv, note=args.note), ensure_ascii=False, indent=2))

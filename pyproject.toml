@@ -16,4 +16,4 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-ag = ["strategies.sqlite"]
+ag = ["strategies.sqlite", "critic_prompt.md"]

@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from .catalog import list_lane
+from .critic import TOOLS as CRITIC_TOOLS
 from .managed import ag_home, lookup_project, project_key, real_root
+from .probe import TOOLS as PROBE_TOOLS
 
 ID = "see"
 JOB = "看见"
@@ -24,6 +26,8 @@ TOOLS = [
         "description": "Run see strategies as a snapshot. Does not set product or refuse finish.",
         "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}}, "required": ["root"]},
     },
+    *PROBE_TOOLS,
+    *CRITIC_TOOLS,
 ]
 
 
@@ -121,4 +125,12 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return usage(Path(str(args.get("root") or "")))
     if name == "ag_see":
         return run(Path(str(args.get("root") or "")))
+    if name in {item["name"] for item in PROBE_TOOLS}:
+        from .probe import call as probe_call
+
+        return probe_call(name, args)
+    if name in {item["name"] for item in CRITIC_TOOLS}:
+        from .critic import call as critic_call
+
+        return critic_call(name, args)
     raise ChainBroken(f"see has no tool {name}")
