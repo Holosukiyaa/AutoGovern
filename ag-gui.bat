@@ -1,10 +1,11 @@
 @echo off
 setlocal
-set "HERE=%~dp0"
-set "PYTHONPATH=%HERE%src"
+cd /d "%~dp0"
+set "PYTHONPATH=%~dp0src"
 if "%~1"=="" (
-  python -B -m ag gui "%HERE%."
+  python -B -m ag gui
 ) else (
-  python -m ag gui "%~1"
+  python -B -m ag gui "%~1"
 )
+if errorlevel 1 pause
 endlocal

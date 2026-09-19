@@ -107,6 +107,17 @@ class LaneTests(unittest.TestCase):
         self.assertIn("test_probe", joined)
         self.assertIn("Critic is a layer before the switch", Path(__file__).resolve().parents[1].joinpath("src", "ag", "mcp.py").read_text(encoding="utf-8"))
 
+    def test_gui_single_bat_and_picker(self) -> None:
+        from ag.gui import resolve_gui_root
+
+        repo = Path(__file__).resolve().parents[1]
+        self.assertTrue((repo / "ag-gui.bat").is_file())
+        self.assertFalse((repo / "cf-gui.bat").is_file())
+        picked = resolve_gui_root(str(repo))
+        self.assertEqual(picked, Path(str(repo)))
+        one = resolve_gui_root(None, reader=lambda: "1")
+        self.assertTrue(isinstance(one, Path))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -21,6 +21,6 @@ ag enroll <repo> --test python -B tests/run_fast.py
 ag mcp
 ```
 
-Critic config lives in `~/.ag/projects/<key>/critic.json` (not in the git tree). Audit log: sqlite `ag.sqlite` table `critic_event` (jsonl is a backup). `ag critic-log` reads the database. `ag gui <repo>` writes HTML of critic_event rows and current probes (exam_fragment only). Double-click `ag-gui.bat` (this repo) or `cf-gui.bat` (sibling CartridgeFlow). Critic `rejected` with `path:line` auto-plants a must_exclude probe; heal does not. Default `ag probe list` hides observation/evidence (`--full` for a person).
+Critic config lives in `~/.ag/projects/<key>/critic.json` (not in the git tree). Audit log: sqlite `ag.sqlite` table `critic_event` (jsonl is a backup). `ag critic-log` reads the database. `ag gui <repo>` writes HTML of critic_event rows and current probes (exam_fragment only). Double-click `ag-gui.bat` (picks an enrolled repo, or pass a path). Critic `rejected` with `path:line` auto-plants a must_exclude probe; heal does not. Default `ag probe list` hides observation/evidence (`--full` for a person).
 
 `ag plug list|on|off <repo> lift-4` toggles a pluggable strategy; ship core cannot be unplugged. `ag usage` counts help/block by lane-seq.

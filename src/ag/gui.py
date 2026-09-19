@@ -6,7 +6,7 @@ import webbrowser
 from pathlib import Path
 from typing import Any
 
-from .managed import ChainBroken, ag_home, real_root
+from .managed import ChainBroken, ag_home, load_managed, real_root
 from .probe import list_probes
 from .store import db_path, list_critic_events, list_probe_rows, upsert_probe
 
@@ -25,6 +25,47 @@ TOOLS = [
 
 def _cell(value: object) -> str:
     return html.escape(str(value or ""), quote=True)
+
+
+def enrolled_roots() -> list[Path]:
+    found: list[Path] = []
+    seen: set[str] = set()
+    for row in load_managed().get("projects") or []:
+        if not isinstance(row, dict):
+            continue
+        raw = row.get("real") or row.get("root")
+        if not raw:
+            continue
+        path = Path(str(raw))
+        if not path.is_dir():
+            continue
+        key = str(path.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(path.resolve())
+    return found
+
+
+def resolve_gui_root(explicit: str | None = None, *, reader=input) -> Path:
+    if explicit and str(explicit).strip():
+        return Path(str(explicit).strip())
+    roots = enrolled_roots()
+    if not roots:
+        raise ChainBroken("no enrolled repos; pass a path to ag gui")
+    if len(roots) == 1:
+        return roots[0]
+    for index, path in enumerate(roots, start=1):
+        print(f"{index}. {path}", flush=True)
+    raw = str(reader()).strip()
+    if raw.isdigit():
+        pick = int(raw)
+        if 1 <= pick <= len(roots):
+            return roots[pick - 1]
+    for path in roots:
+        if raw.lower() in str(path).lower():
+            return path
+    raise ChainBroken("pick a listed number")
 
 
 def html_path(root: Path) -> Path:
