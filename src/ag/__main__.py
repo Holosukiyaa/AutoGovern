@@ -172,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
         "switch-run",
         help="one switch chat; this is the finish gate",
         description=(
-            "One switch chat; rejected or unavailable refuse finish. "
+            "One switch chat; configured deny/void refuse finish; not-configured does not. "
             "Uses the same critic.json endpoint. Report: AG_HOME/projects/<key>/switch-last.json"
         ),
     )

@@ -213,6 +213,8 @@ def _product(test_argv: list[str], verify: dict[str, Any] | None) -> str:
         return "failed"
     if _switch_block_message(verify):
         return "failed"
+    if not test_argv:
+        return "undeclared"
     return "passed"
 
 

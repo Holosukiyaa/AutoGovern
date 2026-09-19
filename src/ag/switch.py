@@ -30,8 +30,8 @@ TOOLS = [
     {
         "name": "ag_switch_run",
         "description": (
-            "One switch chat on the exam pack. This is the finish gate. "
-            "Rejected or unavailable refuse finish. Critic does not."
+            "One switch chat on the exam pack. Configured deny/void refuse finish. "
+            "Not-configured does not. Critic does not refuse finish."
         ),
         "inputSchema": {
             "type": "object",
@@ -342,14 +342,17 @@ def block_message(verify: dict[str, Any] | None) -> str:
     if not isinstance(verify, dict) or "exit" not in verify:
         return ""
     switch = record_from_verify(verify)
+    if not switch or not bool(switch.get("configured")):
+        return ""
+    outcome = str(switch.get("outcome") or "").strip().casefold()
+    if outcome in {"passed", "pass", "allow"}:
+        return ""
+    reason = str(switch.get("reason") or "").strip()
+    if outcome in {"unavailable", ""} and reason == "not-configured":
+        return ""
     rid = report_id_from_verify(verify)
     suffix = f"; report_id={rid}" if rid else ""
-    outcome = str(switch.get("outcome") or "").strip().casefold()
-    if outcome == "passed":
-        return ""
-    if not switch:
-        return "switch missing; will not deliver"
-    if outcome == "rejected":
+    if outcome in {"rejected", "reject", "deny", "denied"}:
         return "switch rejected; will not deliver" + suffix
     return "switch unavailable; will not deliver" + suffix
 

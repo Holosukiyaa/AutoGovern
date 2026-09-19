@@ -8,12 +8,12 @@ from typing import Any
 
 from .managed import ChainBroken, ag_home, load_managed, real_root
 from .probe import list_probes
-from .store import db_path, list_critic_events, list_probe_rows, upsert_probe
+from .store import db_path, list_critic_events, list_probe_rows, list_switch_events, upsert_probe
 
 TOOLS = [
     {
         "name": "ag_gui",
-        "description": "Write a read-only HTML table of critic_event rows from AG_HOME sqlite. Not a lane.",
+        "description": "Write a read-only HTML table of critic_event and switch_event rows from AG_HOME sqlite. Not a lane.",
         "inputSchema": {
             "type": "object",
             "properties": {"root": {"type": "string"}},
@@ -123,6 +123,18 @@ def write_dashboard(root: Path, *, browse: bool = True) -> Path:
             "</tr>"
         )
     body = "\n".join(rows) or "<tr><td colspan='7'>no critic_event rows</td></tr>"
+    switch_events = list_switch_events(repo, limit=200)
+    switch_rows = []
+    for event in reversed(switch_events):
+        switch_rows.append(
+            "<tr>"
+            f"<td>{_cell(event.get('report_id'))}</td>"
+            f"<td>{_cell(event.get('ts'))}</td>"
+            f"<td>{_cell(event.get('outcome'))}</td>"
+            f"<td>{_cell(event.get('reason'))}</td>"
+            "</tr>"
+        )
+    switch_body = "\n".join(switch_rows) or "<tr><td colspan='4'>no switch_event rows</td></tr>"
     listed = list_probes(repo, full=False)
     for probe in listed.get("probes") or []:
         if isinstance(probe, dict) and probe.get("id"):
@@ -160,7 +172,7 @@ th {{ background: #f4f4f4; }}
 pre {{ white-space: pre-wrap; background: #111; color: #eee; padding: 1rem; max-height: 24rem; overflow: auto; }}
 </style>
 <h1>ag critic log</h1>
-<p class="meta">root={_cell(repo)} db={_cell(db_path(repo))} — sqlite critic_event + probes. Refresh every 5s. Open this bat before ag_verify to watch thinking.</p>
+<p class="meta">root={_cell(repo)} db={_cell(db_path(repo))} — sqlite critic_event + switch_event + probes. Refresh every 5s. Open this bat before ag_verify to watch thinking.</p>
 <p class="meta">last timings: {_cell(timing_bits)} — tests_s is usually the long wait</p>
 <h2>last critic thinking</h2>
 <pre>{_cell(think[-20000:]) or "(none)"}</pre>
@@ -168,6 +180,14 @@ pre {{ white-space: pre-wrap; background: #111; color: #eee; padding: 1rem; max-
 <thead><tr><th>report_id</th><th>ts</th><th>outcome</th><th>model</th><th>task</th><th>reason</th><th>items</th></tr></thead>
 <tbody>
 {body}
+</tbody>
+</table>
+<h1>switch</h1>
+<p class="meta">sw- rows from switch_event; critic thinking above is not the switch</p>
+<table>
+<thead><tr><th>report_id</th><th>ts</th><th>outcome</th><th>reason</th></tr></thead>
+<tbody>
+{switch_body}
 </tbody>
 </table>
 <h1>probes</h1>
