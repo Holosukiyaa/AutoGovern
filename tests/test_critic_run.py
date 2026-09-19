@@ -37,12 +37,20 @@ def _cli(argv: list[str]) -> tuple[int, str, str]:
 
 
 class _FakeHTTP:
-    def __init__(self, payload: dict) -> None:
-        self._raw = json.dumps(payload).encode("utf-8")
+    def __init__(self, payload: dict | bytes) -> None:
+        if isinstance(payload, bytes):
+            self._raw = payload
+        else:
+            self._raw = json.dumps(payload).encode("utf-8")
         self.requests: list[object] = []
+        self._lines = self._raw.splitlines(keepends=True)
+        if self._raw and not self._lines:
+            self._lines = [self._raw]
+        self._idx = 0
 
     def __call__(self, request: object, timeout: object = None) -> "_FakeHTTP":
         self.requests.append(request)
+        self._idx = 0
         return self
 
     def __enter__(self) -> "_FakeHTTP":
@@ -51,8 +59,17 @@ class _FakeHTTP:
     def __exit__(self, *args: object) -> None:
         return None
 
+    def readline(self) -> bytes:
+        if self._idx >= len(self._lines):
+            return b""
+        line = self._lines[self._idx]
+        self._idx += 1
+        return line
+
     def read(self) -> bytes:
-        return self._raw
+        rest = b"".join(self._lines[self._idx :])
+        self._idx = len(self._lines)
+        return rest
 
 
 def _chat_payload(verdict: dict) -> dict:
@@ -150,6 +167,7 @@ class CriticRunTests(unittest.TestCase):
         request = fake.requests[0]
         body = json.loads(request.data.decode("utf-8"))
         self.assertEqual(0, body["temperature"])
+        self.assertTrue(body.get("stream"))
         self.assertNotIn("thinking", body)
         self.assertEqual("json_object", (body.get("response_format") or {}).get("type"))
         self.assertEqual("unit-critic", body["model"])
@@ -235,6 +253,23 @@ class CriticRunTests(unittest.TestCase):
         self.assertEqual(0, code, err)
         blob = json.loads(out)
         self.assertEqual("passed", blob["outcome"])
+
+    def test_sse_reasoning_is_stored(self) -> None:
+        self._write_config()
+        inner = json.dumps(
+            {"verdict": "pass", "items": [{"name": "exam", "status": "pass", "comment": "ok"}], "summary": "ok"}
+        )
+        line1 = json.dumps({"choices": [{"delta": {"reasoning_content": "because-tests"}}]})
+        line2 = json.dumps({"choices": [{"delta": {"content": inner}}]})
+        raw = f"data: {line1}\n\ndata: {line2}\n\ndata: [DONE]\n".encode("utf-8")
+        fake = _FakeHTTP(raw)
+        with patch("urllib.request.urlopen", fake):
+            code, out, err = _cli(["critic-run", str(self.root), "--exam", "user: keep x = 1"])
+        self.assertEqual(0, code, err)
+        blob = json.loads(out)
+        self.assertEqual("passed", blob["outcome"])
+        rows = list_critic_events(self.root, limit=1)
+        self.assertIn("because-tests", str(rows[-1].get("thinking") or ""))
 
     def test_critic_run_does_not_change_probe_quiet_count(self) -> None:
         self._write_config()

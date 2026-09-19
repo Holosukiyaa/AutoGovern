@@ -27,6 +27,40 @@ def _cell(value: object) -> str:
     return html.escape(str(value or ""), quote=True)
 
 
+def html_path(root: Path) -> Path:
+    repo = real_root(root)
+    return ag_home() / "projects" / db_path(repo).parent.name / "critic-log.html"
+
+
+def write_live(
+    root: Path,
+    *,
+    phase: str,
+    timings: dict[str, Any] | None = None,
+    thinking: str = "",
+    content: str = "",
+) -> Path:
+    repo = real_root(root)
+    bits = []
+    for key in ("tests_s", "probes_s", "critic_s", "total_s"):
+        if timings and key in timings:
+            bits.append(f"{key}={timings[key]}")
+    timing_line = " ".join(bits) or "running"
+    page = (
+        "<!doctype html><meta charset='utf-8'><meta http-equiv='refresh' content='2'>"
+        "<title>ag verify live</title>"
+        "<style>body{font-family:sans-serif;margin:1.5rem}pre{white-space:pre-wrap;background:#111;color:#eee;padding:1rem}</style>"
+        f"<h1>verify live</h1><p>phase={_cell(phase)}</p><p>{_cell(timing_line)}</p>"
+        "<p>Five minutes is usually the enrolled tests, not DeepSeek. Thinking below streams during critic.</p>"
+        f"<h2>thinking</h2><pre>{_cell(thinking[-20000:])}</pre>"
+        f"<h2>content</h2><pre>{_cell(content[-8000:])}</pre>"
+    )
+    out = html_path(repo)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(page, encoding="utf-8")
+    return out
+
+
 def write_dashboard(root: Path, *, browse: bool = True) -> Path:
     repo = real_root(root)
     events = list_critic_events(repo, limit=200)
@@ -68,8 +102,13 @@ def write_dashboard(root: Path, *, browse: bool = True) -> Path:
             "</tr>"
         )
     probes_body = "\n".join(probe_rows) or "<tr><td colspan='6'>no probes</td></tr>"
+    last = events[-1] if events else {}
+    timings = last.get("timings") if isinstance(last.get("timings"), dict) else {}
+    timing_bits = " ".join(f"{k}={v}" for k, v in timings.items()) or "no timings yet"
+    think = str(last.get("thinking") or "")
     page = f"""<!doctype html>
 <meta charset="utf-8">
+<meta http-equiv="refresh" content="5">
 <title>ag critic log</title>
 <style>
 body {{ font-family: sans-serif; margin: 1.5rem; }}
@@ -77,9 +116,13 @@ table {{ border-collapse: collapse; width: 100%; margin-bottom: 2rem; }}
 th, td {{ border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: left; vertical-align: top; }}
 th {{ background: #f4f4f4; }}
 .meta {{ color: #555; margin-bottom: 1rem; }}
+pre {{ white-space: pre-wrap; background: #111; color: #eee; padding: 1rem; max-height: 24rem; overflow: auto; }}
 </style>
 <h1>ag critic log</h1>
-<p class="meta">root={_cell(repo)} db={_cell(db_path(repo))} — sqlite critic_event + probes, not the old strategy poster</p>
+<p class="meta">root={_cell(repo)} db={_cell(db_path(repo))} — sqlite critic_event + probes. Refresh every 5s. Open this bat before ag_verify to watch thinking.</p>
+<p class="meta">last timings: {_cell(timing_bits)} — tests_s is usually the long wait</p>
+<h2>last critic thinking</h2>
+<pre>{_cell(think[-20000:]) or "(none)"}</pre>
 <table>
 <thead><tr><th>report_id</th><th>ts</th><th>outcome</th><th>model</th><th>task</th><th>reason</th><th>items</th></tr></thead>
 <tbody>
@@ -95,7 +138,7 @@ th {{ background: #f4f4f4; }}
 </tbody>
 </table>
 """
-    out = ag_home() / "projects" / db_path(repo).parent.name / "critic-log.html"
+    out = html_path(repo)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(page, encoding="utf-8")
     if browse:

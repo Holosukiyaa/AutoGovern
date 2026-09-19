@@ -64,6 +64,11 @@ def connect(root: Path) -> sqlite3.Connection:
         )
         """
     )
+    cols = {str(item[1]) for item in conn.execute("PRAGMA table_info(critic_event)").fetchall()}
+    if "thinking" not in cols:
+        conn.execute("ALTER TABLE critic_event ADD COLUMN thinking TEXT NOT NULL DEFAULT ''")
+    if "timings_json" not in cols:
+        conn.execute("ALTER TABLE critic_event ADD COLUMN timings_json TEXT NOT NULL DEFAULT '{}'")
     conn.commit()
     return conn
 
@@ -76,8 +81,8 @@ def insert_critic_event(root: Path, row: dict[str, Any]) -> int:
             INSERT INTO critic_event (
                 ts, outcome, reason, configured, prompt_version, store,
                 exam_sha256, pack_sha256, items_json, task_id, model,
-                probe_red_json, allow_same_family
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                probe_red_json, allow_same_family, thinking, timings_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(row.get("ts") or ""),
@@ -93,6 +98,8 @@ def insert_critic_event(root: Path, row: dict[str, Any]) -> int:
                 str(row.get("model") or ""),
                 json.dumps(row.get("probe_red") or [], ensure_ascii=False),
                 1 if row.get("allow_same_family") else 0,
+                str(row.get("thinking") or "")[:20000],
+                json.dumps(row.get("timings") or {}, ensure_ascii=False),
             ),
         )
         conn.commit()
@@ -124,6 +131,16 @@ def _row_to_event(row: sqlite3.Row) -> dict[str, Any]:
         out["probe_red"] = probe_red
     if row["allow_same_family"]:
         out["allow_same_family"] = True
+    keys = set(row.keys())
+    if "thinking" in keys and row["thinking"]:
+        out["thinking"] = str(row["thinking"])
+    if "timings_json" in keys and row["timings_json"]:
+        try:
+            timings = json.loads(row["timings_json"])
+        except json.JSONDecodeError:
+            timings = {}
+        if isinstance(timings, dict) and timings:
+            out["timings"] = timings
     return out
 
 

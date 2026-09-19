@@ -27,9 +27,12 @@ class _FakeHTTP:
     def __init__(self, payload: dict) -> None:
         self._raw = json.dumps(payload).encode("utf-8")
         self.requests: list[object] = []
+        self._lines = self._raw.splitlines(keepends=True) or [self._raw]
+        self._idx = 0
 
     def __call__(self, request: object, timeout: object = None) -> "_FakeHTTP":
         self.requests.append(request)
+        self._idx = 0
         return self
 
     def __enter__(self) -> "_FakeHTTP":
@@ -38,8 +41,17 @@ class _FakeHTTP:
     def __exit__(self, *args: object) -> None:
         return None
 
+    def readline(self) -> bytes:
+        if self._idx >= len(self._lines):
+            return b""
+        line = self._lines[self._idx]
+        self._idx += 1
+        return line
+
     def read(self) -> bytes:
-        return self._raw
+        rest = b"".join(self._lines[self._idx :])
+        self._idx = len(self._lines)
+        return rest
 
 
 def _chat_payload(verdict: dict) -> dict:

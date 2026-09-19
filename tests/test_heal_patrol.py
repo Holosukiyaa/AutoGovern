@@ -214,6 +214,8 @@ class HealPatrolTests(unittest.TestCase):
             def __call__(self, request, timeout=None):
                 Fake.n += 1
                 self._raw = json.dumps(payload).encode()
+                self._idx = 0
+                self._lines = self._raw.splitlines(keepends=True) or [self._raw]
                 return self
 
             def __enter__(self):
@@ -222,8 +224,17 @@ class HealPatrolTests(unittest.TestCase):
             def __exit__(self, *a):
                 return None
 
+            def readline(self):
+                if self._idx >= len(self._lines):
+                    return b""
+                line = self._lines[self._idx]
+                self._idx += 1
+                return line
+
             def read(self):
-                return self._raw
+                rest = b"".join(self._lines[self._idx :])
+                self._idx = len(self._lines)
+                return rest
 
         with patch("urllib.request.urlopen", Fake()):
             out = patrol(self.root, gear="mess", max_lines=800)

@@ -400,27 +400,95 @@ def complete_chat(config: dict[str, Any], messages: list[dict[str, str]]) -> tup
             "model": config["model"],
             "messages": messages,
             "temperature": 0,
+            "stream": True,
             "response_format": {"type": "json_object"},
         },
         ensure_ascii=False,
     ).encode("utf-8")
     request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
     timeout = int(config.get("timeout") or DEFAULT_TIMEOUT)
+    on_delta = config.get("on_delta")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            body = json.loads(response.read().decode("utf-8"))
+            content, reasoning = _read_chat_body(response, on_delta=on_delta if callable(on_delta) else None)
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, json.JSONDecodeError, ValueError) as exc:
         raise RuntimeError(f"failed: {exc}") from exc
-    try:
-        message = body["choices"][0]["message"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError("failed: response has no message content") from exc
-    if not isinstance(message, dict):
-        raise RuntimeError("failed: response has no message content")
-    content = message.get("content") if isinstance(message.get("content"), str) else ""
-    reasoning = message.get("reasoning_content") if isinstance(message.get("reasoning_content"), str) else ""
     if not content.strip() and not reasoning.strip():
         raise RuntimeError("failed: empty message")
+    return content, reasoning
+
+
+def _decode_line(chunk: bytes | str) -> str:
+    if isinstance(chunk, bytes):
+        return chunk.decode("utf-8", "replace")
+    return str(chunk)
+
+
+def _apply_delta(payload: dict[str, Any], content: str, reasoning: str) -> tuple[str, str]:
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return content, reasoning
+    first = choices[0] if isinstance(choices[0], dict) else {}
+    delta = first.get("delta") if isinstance(first.get("delta"), dict) else None
+    message = first.get("message") if isinstance(first.get("message"), dict) else None
+    piece = delta or message or {}
+    extra_c = piece.get("content")
+    extra_r = piece.get("reasoning_content")
+    if isinstance(extra_c, str):
+        content += extra_c
+    if isinstance(extra_r, str):
+        reasoning += extra_r
+    return content, reasoning
+
+
+def _read_chat_body(response: Any, *, on_delta: Any = None) -> tuple[str, str]:
+    first = _decode_line(response.readline() or b"")
+    rest_head = first.lstrip()
+    if rest_head.startswith("{"):
+        raw = first.encode("utf-8") + (response.read() or b"")
+        body = json.loads(raw.decode("utf-8"))
+        try:
+            message = body["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("failed: response has no message content") from exc
+        if not isinstance(message, dict):
+            raise RuntimeError("failed: response has no message content")
+        content = message.get("content") if isinstance(message.get("content"), str) else ""
+        reasoning = message.get("reasoning_content") if isinstance(message.get("reasoning_content"), str) else ""
+        if callable(on_delta):
+            on_delta(reasoning, content)
+        return content, reasoning
+    content = ""
+    reasoning = ""
+
+    def handle(line: str) -> bool:
+        nonlocal content, reasoning
+        text = line.strip()
+        if not text or text.startswith(":"):
+            return True
+        if not text.startswith("data:"):
+            return True
+        data = text[5:].strip()
+        if data == "[DONE]":
+            return False
+        try:
+            payload = json.loads(data)
+        except json.JSONDecodeError:
+            return True
+        if isinstance(payload, dict):
+            content, reasoning = _apply_delta(payload, content, reasoning)
+            if callable(on_delta):
+                on_delta(reasoning, content)
+        return True
+
+    if first and not handle(first):
+        return content, reasoning
+    while True:
+        chunk = response.readline()
+        if not chunk:
+            break
+        if not handle(_decode_line(chunk)):
+            break
     return content, reasoning
 
 
@@ -548,6 +616,8 @@ def append_log(
     model: str = "",
     probe_red: list[str] | None = None,
     allow_same_family: bool = False,
+    thinking: str = "",
+    timings: dict[str, Any] | None = None,
 ) -> str:
     try:
         row: dict[str, Any] = {
@@ -569,6 +639,10 @@ def append_log(
             row["probe_red"] = [str(item) for item in probe_red if str(item)]
         if allow_same_family:
             row["allow_same_family"] = True
+        if thinking:
+            row["thinking"] = str(thinking)[:20000]
+        if timings:
+            row["timings"] = timings
         path = log_path(root)
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -633,6 +707,8 @@ def _result(
     task_id: str = "",
     probe_red: list[str] | None = None,
     allow_same_family: bool = False,
+    thinking: str = "",
+    timings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     blob: dict[str, Any] = {
         "schema": RUN_SCHEMA,
@@ -665,6 +741,8 @@ def _result(
         model=str(model or ""),
         probe_red=probe_red,
         allow_same_family=bool(allow_same_family),
+        thinking=thinking,
+        timings=timings,
     )
     return blob
 
@@ -708,8 +786,23 @@ def critic_run(
         {"role": "system", "content": prompt_text()},
         {"role": "user", "content": json.dumps(packed, ensure_ascii=False)},
     ]
+    held = {"r": "", "c": ""}
+
+    def on_delta(reasoning_text: str, content_text: str) -> None:
+        held["r"] = reasoning_text
+        held["c"] = content_text
+        try:
+            from .gui import write_live
+
+            write_live(root, phase="critic", thinking=reasoning_text, content=content_text)
+        except Exception:
+            pass
+
+    run_cfg = dict(cfg)
+    run_cfg["on_delta"] = on_delta
     try:
-        content, reasoning = complete_chat(cfg, messages)
+        content, reasoning = complete_chat(run_cfg, messages)
+        extra["thinking"] = held["r"] or reasoning
     except RuntimeError as exc:
         return _result(
             root,

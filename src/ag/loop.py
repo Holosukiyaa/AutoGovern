@@ -4,6 +4,7 @@ from __future__ import annotations
 import hmac
 import json
 import os
+import time
 import shutil
 import subprocess
 import sys
@@ -510,6 +511,15 @@ def verify(root: Path) -> dict[str, Any]:
         for ln in git(worktree, "ls-files", "-o", "--exclude-standard", check=False).splitlines()
         if ln.strip()
     ]
+    enrolled = Path(state["root"])
+    timings: dict[str, float] = {}
+    t0 = time.perf_counter()
+    try:
+        from .gui import write_live
+
+        write_live(enrolled, phase="tests", timings=timings)
+    except Exception:
+        pass
     record: dict[str, Any] = {
         "exit": 0,
         "stdout": "",
@@ -517,6 +527,7 @@ def verify(root: Path) -> dict[str, Any]:
         "undeclared": not test_argv,
         "untracked": untracked[:50],
     }
+    t_tests = time.perf_counter()
     if test_argv:
         completed = subprocess.run(
             test_argv,
@@ -532,6 +543,13 @@ def verify(root: Path) -> dict[str, Any]:
             "undeclared": False,
             "untracked": untracked[:50],
         }
+    timings["tests_s"] = round(time.perf_counter() - t_tests, 3)
+    try:
+        from .gui import write_live
+
+        write_live(enrolled, phase="probes", timings=timings)
+    except Exception:
+        pass
     paths = _ticket_paths(worktree, str(task.get("source_head") or ""))
     probe_results: list[Any] = []
     if paths:
@@ -547,9 +565,15 @@ def verify(root: Path) -> dict[str, Any]:
     from .probe import missing_fragments
 
     record["missing"] = missing_fragments(Path(state["root"]), list(record["probe_red"]))
+    timings["probes_s"] = round(time.perf_counter() - t_tests - timings["tests_s"], 3)
+    try:
+        from .gui import write_live
+
+        write_live(enrolled, phase="critic", timings=timings)
+    except Exception:
+        pass
     from .critic import _configured, append_log, critic_run, load_config
 
-    enrolled = Path(state["root"])
     cfg = load_config(enrolled)
     configured = bool(cfg.get("error") or _configured(cfg))
     portrait = str(task.get("portrait") or "").strip()
@@ -610,6 +634,15 @@ def verify(root: Path) -> dict[str, Any]:
             probe_red=probe_red,
         )
     record["critic"] = critic
+    timings["critic_s"] = round(time.perf_counter() - t0 - timings.get("tests_s", 0) - timings.get("probes_s", 0), 3)
+    timings["total_s"] = round(time.perf_counter() - t0, 3)
+    record["timings"] = timings
+    try:
+        from .gui import write_dashboard
+
+        write_dashboard(enrolled, browse=False)
+    except Exception:
+        pass
     digest = tree_digest(worktree)
     task["verify"] = record
     task["verified_tree"] = digest if record["exit"] == 0 else ""
@@ -629,6 +662,7 @@ def verify(root: Path) -> dict[str, Any]:
     out["missing"] = list(record["missing"])
     out["critic"] = critic
     out["probes_planted"] = list(record.get("probes_planted") or [])
+    out["timings"] = dict(record.get("timings") or {})
     try:
         from .lift import run as lift_run
 
