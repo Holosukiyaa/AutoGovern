@@ -10,16 +10,14 @@ MCP delivery loop. Canonical checkout is not a work site. While a task is open, 
 ag_status → ag_start → write only in worktree → ag_verify → ag_finish
 ```
 
-`ag_verify` runs the enrolled test command, then path-hit out-of-tree probes, then one read-only critic (if configured). Process complete is not product passed. No test command → `product` stays `undeclared` unless a probe is red or the critic refuses.
+`ag_verify` runs the enrolled test command, then path-hit out-of-tree probes, then one read-only critic (if configured). Process complete is not product passed. No test command → `product` stays `undeclared` unless a probe is red.
 
-Finish also refuses when:
+Finish refuses when this ticket's probes are red or enrolled tests failed. Critic is a layer before the switch: `rejected` or configured `unavailable` does not refuse this ticket's finish. Void still logs a `cr-`. `rejected` with `path:line` still plants `auto-` needles.
 
-- this ticket's probes are red
-- critic outcome is `rejected`
-- critic is configured and `unavailable` for a reason other than `not-configured`
+This repo's enrolled gate is `python -B tests/run_fast.py` (critic / lanes / probe). LoopTests stay off the daily lamp. Worker one-shot checks live in worktree `.ag-check/` (gitignored).
 
 ```
-ag enroll <repo> --test python -m unittest
+ag enroll <repo> --test python -B tests/run_fast.py
 ag mcp
 ```
 

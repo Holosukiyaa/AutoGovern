@@ -309,9 +309,10 @@ class ProbeAndCriticTests(unittest.TestCase):
         self.assertEqual(0, code, err)
         pack = json.loads(out)
         self.assertEqual(
-            {"schema", "exam", "diff", "changed_files", "neighbors", "probes"},
+            {"schema", "exam", "diff", "changed_files", "neighbors", "probes", "this_ticket_checks"},
             set(pack),
         )
+        self.assertEqual([], pack.get("this_ticket_checks"))
         forbidden = {"proof", "product", "passed", "guidance", "lineage", "messages", "tool_trace"}
         self.assertFalse(forbidden & set(pack))
         self.assertIn("import ok", pack["exam"])
@@ -326,6 +327,9 @@ class ProbeAndCriticTests(unittest.TestCase):
         self.assertIn("UNPROVEN", prompt_out)
         self.assertIn("ag_probe_insert", prompt_out)
         self.assertIn("没有工地", prompt_out)
+        self.assertIn("不是开关", prompt_out)
+        self.assertIn("this_ticket_checks", prompt_out)
+        self.assertIn("tests/", prompt_out)
 
     def test_critic_pack_does_not_change_probe_lifetime(self) -> None:
         call(

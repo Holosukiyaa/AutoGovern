@@ -401,7 +401,7 @@ class LoopTests(unittest.TestCase):
         self.assertEqual("passed", done["product"])
         self.assertTrue((self.root / "keep.txt").is_file())
 
-    def test_andersen_blocks_verify_and_finish(self) -> None:
+    def test_andersen_unavailable_still_finish(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
         self._enable_critic(model="gpt-4o", worker_model="gpt-4o-mini")
         worktree = Path(str(start(self.root, portrait="keep file")["worktree"]))
@@ -414,10 +414,9 @@ class LoopTests(unittest.TestCase):
         self.assertIn("andersen", str(critic.get("reason") or "").casefold())
         self.assertTrue(critic.get("configured"))
         self.assertEqual([], fake.requests)
-        self.assertEqual("failed", checked["product"])
-        with self.assertRaises(ChainBroken) as raised:
-            finish(self.root)
-        self.assertIn("unavailable", str(raised.exception).lower())
+        self.assertEqual("passed", checked["product"])
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
 
     def test_andersen_exemption_verify_can_finish(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
@@ -483,7 +482,10 @@ class LoopTests(unittest.TestCase):
         self.assertFalse((self.root / "critic-last.json").exists())
         body = json.loads(fake.requests[0].data.decode("utf-8"))
         user = json.loads(body["messages"][1]["content"])
-        self.assertEqual({"schema", "exam", "diff", "changed_files", "neighbors", "probes"}, set(user))
+        self.assertEqual(
+            {"schema", "exam", "diff", "changed_files", "neighbors", "probes", "this_ticket_checks"},
+            set(user),
+        )
         self.assertEqual("keep hello.txt", user["exam"])
         names = [str(item.get("path") or "") for item in user.get("changed_files") or []]
         self.assertIn("hello.txt", names)
@@ -526,15 +528,14 @@ class LoopTests(unittest.TestCase):
         self.assertIn("no-exam", str((checked.get("critic") or {}).get("reason") or ""))
         self.assertTrue((checked.get("critic") or {}).get("configured"))
         self.assertEqual([], fake.requests)
-        self.assertEqual("failed", checked["product"])
+        self.assertEqual("passed", checked["product"])
         rows = [json.loads(line) for line in log_path(self.root).read_text(encoding="utf-8").splitlines() if line.strip()]
         self.assertEqual(1, len(rows))
         self.assertIn("no-exam", rows[0]["reason"])
-        with self.assertRaises(ChainBroken) as raised:
-            finish(self.root)
-        self.assertIn("unavailable", str(raised.exception).lower())
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
 
-    def test_verify_critic_reject_fails_product_and_refuses_finish(self) -> None:
+    def test_verify_critic_reject_still_passed_and_finish(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
         self._enable_critic()
         worktree = Path(str(start(self.root, portrait="keep file")["worktree"]))
@@ -561,19 +562,16 @@ class LoopTests(unittest.TestCase):
         self.assertEqual("rejected", (checked.get("critic") or {}).get("outcome"))
         rid = str((checked.get("critic") or {}).get("report_id") or "")
         self.assertTrue(rid.startswith("cr-"), rid)
-        self.assertEqual("failed", checked["product"])
+        self.assertEqual("passed", checked["product"])
         self.assertTrue(checked["verified_tree"])
         rows = [json.loads(line) for line in log_path(self.root).read_text(encoding="utf-8").splitlines() if line.strip()]
         self.assertEqual(1, len(rows))
         self.assertEqual("rejected", rows[0]["outcome"])
-        with self.assertRaises(ChainBroken) as raised:
-            finish(self.root)
-        text = str(raised.exception).lower()
-        self.assertIn("critic", text)
-        self.assertIn("rejected", text)
-        self.assertIn(rid.lower(), text)
-        self.assertEqual(before, _git(self.root, "rev-parse", "HEAD"))
-        self.assertFalse((self.root / "keep.txt").exists())
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
+        self.assertEqual(rid, done.get("critic_report_id"))
+        self.assertNotEqual(before, _git(self.root, "rev-parse", "HEAD"))
+        self.assertTrue((self.root / "keep.txt").exists())
 
     def test_reject_plants_probe_and_gui_lists_fragment(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
@@ -609,10 +607,11 @@ class LoopTests(unittest.TestCase):
         self.assertIn("drop the bad marker", page)
         self.assertIn("<h1>probes</h1>", page)
         self.assertNotIn("must_exclude", page)
-        with self.assertRaises(ChainBroken):
-            finish(self.root)
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
+        self.assertTrue((self.root / "keep.txt").is_file())
 
-    def test_verify_critic_network_fail_fails_product_and_refuses_finish(self) -> None:
+    def test_verify_critic_network_fail_still_finish(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
         self._enable_critic()
         worktree = Path(str(start(self.root, portrait="keep file")["worktree"]))
@@ -623,13 +622,27 @@ class LoopTests(unittest.TestCase):
         self.assertEqual("unavailable", critic.get("outcome"))
         self.assertIn("failed", str(critic.get("reason") or ""))
         self.assertTrue(critic.get("configured"))
-        self.assertEqual("failed", checked["product"])
-        with self.assertRaises(ChainBroken) as raised:
-            finish(self.root)
-        self.assertIn("unavailable", str(raised.exception).lower())
-        self.assertFalse((self.root / "keep.txt").exists())
+        self.assertEqual("passed", checked["product"])
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
+        self.assertTrue((self.root / "keep.txt").exists())
 
-    def test_verify_critic_void_fails_product_and_refuses_finish(self) -> None:
+    def test_failed_tests_skip_critic_http(self) -> None:
+        enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(7)"])
+        self._enable_critic()
+        worktree = Path(str(start(self.root, portrait="keep file")["worktree"]))
+        (worktree / "keep.txt").write_text("k\n", encoding="utf-8")
+        fake = _FakeHTTP(_chat_payload({"verdict": "pass", "items": [{"name": "x", "status": "pass", "comment": "x"}]}))
+        with patch("urllib.request.urlopen", fake):
+            checked = verify(self.root)
+        critic = checked.get("critic") or {}
+        self.assertEqual([], fake.requests)
+        self.assertEqual("unavailable", critic.get("outcome"))
+        self.assertEqual("tests-failed", critic.get("reason"))
+        self.assertEqual("failed", checked["product"])
+        self.assertTrue(str(critic.get("report_id") or "").startswith("cr-"))
+
+    def test_verify_critic_void_still_logs_and_finish(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
         self._enable_critic()
         worktree = Path(str(start(self.root, portrait="keep file")["worktree"]))
@@ -655,10 +668,12 @@ class LoopTests(unittest.TestCase):
         critic = checked.get("critic") or {}
         self.assertEqual("unavailable", critic.get("outcome"))
         self.assertIn("作废", str(critic.get("reason") or ""))
-        self.assertEqual("failed", checked["product"])
-        with self.assertRaises(ChainBroken) as raised:
-            finish(self.root)
-        self.assertIn("unavailable", str(raised.exception).lower())
+        self.assertEqual("passed", checked["product"])
+        rid = str(critic.get("report_id") or "")
+        self.assertTrue(rid.startswith("cr-"), rid)
+        done = finish(self.root)
+        self.assertEqual("passed", done["product"])
+        self.assertEqual(rid, done.get("critic_report_id"))
 
     def test_probe_red_fails_even_if_critic_passed(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])

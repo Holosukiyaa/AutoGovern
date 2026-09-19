@@ -20,8 +20,9 @@ from ag.see import call
 EVIDENCE = "already-seen observation text from this run"
 
 
-def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=True)
+def _git(cwd: Path, *args: str) -> str:
+    completed = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True, check=True)
+    return (completed.stdout or "").strip()
 
 
 def _cli(argv: list[str]) -> tuple[int, str, str]:
@@ -173,7 +174,11 @@ class CriticRunTests(unittest.TestCase):
         self.assertEqual("unit-critic", body["model"])
         self.assertEqual("system", body["messages"][0]["role"])
         user = json.loads(body["messages"][1]["content"])
-        self.assertEqual({"schema", "exam", "diff", "changed_files", "neighbors", "probes"}, set(user))
+        self.assertEqual(
+            {"schema", "exam", "diff", "changed_files", "neighbors", "probes", "this_ticket_checks"},
+            set(user),
+        )
+        self.assertEqual([], user.get("this_ticket_checks"))
         self.assertNotIn("proof", user)
         self.assertNotIn("product", user)
 
@@ -403,6 +408,98 @@ class CriticRunTests(unittest.TestCase):
         self.assertIn("critic_event", html)
         self.assertNotIn("大街上盖房子", html)
         self.assertTrue(html_path.is_relative_to(self.home))
+
+    def test_pack_includes_ag_check_and_empty_when_missing(self) -> None:
+        from ag.critic import pack
+
+        empty = pack(self.root, exam="keep x = 1")
+        self.assertEqual([], empty["this_ticket_checks"])
+        check = self.root / ".ag-check"
+        check.mkdir()
+        (check / "foo.py").write_text("assert True  # this-ticket check\n", encoding="utf-8")
+        huge = "a" * (100_000 + 1)
+        (check / "huge.txt").write_text(huge, encoding="utf-8")
+        blob = pack(self.root, exam="keep x = 1")
+        by_path = {str(item.get("path") or ""): item for item in blob["this_ticket_checks"]}
+        self.assertIn(".ag-check/foo.py", by_path)
+        self.assertIn("assert True", str(by_path[".ag-check/foo.py"].get("content") or ""))
+        self.assertTrue(by_path[".ag-check/huge.txt"].get("truncated"))
+
+    def test_mock_reject_product_passed_and_finish(self) -> None:
+        from ag.loop import enroll, finish, start, thaw_canonical, verify
+
+        enroll(self.root, test_argv=[sys.executable, "-c", "raise SystemExit(0)"])
+        self._write_config()
+        try:
+            worktree = Path(str(start(self.root, portrait="keep file")["worktree"]))
+            (worktree / ".gitignore").write_text(".ag-check/\n", encoding="utf-8")
+            check = worktree / ".ag-check"
+            check.mkdir()
+            (check / "foo.py").write_text("assert True  # this-ticket check\n", encoding="utf-8")
+            (worktree / "keep.txt").write_text("k\n", encoding="utf-8")
+            fake = _FakeHTTP(
+                _chat_payload(
+                    {
+                        "verdict": "reject",
+                        "items": [
+                            {
+                                "name": "exam",
+                                "status": "fail",
+                                "evidence": "keep.txt:1",
+                                "comment": "not enough",
+                            }
+                        ],
+                        "summary": "reject",
+                    }
+                )
+            )
+            with patch("urllib.request.urlopen", fake):
+                checked = verify(self.root)
+            self.assertEqual("rejected", (checked.get("critic") or {}).get("outcome"))
+            rid = str((checked.get("critic") or {}).get("report_id") or "")
+            self.assertTrue(rid.startswith("cr-"), rid)
+            self.assertEqual("passed", checked["product"])
+            body = json.loads(fake.requests[0].data.decode("utf-8"))
+            user = json.loads(body["messages"][1]["content"])
+            self.assertTrue(
+                any(str(item.get("path") or "") == ".ag-check/foo.py" for item in user.get("this_ticket_checks") or [])
+            )
+            rows = [
+                json.loads(line)
+                for line in log_path(self.root).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual("rejected", rows[-1]["outcome"])
+            self.assertTrue(str(rows[-1].get("report_id") or "").startswith("cr-"))
+            done = finish(self.root)
+            self.assertEqual("passed", done["product"])
+            names = _git(self.root, "ls-tree", "-r", "--name-only", "HEAD")
+            self.assertNotIn(".ag-check", names)
+            self.assertIn(".gitignore", names)
+            self.assertTrue((self.root / "keep.txt").is_file())
+            self.assertFalse((self.root / ".ag-check" / "foo.py").exists())
+        finally:
+            thaw_canonical(self.root)
+
+    def test_failed_tests_skip_critic_http(self) -> None:
+        from ag.critic import attach_verify
+
+        self._write_config()
+        fake = _FakeHTTP(_chat_payload({"verdict": "pass", "items": [{"name": "x", "status": "pass", "comment": "x"}]}))
+        with patch("urllib.request.urlopen", fake):
+            critic, planted = attach_verify(
+                self.root,
+                worktree=self.root,
+                portrait="keep file",
+                task_id="t1",
+                probe_red=[],
+                tests_failed=True,
+            )
+        self.assertEqual([], fake.requests)
+        self.assertEqual([], planted)
+        self.assertEqual("unavailable", critic.get("outcome"))
+        self.assertEqual("tests-failed", critic.get("reason"))
+        self.assertTrue(str(critic.get("report_id") or "").startswith("cr-"))
 
 
 if __name__ == "__main__":

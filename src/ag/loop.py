@@ -197,26 +197,8 @@ def _critic_report_id(verify: dict[str, Any] | None) -> str:
     return str(critic.get("report_id") or "").strip()
 
 
-def _critic_block_message(verify: dict[str, Any] | None) -> str:
-    critic = _critic_record(verify)
-    if not critic:
-        return ""
-    rid = _critic_report_id(verify)
-    suffix = f"; report_id={rid}" if rid else ""
-    outcome = str(critic.get("outcome") or "").strip().casefold()
-    if outcome == "rejected":
-        return "critic rejected; will not deliver" + suffix
-    if outcome == "unavailable" and bool(critic.get("configured")):
-        reason = str(critic.get("reason") or "").strip()
-        if reason != "not-configured":
-            return "critic unavailable; will not deliver" + suffix
-    return ""
-
-
 def _product(test_argv: list[str], verify: dict[str, Any] | None) -> str:
     if _probe_red_ids(verify):
-        return "failed"
-    if _critic_block_message(verify):
         return "failed"
     if not test_argv:
         return "undeclared"
@@ -572,67 +554,21 @@ def verify(root: Path) -> dict[str, Any]:
         write_live(enrolled, phase="critic", timings=timings)
     except Exception:
         pass
-    from .critic import _configured, append_log, critic_run, load_config
+    from .critic import attach_verify
 
-    cfg = load_config(enrolled)
-    configured = bool(cfg.get("error") or _configured(cfg))
     portrait = str(task.get("portrait") or "").strip()
     task_id = str(task.get("id") or "")
     probe_red = list(record["probe_red"])
-    critic: dict[str, Any] = {
-        "outcome": "unavailable",
-        "reason": "not-configured",
-        "store": "",
-        "configured": configured,
-    }
-    logged = False
-    if not portrait:
-        if configured:
-            critic["reason"] = str(cfg.get("error") or "no-exam")
-    elif configured:
-        try:
-            raw = critic_run(
-                enrolled,
-                exam=portrait,
-                tree=worktree,
-                task_id=task_id,
-                probe_red=probe_red,
-            )
-            logged = True
-            critic = {
-                "outcome": str(raw.get("outcome") or "unavailable"),
-                "reason": str(raw.get("reason") or ""),
-                "store": str(raw.get("store") or ""),
-                "prompt_version": str(raw.get("prompt_version") or ""),
-                "configured": True,
-                "report_id": str(raw.get("report_id") or ""),
-            }
-            if raw.get("model"):
-                critic["model"] = raw["model"]
-            if str(raw.get("outcome") or "") == "rejected":
-                from .probe import plant_from_reject
-
-                record["probes_planted"] = plant_from_reject(
-                    enrolled, items=raw.get("items"), tree=worktree
-                )
-        except Exception as exc:
-            critic = {
-                "outcome": "unavailable",
-                "reason": f"failed: {exc}",
-                "store": "",
-                "configured": True,
-            }
-    if not logged:
-        critic["report_id"] = append_log(
-            enrolled,
-            outcome=str(critic.get("outcome") or "unavailable"),
-            reason=str(critic.get("reason") or ""),
-            configured=bool(critic.get("configured")),
-            store=str(critic.get("store") or ""),
-            exam=portrait,
-            task_id=task_id,
-            probe_red=probe_red,
-        )
+    critic, planted = attach_verify(
+        enrolled,
+        worktree=worktree,
+        portrait=portrait,
+        task_id=task_id,
+        probe_red=probe_red,
+        tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
+    )
+    if planted:
+        record["probes_planted"] = planted
     record["critic"] = critic
     timings["critic_s"] = round(time.perf_counter() - t0 - timings.get("tests_s", 0) - timings.get("probes_s", 0), 3)
     timings["total_s"] = round(time.perf_counter() - t0, 3)
@@ -711,11 +647,7 @@ def finish(root: Path) -> dict[str, Any]:
     if red:
         usage_note(root, "ship", 6, "block", "probe " + ",".join(red))
         raise ChainBroken("probe red: " + ", ".join(red) + "; will not deliver")
-    critic_block = _critic_block_message(verify_blob)
-    if critic_block:
-        usage_note(root, "ship", 6, "block", critic_block)
-        raise ChainBroken(critic_block)
-    # Probe/critic refuse keeps freeze (task still open). Thaw only once git must write canonical.
+    # Probe refuse keeps freeze (task still open). Critic is not a finish gate.
     thaw_canonical(root)
     try:
         return _finish_after_thaw(root, key, state, task, worktree)

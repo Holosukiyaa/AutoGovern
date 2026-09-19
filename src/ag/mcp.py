@@ -28,7 +28,8 @@ INSTRUCTIONS = (
     "Read-only critic: do not write product files, do not finish, do not git commit, and do not open a worktree. "
     "Insert a probe only via ag_probe_insert with already-seen evidence; ag_critic_pack is an exam pack, not a worker ticket. "
     "ag_critic_run does one read-only chat on that pack (no tools). "
-    "Path-hit probe red, critic rejected, or configured critic unavailable (other than not-configured) refuse finish. "
+    "Path-hit probe red or enrolled tests failing refuse finish. "
+    "Critic is a layer before the switch: rejected or configured unavailable does not refuse this ticket's finish. "
     "ag_verify may attach one read-only critic. "
     "ag_gui writes HTML from AG_HOME sqlite critic_event rows, not the old strategy poster."
 )

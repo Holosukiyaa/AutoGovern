@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import sys
 import unittest
 from pathlib import Path
@@ -79,6 +80,32 @@ class LaneTests(unittest.TestCase):
                 self.assertTrue(fields["pluggable"], item["code"])
                 self.assertEqual("usage", fields["probe"])
                 self.assertFalse(fields["in_product_tree"])
+
+    def test_run_fast_does_not_collect_loop_tests(self) -> None:
+        path = Path(__file__).resolve().parent / "run_fast.py"
+        spec = importlib.util.spec_from_file_location("ag_run_fast", path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        ids: list[str] = []
+
+        def walk(suite: unittest.TestSuite) -> None:
+            for item in suite:
+                if isinstance(item, unittest.TestSuite):
+                    walk(item)
+                else:
+                    ids.append(item.id())
+
+        walk(mod.load_suite())
+        joined = " ".join(ids)
+        self.assertTrue(ids)
+        self.assertNotIn("test_loop", joined)
+        self.assertNotIn("LoopTests", joined)
+        self.assertIn("test_critic_run", joined)
+        self.assertIn("test_lanes", joined)
+        self.assertIn("test_probe", joined)
+        self.assertIn("Critic is a layer before the switch", Path(__file__).resolve().parents[1].joinpath("src", "ag", "mcp.py").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

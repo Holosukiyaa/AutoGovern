@@ -67,7 +67,8 @@ TOOLS = [
     {
         "name": "ag_critic_pack",
         "description": (
-            "Build a read-only exam pack: exam, diff, changed files, one-hop imports, matching probe tails. "
+            "Build a read-only exam pack: exam, diff, changed files, one-hop imports, matching probe tails, "
+            "this_ticket_checks from worktree .ag-check/. "
             "Not a worker ticket. Does not include proof, product, or passed as a conclusion."
         ),
         "inputSchema": {
@@ -86,7 +87,7 @@ TOOLS = [
         "name": "ag_critic_run",
         "description": (
             "One read-only critic chat on the exam pack. No tools, no worktree. "
-            "Does not refuse finish. Unconfigured or void verdict is unavailable."
+            "Does not refuse finish. Rejected is critique, not a finish gate."
         ),
         "inputSchema": {
             "type": "object",
@@ -278,6 +279,24 @@ def neighbors(repo: Path, changed_files: list[dict[str, Any]]) -> list[str]:
     return out
 
 
+def _ticket_checks(repo: Path) -> list[dict[str, Any]]:
+    base = repo / ".ag-check"
+    if not base.is_dir():
+        return []
+    out: list[dict[str, Any]] = []
+    for path in sorted(base.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.suffix == ".pyc" or "__pycache__" in path.parts:
+            continue
+        try:
+            rel = path.resolve().relative_to(repo.resolve()).as_posix()
+        except (OSError, ValueError):
+            continue
+        out.append(_file_entry(repo, rel))
+    return out
+
+
 def pack(
     root: Path,
     *,
@@ -306,6 +325,7 @@ def pack(
         "changed_files": changed,
         "neighbors": hops,
         "probes": results,
+        "this_ticket_checks": _ticket_checks(repo),
     }
 
 
@@ -864,6 +884,76 @@ def critic_run(
         model=model,
         **extra,
     )
+
+
+def attach_verify(
+    enrolled: Path,
+    *,
+    worktree: Path,
+    portrait: str,
+    task_id: str,
+    probe_red: list[str],
+    tests_failed: bool = False,
+) -> tuple[dict[str, Any], list[Any]]:
+    """One critic pass after enrolled tests. Does not set product or refuse finish."""
+    cfg = load_config(enrolled)
+    configured = bool(cfg.get("error") or _configured(cfg))
+    critic: dict[str, Any] = {
+        "outcome": "unavailable",
+        "reason": "not-configured",
+        "store": "",
+        "configured": configured,
+    }
+    planted: list[Any] = []
+    logged = False
+    if tests_failed:
+        critic["reason"] = "tests-failed"
+    elif not str(portrait or "").strip():
+        if configured:
+            critic["reason"] = str(cfg.get("error") or "no-exam")
+    elif configured:
+        try:
+            raw = critic_run(
+                enrolled,
+                exam=portrait,
+                tree=worktree,
+                task_id=task_id,
+                probe_red=probe_red,
+            )
+            logged = True
+            critic = {
+                "outcome": str(raw.get("outcome") or "unavailable"),
+                "reason": str(raw.get("reason") or ""),
+                "store": str(raw.get("store") or ""),
+                "prompt_version": str(raw.get("prompt_version") or ""),
+                "configured": True,
+                "report_id": str(raw.get("report_id") or ""),
+            }
+            if raw.get("model"):
+                critic["model"] = raw["model"]
+            if str(raw.get("outcome") or "") == "rejected":
+                from .probe import plant_from_reject
+
+                planted = list(plant_from_reject(enrolled, items=raw.get("items"), tree=worktree) or [])
+        except Exception as exc:
+            critic = {
+                "outcome": "unavailable",
+                "reason": f"failed: {exc}",
+                "store": "",
+                "configured": True,
+            }
+    if not logged:
+        critic["report_id"] = append_log(
+            enrolled,
+            outcome=str(critic.get("outcome") or "unavailable"),
+            reason=str(critic.get("reason") or ""),
+            configured=bool(critic.get("configured")),
+            store=str(critic.get("store") or ""),
+            exam=portrait,
+            task_id=task_id,
+            probe_red=probe_red,
+        )
+    return critic, planted
 
 
 def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
