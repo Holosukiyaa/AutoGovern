@@ -5,20 +5,18 @@ Not a worker ticket. Does not write product files or refuse finish.
 from __future__ import annotations
 
 import ast
-import hashlib
 import json
 import os
 import re
 import subprocess
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .managed import ChainBroken, ag_home, project_key, real_root
 from .probe import evaluate as evaluate_probes
-from .store import append_llm_log, event_count, insert_critic_event, list_critic_events
+from .store import event_count, insert_critic_event, list_critic_events
 
 PACK_SCHEMA = "ag.critic-pack.v1"
 RUN_SCHEMA = "ag.critic-run.v1"
@@ -592,80 +590,13 @@ def verdict_problems(verdict: dict[str, Any]) -> list[str]:
     return problems
 
 
-def _write_report(root: Path, blob: dict[str, Any]) -> str:
-    path = report_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(blob, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return str(path)
+def append_log(root: Path, **kwargs: Any) -> str:
+    from .seat import append_log as seat_append
 
-
-def _sha256_text(text: str) -> str:
-    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
-
-
-def _trim_items(items: Any) -> list[dict[str, str]]:
-    out: list[dict[str, str]] = []
-    if not isinstance(items, list):
-        return out
-    for item in items[:20]:
-        if not isinstance(item, dict):
-            continue
-        out.append(
-            {
-                "name": str(item.get("name") or ""),
-                "status": str(item.get("status") or ""),
-                "evidence": str(item.get("evidence") or ""),
-                "comment": str(item.get("comment") or ""),
-            }
-        )
-    return out
-
-
-def append_log(
-    root: Path,
-    *,
-    outcome: str,
-    reason: str,
-    configured: bool,
-    prompt_version: str = PROMPT_VERSION,
-    store: str = "",
-    exam: str = "",
-    pack: dict[str, Any] | None = None,
-    items: Any = None,
-    task_id: str = "",
-    model: str = "",
-    probe_red: list[str] | None = None,
-    allow_same_family: bool = False,
-    thinking: str = "",
-    timings: dict[str, Any] | None = None,
-) -> str:
-    try:
-        row: dict[str, Any] = {
-            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "outcome": outcome,
-            "reason": reason,
-            "configured": bool(configured),
-            "prompt_version": prompt_version or PROMPT_VERSION,
-            "store": store,
-            "exam_sha256": _sha256_text(exam),
-            "pack_sha256": _sha256_text(json.dumps(pack, ensure_ascii=False, sort_keys=True)) if pack is not None else "",
-            "items": _trim_items(items),
-        }
-        if task_id:
-            row["task_id"] = task_id
-        if model:
-            row["model"] = model
-        if probe_red:
-            row["probe_red"] = [str(item) for item in probe_red if str(item)]
-        if allow_same_family:
-            row["allow_same_family"] = True
-        if thinking:
-            row["thinking"] = str(thinking)[:20000]
-        if timings:
-            row["timings"] = timings
-        return append_llm_log(root, "critic_event", row)
-    except OSError:
-        return ""
+    if "pack" not in kwargs and "pack_blob" in kwargs:
+        kwargs["pack"] = kwargs.pop("pack_blob")
+    kwargs.pop("prompt_version", None)
+    return seat_append("critic", root, **kwargs)
 
 
 def list_log(root: Path, limit: int = DEFAULT_LOG_LIMIT) -> dict[str, Any]:
@@ -702,58 +633,12 @@ def _backfill_jsonl(root: Path) -> None:
                 return
 
 
-def _result(
-    root: Path,
-    *,
-    outcome: str,
-    reason: str,
-    pack: dict[str, Any],
-    items: list[Any] | None = None,
-    summary: str = "",
-    model: str | None = None,
-    configured: bool = False,
-    exam: str = "",
-    task_id: str = "",
-    probe_red: list[str] | None = None,
-    allow_same_family: bool = False,
-    thinking: str = "",
-    timings: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    blob: dict[str, Any] = {
-        "schema": RUN_SCHEMA,
-        "outcome": outcome,
-        "reason": reason,
-        "items": list(items or []),
-        "summary": summary,
-        "prompt_version": PROMPT_VERSION,
-        "pack": pack,
-        "store": "",
-        "configured": bool(configured),
-    }
-    if model:
-        blob["model"] = model
-    try:
-        blob["store"] = _write_report(root, blob)
-    except OSError:
-        blob["store"] = ""
-    blob["report_id"] = append_log(
-        root,
-        outcome=outcome,
-        reason=reason,
-        configured=bool(configured),
-        prompt_version=PROMPT_VERSION,
-        store=str(blob.get("store") or ""),
-        exam=exam,
-        pack=pack,
-        items=items,
-        task_id=task_id,
-        model=str(model or ""),
-        probe_red=probe_red,
-        allow_same_family=bool(allow_same_family),
-        thinking=thinking,
-        timings=timings,
-    )
-    return blob
+def _result(root: Path, **kwargs: Any) -> dict[str, Any]:
+    from .seat import seat_result
+
+    if "pack" not in kwargs and "pack_blob" in kwargs:
+        kwargs["pack"] = kwargs.pop("pack_blob")
+    return seat_result("critic", root, **kwargs)
 
 
 def critic_run(
@@ -767,111 +652,18 @@ def critic_run(
     task_id: str = "",
     probe_red: list[str] | None = None,
 ) -> dict[str, Any]:
-    packed = pack(root, exam=exam, exam_file=exam_file, base=base, head=head, tree=tree)
-    cfg = load_config(root)
-    configured = bool(cfg.get("error") or _configured(cfg))
-    extra = {
-        "configured": configured,
-        "exam": str(packed.get("exam") or ""),
-        "task_id": task_id,
-        "probe_red": probe_red,
-    }
-    if cfg.get("error"):
-        return _result(root, outcome="unavailable", reason=str(cfg["error"]), pack=packed, **extra)
-    if not _configured(cfg):
-        return _result(root, outcome="unavailable", reason="not-configured", pack=packed, **extra)
-    if same_family(str(cfg.get("model") or ""), str(cfg.get("worker_model") or "")):
-        if not cfg.get("allow_same_family"):
-            return _result(
-                root,
-                outcome="unavailable",
-                reason="andersen: same family",
-                pack=packed,
-                model=str(cfg.get("model") or ""),
-                **extra,
-            )
-        extra["allow_same_family"] = True
-    messages = [
-        {"role": "system", "content": prompt_text()},
-        {"role": "user", "content": json.dumps(packed, ensure_ascii=False)},
-    ]
-    held = {"r": "", "c": ""}
+    from .seat import seat_run
 
-    def on_delta(reasoning_text: str, content_text: str) -> None:
-        held["r"] = reasoning_text
-        held["c"] = content_text
-        try:
-            from .gui import write_live
-
-            write_live(root, phase="critic", thinking=reasoning_text, content=content_text)
-        except Exception:
-            pass
-
-    run_cfg = dict(cfg)
-    run_cfg["on_delta"] = on_delta
-    try:
-        content, reasoning = complete_chat(run_cfg, messages)
-        extra["thinking"] = held["r"] or reasoning
-    except RuntimeError as exc:
-        return _result(
-            root,
-            outcome="unavailable",
-            reason=str(exc),
-            pack=packed,
-            model=str(cfg.get("model") or ""),
-            **extra,
-        )
-    verdict: dict[str, Any] | None = None
-    parse_error: ValueError | None = None
-    for blob in (content, reasoning):
-        if not str(blob or "").strip():
-            continue
-        try:
-            verdict = parse_verdict(blob)
-            break
-        except ValueError as exc:
-            parse_error = exc
-    if verdict is None:
-        return _result(
-            root,
-            outcome="unavailable",
-            reason=f"void: {parse_error or 'critic output is not JSON'} (作废)",
-            pack=packed,
-            model=str(cfg.get("model") or ""),
-            **extra,
-        )
-    problems = verdict_problems(verdict)
-    items = verdict.get("items") if isinstance(verdict.get("items"), list) else []
-    summary = str(verdict.get("summary") or "")
-    model = str(cfg.get("model") or "")
-    if problems:
-        return _result(
-            root,
-            outcome="unavailable",
-            reason="void: " + "; ".join(problems),
-            pack=packed,
-            items=items,
-            summary=summary,
-            model=model,
-            **extra,
-        )
-    raw_verdict = str(verdict.get("verdict") or verdict.get("outcome") or "").strip().casefold()
-    has_fail = any(
-        isinstance(item, dict) and _item_status(item) == "fail" for item in items
-    )
-    if raw_verdict in {"reject", "rejected", "fail", "failed"} or has_fail:
-        outcome = "rejected"
-    else:
-        outcome = "passed"
-    return _result(
+    return seat_run(
+        "critic",
         root,
-        outcome=outcome,
-        reason="",
-        pack=packed,
-        items=items,
-        summary=summary,
-        model=model,
-        **extra,
+        exam=exam,
+        exam_file=exam_file,
+        base=base,
+        head=head,
+        tree=tree,
+        task_id=task_id,
+        probe_red=probe_red,
     )
 
 
@@ -884,65 +676,20 @@ def attach_verify(
     probe_red: list[str],
     tests_failed: bool = False,
 ) -> tuple[dict[str, Any], list[Any]]:
-    """One critic pass after enrolled tests. Does not set product or refuse finish."""
-    cfg = load_config(enrolled)
-    configured = bool(cfg.get("error") or _configured(cfg))
-    critic: dict[str, Any] = {
-        "outcome": "unavailable",
-        "reason": "not-configured",
-        "store": "",
-        "configured": configured,
-    }
-    planted: list[Any] = []
-    logged = False
-    if tests_failed:
-        critic["reason"] = "tests-failed"
-    elif not str(portrait or "").strip():
-        if configured:
-            critic["reason"] = str(cfg.get("error") or "no-exam")
-    elif configured:
-        try:
-            raw = critic_run(
-                enrolled,
-                exam=portrait,
-                tree=worktree,
-                task_id=task_id,
-                probe_red=probe_red,
-            )
-            logged = True
-            critic = {
-                "outcome": str(raw.get("outcome") or "unavailable"),
-                "reason": str(raw.get("reason") or ""),
-                "store": str(raw.get("store") or ""),
-                "prompt_version": str(raw.get("prompt_version") or ""),
-                "configured": True,
-                "report_id": str(raw.get("report_id") or ""),
-            }
-            if raw.get("model"):
-                critic["model"] = raw["model"]
-            if str(raw.get("outcome") or "") == "rejected":
-                from .probe import plant_from_reject
+    from .seat import attach_verify as seat_attach
 
-                planted = list(plant_from_reject(enrolled, items=raw.get("items"), tree=worktree) or [])
-        except Exception as exc:
-            critic = {
-                "outcome": "unavailable",
-                "reason": f"failed: {exc}",
-                "store": "",
-                "configured": True,
-            }
-    if not logged:
-        critic["report_id"] = append_log(
-            enrolled,
-            outcome=str(critic.get("outcome") or "unavailable"),
-            reason=str(critic.get("reason") or ""),
-            configured=bool(critic.get("configured")),
-            store=str(critic.get("store") or ""),
-            exam=portrait,
-            task_id=task_id,
-            probe_red=probe_red,
-        )
-    return critic, planted
+    raw = seat_attach(
+        "critic",
+        enrolled,
+        worktree=worktree,
+        portrait=portrait,
+        task_id=task_id,
+        probe_red=probe_red,
+        tests_failed=tests_failed,
+    )
+    if isinstance(raw, tuple):
+        return raw
+    return raw, []
 
 
 def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
