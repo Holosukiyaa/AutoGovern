@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import html
+import os
+import sys
 import webbrowser
 from pathlib import Path
 from typing import Any
@@ -47,6 +49,27 @@ def enrolled_roots() -> list[Path]:
     return found
 
 
+def _pick_tk(roots: list[Path]) -> Path | None:
+    try:
+        import tkinter as tk
+    except Exception:
+        return None
+    chosen: list[Path] = []
+    win = tk.Tk()
+    win.title("ag gui — pick repo")
+    win.geometry("720x280")
+    var = tk.StringVar(value=str(roots[0]))
+    tk.Label(win, text="Choose enrolled repo", anchor="w").pack(fill="x", padx=10, pady=(10, 4))
+    for path in roots:
+        tk.Radiobutton(win, text=str(path), variable=var, value=str(path), anchor="w", justify="left").pack(fill="x", padx=12)
+    def ok() -> None:
+        chosen.append(Path(var.get()))
+        win.destroy()
+    tk.Button(win, text="Open HTML", command=ok).pack(pady=12)
+    win.mainloop()
+    return chosen[0] if chosen else None
+
+
 def resolve_gui_root(explicit: str | None = None, *, reader=input) -> Path:
     if explicit and str(explicit).strip():
         return Path(str(explicit).strip())
@@ -55,6 +78,11 @@ def resolve_gui_root(explicit: str | None = None, *, reader=input) -> Path:
         raise ChainBroken("no enrolled repos; pass a path to ag gui")
     if len(roots) == 1:
         return roots[0]
+    picked = _pick_tk(roots)
+    if picked is not None:
+        return picked
+    if not (sys.stdin and sys.stdin.isatty()):
+        raise ChainBroken("no repo selected")
     for index, path in enumerate(roots, start=1):
         print(f"{index}. {path}", flush=True)
     raw = str(reader()).strip()
@@ -238,7 +266,10 @@ pre {{ white-space: pre-wrap; background: #111; color: #eee; padding: 1rem; max-
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(page, encoding="utf-8")
     if browse:
-        webbrowser.open(out.as_uri())
+        if os.name == "nt":
+            os.startfile(str(out))  # type: ignore[attr-defined]
+        else:
+            webbrowser.open(out.as_uri())
     return out
 
 
