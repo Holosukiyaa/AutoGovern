@@ -15,7 +15,7 @@ TOOLS = [
     },
     {
         "name": "ag_heal_patrol",
-        "description": "Read-only disease patrol with required gear probes|local|repo|mess. Does not refuse finish or start a task.",
+        "description": "Read-only disease patrol. Default gear is local (needs paths). Other gears: probes|repo|mess. Does not refuse finish or start a task.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -25,7 +25,7 @@ TOOLS = [
                 "max_lines": {"type": "integer"},
                 "paths": {"type": "array", "items": {"type": "string"}},
             },
-            "required": ["root", "gear"],
+            "required": ["root"],
         },
     },
 ]

@@ -402,9 +402,9 @@ def patrol(
     enrolled = real_root(root)
     if lookup_project(enrolled) is None:
         raise ChainBroken("not enrolled")
-    mode = str(gear or "").strip().casefold()
+    mode = str(gear or "local").strip().casefold() or "local"
     if mode not in GEARS:
-        raise ChainBroken("gear is required: probes|local|repo|mess")
+        raise ChainBroken("gear must be probes|local|repo|mess")
     scan_root = real_root(Path(tree)) if tree is not None else enrolled
     limit = _max_lines(max_lines)
     wanted = _as_paths(paths)
@@ -439,7 +439,7 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     tree = args.get("tree")
     return patrol(
         Path(str(args.get("root") or "")),
-        gear=str(args.get("gear") or ""),
+        gear=str(args.get("gear") or "local"),
         tree=Path(str(tree)) if tree else None,
         max_lines=args.get("max_lines"),
         paths=args.get("paths") or args.get("path"),

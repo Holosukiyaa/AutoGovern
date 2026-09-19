@@ -58,20 +58,28 @@ class HealPatrolTests(unittest.TestCase):
             patrol(self.root, gear="repo")
         self.assertIn("enroll", str(raised.exception).lower())
 
-    def test_missing_gear_fails(self) -> None:
+    def test_default_gear_is_local(self) -> None:
+        (self.root / "glue.py").write_text("from ok import *\n", encoding="utf-8")
+        (self.root / "fat.py").write_text("x=1\n" * 60, encoding="utf-8")
+        _git(self.root, "add", ".")
+        _git(self.root, "commit", "-m", "mix")
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])
         with self.assertRaises(ChainBroken) as raised:
             patrol(self.root)
-        self.assertIn("gear", str(raised.exception).lower())
+        self.assertIn("path", str(raised.exception).lower())
+        out = patrol(self.root, paths=["glue.py"], max_lines=50)
+        self.assertEqual("local", out["gear"])
+        self.assertTrue(any(str(n).startswith("heal-") for n in out["needles"]))
+        self.assertTrue(all("fat.py" not in str(item.get("path") or "") for item in out["diseases"]))
         err = io.StringIO()
-        out = io.StringIO()
-        with patch("sys.stdout", out), patch("sys.stderr", err):
+        printed = io.StringIO()
+        with patch("sys.stdout", printed), patch("sys.stderr", err):
             try:
                 code = main(["heal-patrol", str(self.root)])
             except SystemExit as exc:
                 code = 0 if exc.code is None else int(exc.code)
         self.assertNotEqual(0, code)
-        self.assertIn("gear", (err.getvalue() + out.getvalue()).lower())
+        self.assertIn("path", (err.getvalue() + printed.getvalue()).lower())
 
     def test_empty_scan_no_needles(self) -> None:
         enroll(self.root, test_argv=[PY, "-c", "raise SystemExit(0)"])

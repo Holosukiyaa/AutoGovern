@@ -160,9 +160,9 @@ def main(argv: list[str] | None = None) -> int:
     patrol_p.add_argument("root")
     patrol_p.add_argument(
         "--gear",
-        required=True,
+        default="local",
         choices=["probes", "local", "repo", "mess"],
-        help="probes=run existing needles; local=scan --path only; repo=full scan; mess=repo needles plus optional short chat",
+        help="default local (needs --path). probes=existing needles; repo=full scan; mess=queue a repair",
     )
     patrol_p.add_argument("--path", action="append", dest="paths", help="local gear: repository-relative path; repeatable")
     patrol_p.add_argument("--tree", default="", help="scan this tree (worktree); store still uses enrolled root")
