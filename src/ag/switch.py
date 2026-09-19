@@ -18,7 +18,7 @@ from .critic import (
     verdict_problems,
 )
 from .managed import ChainBroken, ag_home, project_key, real_root
-from .store import insert_switch_event
+from .store import append_llm_log
 
 RUN_SCHEMA = "ag.switch-run.v1"
 PROMPT_NAME = "switch_prompt.md"
@@ -131,18 +131,7 @@ def append_log(
             row["thinking"] = str(thinking)[:20000]
         if timings:
             row["timings"] = timings
-        path = log_path(root)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            row_id = insert_switch_event(root, row)
-            report_id = f"sw-{row_id}" if row_id else ""
-        except Exception:
-            report_id = "sw-" + _sha256_text(row["ts"] + row["outcome"] + row.get("exam_sha256", ""))[:12]
-        if report_id:
-            row["report_id"] = report_id
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-        return report_id
+        return append_llm_log(root, "switch_event", row)
     except OSError:
         return ""
 

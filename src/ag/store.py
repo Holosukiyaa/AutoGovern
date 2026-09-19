@@ -1,6 +1,7 @@
 """Project SQLite under AG_HOME. Not in the product tree."""
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -10,6 +11,15 @@ from .managed import ag_home, project_key, real_root
 
 DB_NAME = "ag.sqlite"
 PENDING_NAME = "pending_repairs.json"
+LLM_PREFIX = {"critic_event": "cr", "switch_event": "sw"}
+LLM_JSONL = {"critic_event": "critic.jsonl", "switch_event": "switch.jsonl"}
+LLM_INSERT = """
+INSERT INTO {table} (
+    ts, outcome, reason, configured, prompt_version, store,
+    exam_sha256, pack_sha256, items_json, task_id, model,
+    probe_red_json, allow_same_family, thinking, timings_json
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
 
 
 def db_path(root: Path) -> Path:
@@ -95,17 +105,13 @@ def connect(root: Path) -> sqlite3.Connection:
     return conn
 
 
-def insert_critic_event(root: Path, row: dict[str, Any]) -> int:
+def insert_llm_event(root: Path, table: str, row: dict[str, Any]) -> int:
+    if table not in LLM_PREFIX:
+        raise ValueError(table)
     conn = connect(root)
     try:
         cur = conn.execute(
-            """
-            INSERT INTO critic_event (
-                ts, outcome, reason, configured, prompt_version, store,
-                exam_sha256, pack_sha256, items_json, task_id, model,
-                probe_red_json, allow_same_family, thinking, timings_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
+            LLM_INSERT.format(table=table),
             (
                 str(row.get("ts") or ""),
                 str(row.get("outcome") or ""),
@@ -130,11 +136,16 @@ def insert_critic_event(root: Path, row: dict[str, Any]) -> int:
         conn.close()
 
 
-def _row_to_event(row: sqlite3.Row) -> dict[str, Any]:
+def insert_critic_event(root: Path, row: dict[str, Any]) -> int:
+    return insert_llm_event(root, "critic_event", row)
+
+
+def _row_to_event(row: sqlite3.Row, prefix: str = "cr") -> dict[str, Any]:
     items = json.loads(row["items_json"] or "[]")
     probe_red = json.loads(row["probe_red_json"] or "[]")
+    prefix = str(prefix or "cr")
     out: dict[str, Any] = {
-        "report_id": f"cr-{row['id']}",
+        "report_id": f"{prefix}-{row['id']}",
         "ts": row["ts"],
         "outcome": row["outcome"],
         "reason": row["reason"],
@@ -167,76 +178,58 @@ def _row_to_event(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def insert_switch_event(root: Path, row: dict[str, Any]) -> int:
+    return insert_llm_event(root, "switch_event", row)
+
+
+def list_llm_events(root: Path, table: str, limit: int = 20) -> list[dict[str, Any]]:
+    prefix = LLM_PREFIX.get(table)
+    if not prefix:
+        raise ValueError(table)
     conn = connect(root)
     try:
-        cur = conn.execute(
-            """
-            INSERT INTO switch_event (
-                ts, outcome, reason, configured, prompt_version, store,
-                exam_sha256, pack_sha256, items_json, task_id, model,
-                probe_red_json, allow_same_family, thinking, timings_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                str(row.get("ts") or ""),
-                str(row.get("outcome") or ""),
-                str(row.get("reason") or ""),
-                1 if row.get("configured") else 0,
-                str(row.get("prompt_version") or ""),
-                str(row.get("store") or ""),
-                str(row.get("exam_sha256") or ""),
-                str(row.get("pack_sha256") or ""),
-                json.dumps(row.get("items") or [], ensure_ascii=False),
-                str(row.get("task_id") or ""),
-                str(row.get("model") or ""),
-                json.dumps(row.get("probe_red") or [], ensure_ascii=False),
-                1 if row.get("allow_same_family") else 0,
-                str(row.get("thinking") or "")[:20000],
-                json.dumps(row.get("timings") or {}, ensure_ascii=False),
-            ),
-        )
-        conn.commit()
-        return int(cur.lastrowid or 0)
+        cap = int(limit) if limit else 20
+        if cap < 0:
+            cap = 20
+        rows = conn.execute(f"SELECT * FROM {table} ORDER BY id ASC").fetchall()
     finally:
         conn.close()
-
-
-def _switch_row_to_event(row: sqlite3.Row) -> dict[str, Any]:
-    blob = _row_to_event(row)
-    blob["report_id"] = f"sw-{row['id']}"
-    return blob
+    events = [_row_to_event(row, prefix) for row in rows]
+    if cap > 0:
+        return events[-cap:]
+    return events
 
 
 def list_switch_events(root: Path, limit: int = 20) -> list[dict[str, Any]]:
-    conn = connect(root)
-    try:
-        cap = int(limit) if limit else 20
-        if cap < 0:
-            cap = 20
-        rows = conn.execute("SELECT * FROM switch_event ORDER BY id ASC").fetchall()
-    finally:
-        conn.close()
-    events = [_switch_row_to_event(row) for row in rows]
-    if cap > 0:
-        return events[-cap:]
-    return events
+    return list_llm_events(root, "switch_event", limit=limit)
 
 
 def list_critic_events(root: Path, limit: int = 20) -> list[dict[str, Any]]:
-    conn = connect(root)
+    return list_llm_events(root, "critic_event", limit=limit)
+
+
+def project_dir(root: Path) -> Path:
+    return ag_home() / "projects" / project_key(real_root(root))
+
+
+def append_llm_log(root: Path, table: str, row: dict[str, Any]) -> str:
+    prefix = LLM_PREFIX[table]
+    name = LLM_JSONL[table]
     try:
-        cap = int(limit) if limit else 20
-        if cap < 0:
-            cap = 20
-        rows = conn.execute(
-            "SELECT * FROM critic_event ORDER BY id ASC"
-        ).fetchall()
-    finally:
-        conn.close()
-    events = [_row_to_event(row) for row in rows]
-    if cap > 0:
-        return events[-cap:]
-    return events
+        path = project_dir(root) / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            row_id = insert_llm_event(root, table, row)
+            report_id = f"{prefix}-{row_id}" if row_id else ""
+        except Exception:
+            blob = str(row.get("ts") or "") + str(row.get("outcome") or "") + str(row.get("exam_sha256") or "")
+            report_id = prefix + "-" + hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
+        if report_id:
+            row["report_id"] = report_id
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+        return report_id
+    except OSError:
+        return ""
 
 
 def upsert_probe(root: Path, row: dict[str, Any]) -> None:

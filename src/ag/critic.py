@@ -18,7 +18,7 @@ from typing import Any
 
 from .managed import ChainBroken, ag_home, project_key, real_root
 from .probe import evaluate as evaluate_probes
-from .store import event_count, insert_critic_event, list_critic_events
+from .store import append_llm_log, event_count, insert_critic_event, list_critic_events
 
 PACK_SCHEMA = "ag.critic-pack.v1"
 RUN_SCHEMA = "ag.critic-run.v1"
@@ -663,18 +663,7 @@ def append_log(
             row["thinking"] = str(thinking)[:20000]
         if timings:
             row["timings"] = timings
-        path = log_path(root)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            row_id = insert_critic_event(root, row)
-            report_id = f"cr-{row_id}" if row_id else ""
-        except Exception:
-            report_id = "cr-" + _sha256_text(row["ts"] + row["outcome"] + row.get("exam_sha256", ""))[:12]
-        if report_id:
-            row["report_id"] = report_id
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-        return report_id
+        return append_llm_log(root, "critic_event", row)
     except OSError:
         return ""
 
