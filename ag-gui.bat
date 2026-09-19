@@ -8,7 +8,7 @@ if not defined PY (
   where py >nul 2>&1 && set "PY=py -3"
 )
 if not defined PY (
-  echo Python not on PATH. Install Python or add it to PATH.
+  echo 找不到运行环境，请先安装解释器并加入系统路径。
   pause
   exit /b 1
 )
