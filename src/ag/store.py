@@ -64,6 +64,28 @@ def connect(root: Path) -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS switch_event (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            configured INTEGER NOT NULL DEFAULT 0,
+            prompt_version TEXT NOT NULL DEFAULT '',
+            store TEXT NOT NULL DEFAULT '',
+            exam_sha256 TEXT NOT NULL DEFAULT '',
+            pack_sha256 TEXT NOT NULL DEFAULT '',
+            items_json TEXT NOT NULL DEFAULT '[]',
+            task_id TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            probe_red_json TEXT NOT NULL DEFAULT '[]',
+            allow_same_family INTEGER NOT NULL DEFAULT 0,
+            thinking TEXT NOT NULL DEFAULT '',
+            timings_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
     cols = {str(item[1]) for item in conn.execute("PRAGMA table_info(critic_event)").fetchall()}
     if "thinking" not in cols:
         conn.execute("ALTER TABLE critic_event ADD COLUMN thinking TEXT NOT NULL DEFAULT ''")
@@ -142,6 +164,62 @@ def _row_to_event(row: sqlite3.Row) -> dict[str, Any]:
         if isinstance(timings, dict) and timings:
             out["timings"] = timings
     return out
+
+
+def insert_switch_event(root: Path, row: dict[str, Any]) -> int:
+    conn = connect(root)
+    try:
+        cur = conn.execute(
+            """
+            INSERT INTO switch_event (
+                ts, outcome, reason, configured, prompt_version, store,
+                exam_sha256, pack_sha256, items_json, task_id, model,
+                probe_red_json, allow_same_family, thinking, timings_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(row.get("ts") or ""),
+                str(row.get("outcome") or ""),
+                str(row.get("reason") or ""),
+                1 if row.get("configured") else 0,
+                str(row.get("prompt_version") or ""),
+                str(row.get("store") or ""),
+                str(row.get("exam_sha256") or ""),
+                str(row.get("pack_sha256") or ""),
+                json.dumps(row.get("items") or [], ensure_ascii=False),
+                str(row.get("task_id") or ""),
+                str(row.get("model") or ""),
+                json.dumps(row.get("probe_red") or [], ensure_ascii=False),
+                1 if row.get("allow_same_family") else 0,
+                str(row.get("thinking") or "")[:20000],
+                json.dumps(row.get("timings") or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        return int(cur.lastrowid or 0)
+    finally:
+        conn.close()
+
+
+def _switch_row_to_event(row: sqlite3.Row) -> dict[str, Any]:
+    blob = _row_to_event(row)
+    blob["report_id"] = f"sw-{row['id']}"
+    return blob
+
+
+def list_switch_events(root: Path, limit: int = 20) -> list[dict[str, Any]]:
+    conn = connect(root)
+    try:
+        cap = int(limit) if limit else 20
+        if cap < 0:
+            cap = 20
+        rows = conn.execute("SELECT * FROM switch_event ORDER BY id ASC").fetchall()
+    finally:
+        conn.close()
+    events = [_switch_row_to_event(row) for row in rows]
+    if cap > 0:
+        return events[-cap:]
+    return events
 
 
 def list_critic_events(root: Path, limit: int = 20) -> list[dict[str, Any]]:

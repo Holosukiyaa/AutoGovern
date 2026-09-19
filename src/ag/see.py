@@ -10,6 +10,7 @@ from .catalog import list_lane
 from .critic import TOOLS as CRITIC_TOOLS
 from .managed import ag_home, lookup_project, project_key, real_root
 from .probe import TOOLS as PROBE_TOOLS
+from .switch import TOOLS as SWITCH_TOOLS
 
 ID = "see"
 JOB = "看见"
@@ -28,6 +29,7 @@ TOOLS = [
     },
     *PROBE_TOOLS,
     *CRITIC_TOOLS,
+    *SWITCH_TOOLS,
 ]
 
 
@@ -133,4 +135,8 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         from .critic import call as critic_call
 
         return critic_call(name, args)
+    if name in {item["name"] for item in SWITCH_TOOLS}:
+        from .switch import call as switch_call
+
+        return switch_call(name, args)
     raise ChainBroken(f"see has no tool {name}")

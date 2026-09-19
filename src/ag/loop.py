@@ -14,6 +14,8 @@ from typing import Any
 
 from .freeze import freeze_canonical, thaw_canonical
 from .hook import hook_main
+from .switch import block_message as _switch_block_message
+from .switch import report_id_from_verify as _switch_report_id
 from .managed import ChainBroken, ag_home, lookup_project, project_key, real_root, load_managed, save_managed
 from .see import note as usage_note
 
@@ -89,13 +91,21 @@ def _hooks_dir(key: str) -> Path:
     return ag_home() / "hooks" / key
 
 
-def _write_hook(key: str) -> Path:
+def _hook_src(enrolled: Path | None = None) -> Path:
+    if enrolled is not None:
+        candidate = Path(enrolled) / "src"
+        if (candidate / "ag").is_dir():
+            return candidate
+    return SRC
+
+
+def _write_hook(key: str, enrolled: Path | None = None) -> Path:
     folder = _hooks_dir(key)
     folder.mkdir(parents=True, exist_ok=True)
     body = (
         "#!/bin/sh\n"
         f"export AG_HOME='{_posix(ag_home())}'\n"
-        f"export PYTHONPATH='{_posix(SRC)}'\n"
+        f"export PYTHONPATH='{_posix(_hook_src(enrolled))}'\n"
         f"'{_posix(Path(sys.executable))}' -m ag hook\n"
         "exit $?\n"
     )
@@ -109,11 +119,8 @@ def _write_hook(key: str) -> Path:
     return folder
 
 
-def _ensure_hook_files(key: str) -> Path:
-    folder = _hooks_dir(key)
-    if (folder / "pre-commit").is_file() and (folder / "prepare-commit-msg").is_file():
-        return folder
-    return _write_hook(key)
+def _ensure_hook_files(key: str, enrolled: Path | None = None) -> Path:
+    return _write_hook(key, enrolled)
 
 
 def _hook_ok(root: Path, key: str) -> bool:
@@ -200,13 +207,13 @@ def _critic_report_id(verify: dict[str, Any] | None) -> str:
 def _product(test_argv: list[str], verify: dict[str, Any] | None) -> str:
     if _probe_red_ids(verify):
         return "failed"
-    if not test_argv:
-        return "undeclared"
     if not verify or "exit" not in verify:
         return "pending"
-    if int(verify["exit"]) == 0:
-        return "passed"
-    return "failed"
+    if test_argv and int(verify["exit"]) != 0:
+        return "failed"
+    if _switch_block_message(verify):
+        return "failed"
+    return "passed"
 
 
 def _process(task: dict[str, Any] | None) -> str:
@@ -342,7 +349,7 @@ def enroll(root: Path, *, test_argv: list[str] | None = None, note: str = "") ->
     if not found:
         blob["projects"].append(payload)
     save_managed(blob)
-    hooks = _write_hook(key)
+    hooks = _write_hook(key, root)
     git(root, "config", "--local", "ag.key", key)
     git(root, "config", "--local", "ag.previousHooksPath", previous)
     git(root, "config", "--local", "core.hooksPath", _posix(hooks))
@@ -364,7 +371,7 @@ def status(root: Path) -> dict[str, Any]:
     if item is None:
         raise ChainBroken(f"not enrolled: {root}")
     key = str(item.get("key") or project_key(root))
-    _ensure_hook_files(key)
+    _ensure_hook_files(key, root)
     test_argv = [str(x) for x in (item.get("test_argv") or [])]
     task = load_task(key)
     verify = task.get("verify") if isinstance(task, dict) else None
@@ -397,13 +404,15 @@ def status(root: Path) -> dict[str, Any]:
         "product": product,
         "reminder": "process complete is not product passed",
         "worker_note": (
-            "After ag_verify you receive critic.report_id (passed, rejected, or unavailable). "
-            "Cite that id when you close the round. You do not receive the critic report body."
+            "After ag_verify you receive critic.report_id and switch.report_id. "
+            "Cite switch.report_id when you close. You do not receive report bodies. "
+            "Switch is the finish gate; critic is not."
         ),
         "task": task,
         "portrait": (task or {}).get("portrait") if task else "",
         "worktree": (task or {}).get("worktree") if task else "",
         "critic_report_id": _critic_report_id(verify if isinstance(verify, dict) else None),
+        "switch_report_id": _switch_report_id(verify if isinstance(verify, dict) else None),
     }
     try:
         from .store import pending_summary
@@ -571,6 +580,22 @@ def verify(root: Path) -> dict[str, Any]:
         record["probes_planted"] = planted
     record["critic"] = critic
     timings["critic_s"] = round(time.perf_counter() - t0 - timings.get("tests_s", 0) - timings.get("probes_s", 0), 3)
+    from .switch import attach_verify as attach_switch
+
+    switch = attach_switch(
+        enrolled,
+        worktree=worktree,
+        portrait=portrait,
+        task_id=task_id,
+        probe_red=probe_red,
+        critic=critic,
+        tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
+    )
+    record["switch"] = switch
+    timings["switch_s"] = round(
+        time.perf_counter() - t0 - timings.get("tests_s", 0) - timings.get("probes_s", 0) - timings.get("critic_s", 0),
+        3,
+    )
     timings["total_s"] = round(time.perf_counter() - t0, 3)
     record["timings"] = timings
     try:
@@ -597,6 +622,8 @@ def verify(root: Path) -> dict[str, Any]:
     out["probe_red"] = list(record["probe_red"])
     out["missing"] = list(record["missing"])
     out["critic"] = critic
+    out["switch"] = switch
+    out["switch_report_id"] = str(switch.get("report_id") or "")
     out["probes_planted"] = list(record.get("probes_planted") or [])
     out["timings"] = dict(record.get("timings") or {})
     try:
@@ -647,7 +674,11 @@ def finish(root: Path) -> dict[str, Any]:
     if red:
         usage_note(root, "ship", 6, "block", "probe " + ",".join(red))
         raise ChainBroken("probe red: " + ", ".join(red) + "; will not deliver")
-    # Probe refuse keeps freeze (task still open). Critic is not a finish gate.
+    switch_block = _switch_block_message(verify_blob)
+    if switch_block:
+        usage_note(root, "ship", 6, "block", switch_block)
+        raise ChainBroken(switch_block)
+    # Probe/switch refuse keeps freeze. Critic is not a finish gate.
     thaw_canonical(root)
     try:
         return _finish_after_thaw(root, key, state, task, worktree)
@@ -713,6 +744,7 @@ def _finish_after_thaw(
         "reminder": "process complete is not product passed",
         "portrait": portrait,
         "critic_report_id": _critic_report_id(task.get("verify") if isinstance(task.get("verify"), dict) else None),
+        "switch_report_id": _switch_report_id(task.get("verify") if isinstance(task.get("verify"), dict) else None),
         "head": git(root, "rev-parse", "HEAD"),
         "hazards": status(root)["hazards"],
     }

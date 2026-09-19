@@ -44,7 +44,7 @@ TOOLS = [
     },
     {
         "name": "ag_verify",
-        "description": "Run enrolled tests in the worktree and pin git write-tree. product failed is not an MCP error.",
+        "description": "Run enrolled tests (if any), probes, critic, then switch; pin git write-tree. product failed is not an MCP error.",
         "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}}, "required": ["root"]},
     },
     {

@@ -168,6 +168,21 @@ def main(argv: list[str] | None = None) -> int:
     patrol_p.add_argument("--tree", default="", help="scan this tree (worktree); store still uses enrolled root")
     patrol_p.add_argument("--max-lines", type=int, default=0, help="oversized threshold; default 800")
     sub.add_parser("critic-prompt", help="print the read-only critic startup prompt")
+    run_s = sub.add_parser(
+        "switch-run",
+        help="one switch chat; this is the finish gate",
+        description=(
+            "One switch chat; rejected or unavailable refuse finish. "
+            "Uses the same critic.json endpoint. Report: AG_HOME/projects/<key>/switch-last.json"
+        ),
+    )
+    run_s.add_argument("root")
+    run_s_exam = run_s.add_mutually_exclusive_group(required=True)
+    run_s_exam.add_argument("--exam", help="exam text (user words + portrait)")
+    run_s_exam.add_argument("--exam-file", help="path to exam text")
+    run_s.add_argument("--base", default="", help="diff base ref; default is working tree vs HEAD")
+    run_s.add_argument("--head", default="", help="diff head ref; requires --base")
+    sub.add_parser("switch-prompt", help="print the switch startup prompt")
     sub.add_parser("hook", help="git pre-commit helper")
     args = parser.parse_args(argv)
     try:
@@ -195,6 +210,29 @@ def main(argv: list[str] | None = None) -> int:
 
             text = prompt_text()
             sys.stdout.write(text if text.endswith("\n") else text + "\n")
+            return 0
+        if args.cmd == "switch-prompt":
+            from .switch import prompt_text as switch_prompt_text
+
+            text = switch_prompt_text()
+            sys.stdout.write(text if text.endswith("\n") else text + "\n")
+            return 0
+        if args.cmd == "switch-run":
+            from .switch import switch_run
+
+            print(
+                json.dumps(
+                    switch_run(
+                        Path(args.root),
+                        exam=args.exam,
+                        exam_file=args.exam_file,
+                        base=args.base,
+                        head=args.head,
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
             return 0
         if args.cmd == "critic-pack":
             from .critic import pack

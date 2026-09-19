@@ -16,8 +16,9 @@ INSTRUCTIONS = (
     "ag has four lanes that must not mix: ship (交货), heal (治病), lift (抬正确率), see (看见). "
     "Only ship may set product or refuse finish. "
     "File-changing work: ag_status → ag_start → write ONLY in worktree.path → ag_verify → ag_finish. "
-    "ag_verify runs the enrolled test command. process complete is not product passed. "
-    "If no test command is enrolled, product stays undeclared. "
+    "ag_verify runs the enrolled test command if any, then probes, critic, then the switch. "
+    "process complete is not product passed. "
+    "Empty enroll cannot undeclared-ff: the switch is the finish gate. "
     "Git hook refuses commits on canonical, including git commit --no-verify. "
     "This server does not intercept host Write; edits on canonical dirty it and start/finish refuse. "
     "While a task is open, tracked canonical files are read-only. "
@@ -28,9 +29,9 @@ INSTRUCTIONS = (
     "Read-only critic: do not write product files, do not finish, do not git commit, and do not open a worktree. "
     "Insert a probe only via ag_probe_insert with already-seen evidence; ag_critic_pack is an exam pack, not a worker ticket. "
     "ag_critic_run does one read-only chat on that pack (no tools). "
-    "Path-hit probe red or enrolled tests failing refuse finish. "
+    "Path-hit probe red, enrolled tests failing, or switch not passed refuse finish. "
     "Critic is a layer before the switch: rejected or configured unavailable does not refuse this ticket's finish. "
-    "ag_verify may attach one read-only critic. "
+    "ag_verify attaches critic then switch; cite switch.report_id (sw-). "
     "ag_gui writes HTML from AG_HOME sqlite critic_event rows, not the old strategy poster."
 )
 TOOLS = lane_tools() + gui.TOOLS + catalog.TOOLS

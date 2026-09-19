@@ -12,7 +12,7 @@ ag_status → ag_start → write only in worktree → ag_verify → ag_finish
 
 Do **not** store long-lived tests in this repo. Worker checks belong in worktree `.ag-check/` (gitignored, discarded at finish). Old `tests/` is a standing answer key for the next AI; it is forbidden here.
 
-`ag_verify` runs an enrolled command only if one was set (other products may enroll a tiny smoke). This repo enrolls **no** test command: `product` stays `undeclared` unless a probe is red. Then path-hit probes, then one read-only critic. Critic is a layer before the switch: `rejected` does not refuse this ticket's finish. Probe red still refuses finish.
+`ag_verify` runs an enrolled command only if one was set (other products may enroll a tiny smoke). This repo enrolls **no** test command. Then path-hit probes, then one read-only critic, then the **switch**. Critic is a layer before the switch: `rejected` does not refuse this ticket's finish. The switch is the finish gate: `switch.outcome` must be `passed` (`sw-` report_id) or finish refuses. Empty enroll cannot undeclared-ff. Probe red still refuses finish.
 
 ```
 ag enroll <repo>
