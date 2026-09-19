@@ -19,4 +19,4 @@ ag enroll <repo>
 ag mcp
 ```
 
-Critic config lives in `~/.ag/projects/<key>/critic.json`. Audit: sqlite `ag.sqlite`. `ag critic-log` / `ag-gui.bat` (pick an enrolled repo).
+Critic config lives in `~/.ag/projects/<key>/critic.json`. Audit: sqlite `ag.sqlite`. Task step chain (not in git): `~/.ag/projects/<key>/tasks/<task_id>.json` — one object with a `steps` array, appended at start / verify-tests / verify-probes / verify-critic / verify-switch / finish / finish-refused. `ag_status.timeline_path` points at the current or latest file. `ag critic-log` / `ag-gui.bat` (pick an enrolled repo) shows that timeline at the top.

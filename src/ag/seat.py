@@ -37,7 +37,7 @@ SEATS: dict[str, dict[str, Any]] = {
         "report": "switch-last.json",
         "table": "switch_event",
         "void_who": "switch",
-        "live": False,
+        "live": True,
     },
 }
 
@@ -260,7 +260,7 @@ def seat_run(
         try:
             from .gui import write_live
 
-            write_live(root, phase="critic", thinking=reasoning_text, content=content_text)
+            write_live(root, phase=str(kind), thinking=reasoning_text, content=content_text)
         except Exception:
             pass
 

@@ -8,7 +8,7 @@ from typing import Any
 
 from .managed import ChainBroken, ag_home, load_managed, real_root
 from .probe import list_probes
-from .store import db_path, list_critic_events, list_probe_rows, list_switch_events, upsert_probe
+from .store import db_path, list_critic_events, list_probe_rows, list_switch_events, load_task_timeline, upsert_probe
 
 TOOLS = [
     {
@@ -83,17 +83,27 @@ def write_live(
 ) -> Path:
     repo = real_root(root)
     bits = []
-    for key in ("tests_s", "probes_s", "critic_s", "total_s"):
+    for key in ("tests_s", "probes_s", "critic_s", "switch_s", "total_s"):
         if timings and key in timings:
             bits.append(f"{key}={timings[key]}")
     timing_line = " ".join(bits) or "running"
+    think_h = "switch thinking" if phase == "switch" else "critic thinking" if phase == "critic" else "thinking"
+    stamps = []
+    for step in load_task_timeline(repo).get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        stamps.append(
+            f"{step.get('phase')} {step.get('ts')} {step.get('seconds', '')} {step.get('report_id') or ''}".strip()
+        )
+    trail = "<br>".join(_cell(item) for item in stamps) or "(no steps yet)"
     page = (
         "<!doctype html><meta charset='utf-8'><meta http-equiv='refresh' content='2'>"
         "<title>ag verify live</title>"
         "<style>body{font-family:sans-serif;margin:1.5rem}pre{white-space:pre-wrap;background:#111;color:#eee;padding:1rem}</style>"
         f"<h1>verify live</h1><p>phase={_cell(phase)}</p><p>{_cell(timing_line)}</p>"
-        "<p>Five minutes is usually the enrolled tests, not DeepSeek. Thinking below streams during critic.</p>"
-        f"<h2>thinking</h2><pre>{_cell(thinking[-20000:])}</pre>"
+        f"<h2>timeline</h2><p>{trail}</p>"
+        "<p>Five minutes is usually the enrolled tests, not DeepSeek. Thinking below streams for the current seat.</p>"
+        f"<h2>{_cell(think_h)}</h2><pre>{_cell(thinking[-20000:])}</pre>"
         f"<h2>content</h2><pre>{_cell(content[-8000:])}</pre>"
     )
     out = html_path(repo)
@@ -159,6 +169,23 @@ def write_dashboard(root: Path, *, browse: bool = True) -> Path:
     timings = last.get("timings") if isinstance(last.get("timings"), dict) else {}
     timing_bits = " ".join(f"{k}={v}" for k, v in timings.items()) or "no timings yet"
     think = str(last.get("thinking") or "")
+    timeline = load_task_timeline(repo)
+    time_rows = []
+    for step in timeline.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        rid = str(step.get("report_id") or step.get("critic_report_id") or "")
+        sw = str(step.get("switch_report_id") or "")
+        ids = " ".join(part for part in (rid, sw) if part)
+        time_rows.append(
+            "<tr>"
+            f"<td>{_cell(step.get('phase'))}</td>"
+            f"<td>{_cell(step.get('ts'))}</td>"
+            f"<td>{_cell(step.get('seconds'))}</td>"
+            f"<td>{_cell(ids or step.get('reason') or step.get('product') or '')}</td>"
+            "</tr>"
+        )
+    time_body = "\n".join(time_rows) or "<tr><td colspan='4'>no task steps</td></tr>"
     page = f"""<!doctype html>
 <meta charset="utf-8">
 <meta http-equiv="refresh" content="5">
@@ -171,6 +198,14 @@ th {{ background: #f4f4f4; }}
 .meta {{ color: #555; margin-bottom: 1rem; }}
 pre {{ white-space: pre-wrap; background: #111; color: #eee; padding: 1rem; max-height: 24rem; overflow: auto; }}
 </style>
+<h1>task timeline</h1>
+<p class="meta">task_id={_cell(timeline.get('task_id'))} path={_cell(timeline.get('path'))} — current or last finished task</p>
+<table>
+<thead><tr><th>phase</th><th>ts</th><th>seconds</th><th>id / note</th></tr></thead>
+<tbody>
+{time_body}
+</tbody>
+</table>
 <h1>ag critic log</h1>
 <p class="meta">root={_cell(repo)} db={_cell(db_path(repo))} — sqlite critic_event + switch_event + probes. Refresh every 5s. Open this bat before ag_verify to watch thinking.</p>
 <p class="meta">last timings: {_cell(timing_bits)} — tests_s is usually the long wait</p>

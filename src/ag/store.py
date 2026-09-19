@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -209,6 +210,85 @@ def list_critic_events(root: Path, limit: int = 20) -> list[dict[str, Any]]:
 
 def project_dir(root: Path) -> Path:
     return ag_home() / "projects" / project_key(real_root(root))
+
+
+def timeline_path(root: Path, task_id: str) -> Path:
+    return project_dir(root) / "tasks" / f"{task_id}.json"
+
+
+def latest_timeline_path(root: Path, task_id: str = "") -> Path | None:
+    if str(task_id or "").strip():
+        path = timeline_path(root, str(task_id).strip())
+        return path if path.is_file() else None
+    folder = project_dir(root) / "tasks"
+    if not folder.is_dir():
+        return None
+    files = [path for path in folder.glob("*.json") if path.is_file()]
+    if not files:
+        return None
+    return max(files, key=lambda path: path.stat().st_mtime)
+
+
+def load_task_timeline(root: Path, task_id: str = "") -> dict[str, Any]:
+    path = latest_timeline_path(root, task_id)
+    empty: dict[str, Any] = {"task_id": str(task_id or ""), "steps": [], "path": str(path or "")}
+    if path is None or not path.is_file():
+        return empty
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return empty
+    if not isinstance(blob, dict):
+        return empty
+    steps = blob.get("steps")
+    return {
+        "task_id": str(blob.get("task_id") or path.stem),
+        "steps": steps if isinstance(steps, list) else [],
+        "path": str(path),
+    }
+
+
+def ensure_start_step(root: Path, task_id: str, portrait: Any, worktree: Any) -> None:
+    blob = load_task_timeline(root, task_id)
+    if any(isinstance(row, dict) and row.get("phase") == "start" for row in blob.get("steps") or []):
+        return
+    line = (str(portrait or "").strip().splitlines() or [""])[0][:80]
+    append_task_step(root, task_id, "start", portrait_line=line, worktree=str(worktree or ""))
+
+
+def append_task_step(root: Path, task_id: str, phase: str, **fields: Any) -> Path | None:
+    tid = str(task_id or "").strip()
+    if not tid:
+        return None
+    path = timeline_path(root, tid)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        blob: dict[str, Any] = {"task_id": tid, "steps": []}
+        if path.is_file():
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    blob = raw
+            except (OSError, json.JSONDecodeError):
+                pass
+        steps = blob.get("steps")
+        if not isinstance(steps, list):
+            steps = []
+        step: dict[str, Any] = {
+            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "phase": str(phase),
+        }
+        for key, value in fields.items():
+            if value is None:
+                continue
+            step[key] = value
+        steps.append(step)
+        blob["task_id"] = tid
+        blob["steps"] = steps
+        path.write_text(json.dumps(blob, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return path
+    except OSError:
+        return None
 
 
 def append_llm_log(root: Path, table: str, row: dict[str, Any]) -> str:

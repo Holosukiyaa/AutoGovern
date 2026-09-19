@@ -16,6 +16,7 @@ from .freeze import freeze_canonical, thaw_canonical
 from .hook import hook_main
 from .switch import block_message as _switch_block_message
 from .switch import report_id_from_verify as _switch_report_id
+from .store import append_task_step, ensure_start_step, latest_timeline_path
 from .managed import ChainBroken, ag_home, lookup_project, project_key, real_root, load_managed, save_managed
 from .see import note as usage_note
 
@@ -405,16 +406,13 @@ def status(root: Path) -> dict[str, Any]:
         "process": process,
         "product": product,
         "reminder": "process complete is not product passed",
-        "worker_note": (
-            "After ag_verify you receive critic.report_id and switch.report_id. "
-            "Cite switch.report_id when you close. You do not receive report bodies. "
-            "Switch is the finish gate; critic is not."
-        ),
+        "worker_note": "After ag_verify cite critic.report_id and switch.report_id. No report bodies. Switch is the finish gate; critic is not.",
         "task": task,
         "portrait": (task or {}).get("portrait") if task else "",
         "worktree": (task or {}).get("worktree") if task else "",
         "critic_report_id": _critic_report_id(verify if isinstance(verify, dict) else None),
         "switch_report_id": _switch_report_id(verify if isinstance(verify, dict) else None),
+        "timeline_path": str(latest_timeline_path(root, str((task or {}).get("id") or "")) or latest_timeline_path(root) or ""),
     }
     try:
         from .store import pending_summary
@@ -486,6 +484,8 @@ def start(root: Path, *, portrait: str = "", skip_pending: bool = False) -> dict
         thaw_canonical(root)
         raise
     usage_note(root, "ship", 2, "help", "opened")
+    line = (chosen.strip().splitlines() or [""])[0][:80]
+    append_task_step(root, task_id, "start", portrait_line=line, worktree=str(worktree))
     return status(root)
 
 
@@ -498,13 +498,15 @@ def verify(root: Path) -> dict[str, Any]:
     worktree = Path(str(task.get("worktree") or ""))
     if not worktree.is_dir():
         raise ChainBroken(f"worktree missing: {worktree}")
+    task_id = str(task.get("id") or "")
+    enrolled = Path(state["root"])
+    ensure_start_step(enrolled, task_id, task.get("portrait"), worktree)
     test_argv = [str(x) for x in (state.get("test_argv") or [])]
     untracked = [
         ln.strip()
         for ln in git(worktree, "ls-files", "-o", "--exclude-standard", check=False).splitlines()
         if ln.strip()
     ]
-    enrolled = Path(state["root"])
     timings: dict[str, float] = {}
     t0 = time.perf_counter()
     try:
@@ -537,6 +539,7 @@ def verify(root: Path) -> dict[str, Any]:
             "untracked": untracked[:50],
         }
     timings["tests_s"] = round(time.perf_counter() - t_tests, 3)
+    append_task_step(enrolled, task_id, "verify-tests", seconds=timings["tests_s"])
     try:
         from .gui import write_live
 
@@ -559,6 +562,7 @@ def verify(root: Path) -> dict[str, Any]:
 
     record["missing"] = missing_fragments(Path(state["root"]), list(record["probe_red"]))
     timings["probes_s"] = round(time.perf_counter() - t_tests - timings["tests_s"], 3)
+    append_task_step(enrolled, task_id, "verify-probes", probe_red=list(record["probe_red"]), seconds=timings["probes_s"])
     try:
         from .gui import write_live
 
@@ -568,7 +572,6 @@ def verify(root: Path) -> dict[str, Any]:
     from .critic import attach_verify
 
     portrait = str(task.get("portrait") or "").strip()
-    task_id = str(task.get("id") or "")
     probe_red = list(record["probe_red"])
     critic, planted = attach_verify(
         enrolled,
@@ -582,6 +585,7 @@ def verify(root: Path) -> dict[str, Any]:
         record["probes_planted"] = planted
     record["critic"] = critic
     timings["critic_s"] = round(time.perf_counter() - t0 - timings.get("tests_s", 0) - timings.get("probes_s", 0), 3)
+    append_task_step(enrolled, task_id, "verify-critic", report_id=str(critic.get("report_id") or ""), outcome=str(critic.get("outcome") or ""), seconds=timings["critic_s"])
     from .switch import attach_verify as attach_switch
 
     switch = attach_switch(
@@ -594,10 +598,8 @@ def verify(root: Path) -> dict[str, Any]:
         tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
     )
     record["switch"] = switch
-    timings["switch_s"] = round(
-        time.perf_counter() - t0 - timings.get("tests_s", 0) - timings.get("probes_s", 0) - timings.get("critic_s", 0),
-        3,
-    )
+    timings["switch_s"] = round(time.perf_counter() - t0 - timings.get("tests_s", 0) - timings.get("probes_s", 0) - timings.get("critic_s", 0), 3)
+    append_task_step(enrolled, task_id, "verify-switch", report_id=str(switch.get("report_id") or ""), outcome=str(switch.get("outcome") or ""), seconds=timings["switch_s"])
     timings["total_s"] = round(time.perf_counter() - t0, 3)
     record["timings"] = timings
     try:
@@ -653,34 +655,34 @@ def finish(root: Path) -> dict[str, Any]:
     task = load_task(key)
     if not task:
         raise ChainBroken("no open task")
+
+    def _no(reason: str, lane: int = 6, detail: str = "") -> None:
+        usage_note(root, "ship", lane, "block", detail or reason)
+        append_task_step(root, str(task.get("id") or ""), "finish-refused", reason=reason)
+        raise ChainBroken(reason)
+
     if not state["hook_ok"]:
-        usage_note(root, "ship", 8, "block", "finish hook-removed")
-        raise ChainBroken("hook-removed: will not deliver")
+        _no("hook-removed: will not deliver", 8, "finish hook-removed")
     if state["canonical_dirty"]:
-        usage_note(root, "ship", 8, "block", "finish canonical dirty")
-        raise ChainBroken("canonical is dirty; will not deliver")
+        _no("canonical is dirty; will not deliver", 8, "finish canonical dirty")
     current = git(root, "rev-parse", "--abbrev-ref", "HEAD")
     if current != str(task.get("branch") or ""):
-        raise ChainBroken(f"canonical is on {current}, task started on {task.get('branch')}")
+        _no(f"canonical is on {current}, task started on {task.get('branch')}")
     worktree = Path(str(task.get("worktree") or ""))
     if not worktree.is_dir():
-        raise ChainBroken("worktree missing")
+        _no("worktree missing")
     if not task.get("verified_tree"):
-        raise ChainBroken("not verified")
+        _no("not verified")
     digest = tree_digest(worktree)
     if digest != task.get("verified_tree"):
-        usage_note(root, "ship", 7, "block", "mismatch")
-        raise ChainBroken("tree digest mismatch; run ag_verify again")
+        _no("tree digest mismatch; run ag_verify again", 7, "mismatch")
     verify_blob = task.get("verify") if isinstance(task.get("verify"), dict) else None
     red = _probe_red_ids(verify_blob)
     if red:
-        usage_note(root, "ship", 6, "block", "probe " + ",".join(red))
-        raise ChainBroken("probe red: " + ", ".join(red) + "; will not deliver")
+        _no("probe red: " + ", ".join(red) + "; will not deliver", 6, "probe " + ",".join(red))
     switch_block = _switch_block_message(verify_blob)
     if switch_block:
-        usage_note(root, "ship", 6, "block", switch_block)
-        raise ChainBroken(switch_block)
-    # Probe/switch refuse keeps freeze. Critic is not a finish gate.
+        _no(switch_block)
     thaw_canonical(root)
     try:
         return _finish_after_thaw(root, key, state, task, worktree)
@@ -720,11 +722,15 @@ def _finish_after_thaw(
         git(root, "merge", "--ff-only", f"ag/{task.get('id')}")
     except ChainBroken:
         usage_note(root, "ship", 5, "block", "merge")
+        append_task_step(root, str(task.get("id") or ""), "finish-refused", reason="merge")
         raise
     usage_note(root, "ship", 5, "help", "merged")
     usage_note(root, "ship", 7, "help", "matched")
     portrait = str(task.get("portrait") or "")
     product = _product([str(x) for x in (state.get("test_argv") or [])], task.get("verify") if isinstance(task.get("verify"), dict) else None)
+    head = git(root, "rev-parse", "HEAD")
+    vblob = task.get("verify") if isinstance(task.get("verify"), dict) else None
+    append_task_step(root, str(task.get("id") or ""), "finish", head=head, product=product, critic_report_id=_critic_report_id(vblob), switch_report_id=_switch_report_id(vblob))
     _cleanup(root, task)
     save_task(key, None)
     blob = load_managed()
@@ -747,7 +753,7 @@ def _finish_after_thaw(
         "portrait": portrait,
         "critic_report_id": _critic_report_id(task.get("verify") if isinstance(task.get("verify"), dict) else None),
         "switch_report_id": _switch_report_id(task.get("verify") if isinstance(task.get("verify"), dict) else None),
-        "head": git(root, "rev-parse", "HEAD"),
+        "head": head,
         "hazards": status(root)["hazards"],
     }
 
