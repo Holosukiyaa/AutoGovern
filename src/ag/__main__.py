@@ -102,6 +102,25 @@ def main(argv: list[str] | None = None) -> int:
     worker_create_p.add_argument("--default", action="append", default=[], help="negotiable default; repeatable")
     worker_create_p.add_argument("--write-allow", action="append", default=[], help="repository-relative write scope; repeatable")
     worker_create_p.add_argument("--worker-id", default="")
+    worker_run_p = sub.add_parser(
+        "worker-run",
+        help="run a vendor-neutral worker dossier through a provider",
+    )
+    worker_run_p.add_argument("root")
+    worker_run_p.add_argument("worker_id")
+    worker_run_p.add_argument("--provider", choices=("grok",), default="grok")
+    worker_run_p.add_argument("--command", default="", help="provider executable; default is grok or AG_GROK_COMMAND")
+    worker_run_p.add_argument("--timeout", type=float, default=0)
+    worker_run_p.add_argument("--no-echo", action="store_true", help="write live.jsonl but do not print rolling output")
+    worker_log_p = sub.add_parser("worker-log", help="tail a worker live.jsonl in real time")
+    worker_log_p.add_argument("root")
+    worker_log_p.add_argument("worker_id")
+    worker_log_p.add_argument("--interval", type=float, default=0.5)
+    checker_log_p = sub.add_parser("checker-log", help="tail critic/switch live output in real time")
+    checker_log_p.add_argument("root")
+    checker_log_p.add_argument("kind", choices=("critic", "switch"))
+    checker_log_p.add_argument("--interval", type=float, default=0.5)
+    checker_log_p.add_argument("--no-follow", action="store_true", help="print current rows and exit")
     worker_read_p = sub.add_parser("worker-read", help="read and validate a worker result.json")
     worker_read_p.add_argument("root")
     worker_read_p.add_argument("worker_id")
@@ -330,6 +349,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "worker-create":
             from .worker import create_task
+            from .worker import MAX_WORKERS, worker_count
 
             state = status(Path(args.root))
             worktree = Path(str((state.get("task") or {}).get("worktree") or ""))
@@ -338,9 +358,8 @@ def main(argv: list[str] | None = None) -> int:
             if not bool(state.get("intent_map_confirmed")):
                 raise ChainBroken("intent map is not confirmed; user approval required")
             worker_root = worktree / ".ag-artifacts" / "workers"
-            existing = [item for item in worker_root.iterdir() if item.is_dir()] if worker_root.is_dir() else []
-            if len(existing) >= 3:
-                raise ChainBroken("worker limit reached: at most 3 workers per task")
+            if worker_count(worktree) >= MAX_WORKERS:
+                raise ChainBroken(f"worker limit reached: at most {MAX_WORKERS} workers per task")
             anchors = [
                 *[{"id": f"a{index}", "text": text, "kind": "soft"} for index, text in enumerate(args.anchor, 1)],
                 *[
@@ -365,6 +384,75 @@ def main(argv: list[str] | None = None) -> int:
                     indent=2,
                 )
             )
+            return 0
+        if args.cmd == "worker-run":
+            from .worker import run_task
+
+            state = status(Path(args.root))
+            worktree = Path(str((state.get("task") or {}).get("worktree") or ""))
+            if not worktree.is_dir():
+                raise ChainBroken("no active AG worktree; ag_start first")
+            print(
+                json.dumps(
+                    run_task(
+                        worktree,
+                        args.worker_id,
+                        provider=args.provider,
+                        command=args.command,
+                        timeout=args.timeout,
+                        echo=not args.no_echo,
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        if args.cmd == "worker-log":
+            import time
+
+            state = status(Path(args.root))
+            worktree = Path(str((state.get("task") or {}).get("worktree") or ""))
+            if not worktree.is_dir():
+                raise ChainBroken("no active AG worktree; ag_start first")
+            path = worktree / ".ag-artifacts" / "workers" / args.worker_id / "live.jsonl"
+            if not path.is_file():
+                raise ChainBroken(f"worker log not found: {path.resolve()}")
+            with path.open(encoding="utf-8") as handle:
+                handle.seek(0, 2)
+                while True:
+                    line = handle.readline()
+                    if line:
+                        print(line, end="", flush=True)
+                    else:
+                        time.sleep(max(args.interval, 0.05))
+                        if (worktree / ".ag-artifacts" / "workers" / args.worker_id / "result.json").is_file():
+                            break
+            return 0
+        if args.cmd == "checker-log":
+            import time
+
+            from .store import project_dir
+
+            state = status(Path(args.root))
+            if not bool(state.get("managed")):
+                raise ChainBroken("repo is not enrolled")
+            path = project_dir(Path(args.root)) / f"{args.kind}-live.jsonl"
+            if not path.is_file():
+                raise ChainBroken(f"checker log not found: {path.resolve()}")
+            with path.open(encoding="utf-8") as handle:
+                if args.no_follow:
+                    for line in handle:
+                        print(line, end="", flush=True)
+                    return 0
+                handle.seek(0, 2)
+                while True:
+                    line = handle.readline()
+                    if line:
+                        print(line, end="", flush=True)
+                    else:
+                        time.sleep(max(args.interval, 0.05))
+                        if (project_dir(Path(args.root)) / f"{args.kind}-last.json").is_file():
+                            break
             return 0
         if args.cmd == "worker-read":
             from .worker import read_result

@@ -78,6 +78,16 @@ python -m ag worker-read C:\repo <worker-id>
 `anchor_receipt` records attention, not acceptance. AG still decides delivery through `ag_verify` and `ag_finish`.
 Every worker dossier carries the current Unicode intent map and the absolute SVG path. AG allows at most 3 worker dossiers per task. `ag_verify` fails while any dossier is missing its `result.json`; the missing worker ids are returned as `verify.missing_worker_results` and `evidence.workers.missing_results`.
 
+AG can launch a Grok dossier as an external worker provider:
+
+```powershell
+python -m ag worker-run C:\repo <worker-id> --provider grok
+```
+
+The provider is optional and vendor-neutral. It does not make Grok a Codex-native subagent; AG remains the commander and the delivery gate. `worker-run` streams stdout/stderr to the terminal while appending every line to `.ag-artifacts/workers/<worker-id>/live.jsonl`. Use `python -m ag worker-log C:\repo <worker-id>` to tail that rolling output from another terminal. The command discovers `grok` from `PATH`, `~/.grok/bin`, or `AG_GROK_COMMAND`; `--timeout` is optional. Grok runs without its own subagents and with shell commands routed through `guard.py`; governance commands, `git commit/merge/rebase/push`, and scripts outside `--write-allow` are refused by the worker guard.
+
+Configured critic and switch chats stream their incremental reasoning/content into `~/.ag/projects/<key>/critic-live.jsonl` and `switch-live.jsonl`. Tail either stream with `python -m ag checker-log C:\repo critic` or `... switch`. These files are append-only process evidence, not acceptance reports.
+
 ## Change-aware advice
 
 `lift-13` summarizes the task signal from the portrait, touched files, HEAD, and verify exit. It reports `changed=true` only when that signal changes. `lift-14` stores a raw task snapshot under `AG_HOME`; it is not product evidence and does not enter the repository.

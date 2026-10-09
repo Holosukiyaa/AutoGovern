@@ -252,9 +252,30 @@ def seat_run(
     ]
     held = {"r": "", "c": ""}
 
+    def live_log(reasoning_text: str, content_text: str) -> None:
+        try:
+            from datetime import datetime, timezone
+            from .store import project_dir
+
+            path = project_dir(root) / f"{kind}-live.jsonl"
+            row = {
+                "schema": f"ag.{kind}-live.v1",
+                "task_id": task_id,
+                "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+                "reasoning": str(reasoning_text)[-12000:],
+                "content": str(content_text)[-12000:],
+            }
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
+                handle.flush()
+        except Exception:
+            pass
+
     def on_delta(reasoning_text: str, content_text: str) -> None:
         held["r"] = reasoning_text
         held["c"] = content_text
+        live_log(reasoning_text, content_text)
         if not spec["live"]:
             return
         try:
