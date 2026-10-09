@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .freeze import freeze_canonical, thaw_canonical
+from .freeze import freeze_canonical, freeze_worktree, thaw_canonical, thaw_worktree
 from .hook import hook_main
 from .switch import block_message as _switch_block_message
 from .switch import report_id_from_verify as _switch_report_id
@@ -423,6 +423,8 @@ def status(root: Path) -> dict[str, Any]:
         hazards.append("hook-removed")
     if dirty:
         hazards.append("canonical-dirty")
+    if task and not bool(task.get("intent_map_confirmed")):
+        hazards.append("intent-map-unconfirmed")
     if task:
         product = _product(test_argv, verify if isinstance(verify, dict) else None)
         process = _process(task)
@@ -445,6 +447,7 @@ def status(root: Path) -> dict[str, Any]:
         "product": product,
         "reminder": "process complete is not product passed",
         "worker_note": "After ag_verify cite critic.report_id and switch.report_id. No report bodies. Switch is the finish gate; critic is not.",
+        "intent_gate": "STOP: show anchor_preview and the absolute anchor_map_path to the user; wait for explicit user approval, then run confirm-map.",
         "task": task,
         "portrait": (task or {}).get("portrait") if task else "",
         "anchors": (task or {}).get("anchors") if task else [],
@@ -488,6 +491,12 @@ def status(root: Path) -> dict[str, Any]:
             task["anchor_preview_path"] = str(anchor_preview_path.resolve())
             task["anchor_preview"] = anchor_preview
             task["current_anchor"] = current_anchor
+            task["audit_anchor_map_path"] = str(ag_home() / "projects" / key / "anchor-maps" / f"ag-{task.get('id') or 'task'}.svg")
+            task["audit_anchor_preview_path"] = str(ag_home() / "projects" / key / "anchor-maps" / f"ag-{task.get('id') or 'task'}.txt")
+            audit_dir = Path(task["audit_anchor_map_path"]).parent
+            audit_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(anchor_map_path, task["audit_anchor_map_path"])
+            shutil.copyfile(anchor_preview_path, task["audit_anchor_preview_path"])
             save_task(key, task)
             out["anchor_preview_path"] = task["anchor_preview_path"]
             out["anchor_preview"] = anchor_preview
@@ -584,13 +593,17 @@ def start(root: Path, *, portrait: str = "", anchors: list[dict[str, Any]] | Non
     )
     try:
         freeze_canonical(root)
+        freeze_worktree(worktree)
     except Exception:
+        thaw_worktree(worktree)
         thaw_canonical(root)
         raise
     usage_note(root, "ship", 2, "help", "opened")
     line = (chosen.strip().splitlines() or [""])[0][:80]
     append_task_step(root, task_id, "start", portrait_line=line, worktree=str(worktree))
-    return status(root)
+    state = status(root)
+    append_task_step(root, task_id, "anchor-preview", anchor_map_path=str(state.get("anchor_map_path") or ""), audit_anchor_map_path=str((state.get("task") or {}).get("audit_anchor_map_path") or ""), anchor_preview=str(state.get("anchor_preview") or ""), audit_anchor_preview_path=str((state.get("task") or {}).get("audit_anchor_preview_path") or ""))
+    return state
 
 
 def _refuse_dirty_verify(root: Path, key: str, task: dict[str, Any], state: dict[str, Any]) -> None:
@@ -631,6 +644,14 @@ def verify(root: Path) -> dict[str, Any]:
     task = load_task(key)
     if not task:
         raise ChainBroken("no open task; ag_start first")
+    if not bool(task.get("intent_map_confirmed")):
+        reason = "intent-map-unconfirmed: ag_verify refused; user must confirm the anchor map first"
+        task["verify"] = {"exit": 1, "stderr": reason, "refused": "intent-map-unconfirmed"}
+        task["verified_tree"] = ""
+        save_task(key, task)
+        usage_note(root, "ship", 8, "block", "verify intent map unconfirmed")
+        append_task_step(root, str(task.get("id") or ""), "verify-refused", reason=reason, refused="intent-map-unconfirmed")
+        raise ChainBroken(reason)
     worktree = Path(str(task.get("worktree") or ""))
     if not worktree.is_dir():
         raise ChainBroken(f"worktree missing: {worktree}")
@@ -885,12 +906,15 @@ def confirm_map(root: Path) -> dict[str, Any]:
         task["intent_map_confirmed"] = True
         save_task(key, task)
         append_task_step(root, str(task.get("id") or ""), "intent-map-confirmed")
+        worktree = Path(str(task.get("worktree") or ""))
+        thaw_worktree(worktree)
     return status(root)
 
 
 def _cleanup(root: Path, task: dict[str, Any]) -> None:
     worktree = Path(str(task.get("worktree") or ""))
     task_id = str(task.get("id") or "")
+    thaw_worktree(worktree)
     if worktree.is_dir():
         git(root, "worktree", "remove", "--force", str(worktree), check=False)
     if task_id:
@@ -910,6 +934,8 @@ def finish(root: Path) -> dict[str, Any]:
         append_task_step(root, str(task.get("id") or ""), "finish-refused", reason=reason)
         raise ChainBroken(reason)
 
+    if not bool(task.get("intent_map_confirmed")):
+        _no("intent map is not confirmed; user approval is required", 8, "finish intent map unconfirmed")
     if not state["hook_ok"]:
         _no("hook-removed: will not deliver", 8, "finish hook-removed")
     if state["canonical_dirty"]:

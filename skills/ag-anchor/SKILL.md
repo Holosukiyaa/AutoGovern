@@ -35,7 +35,7 @@ start, while working, and before verification.
 
 ## Mandatory intent-map confirmation
 
-After `ag_start`, paste the returned `anchor_preview` to the user, give the
+After `ag_start`, stop immediately. Paste the returned `anchor_preview` to the user, give the
 absolute SVG path, and wait. Do not create any worker/subagent or start
 implementation until the user explicitly confirms the intent map and
 `confirm-map` has been run. The AI must never self-invoke `confirm-map`; it

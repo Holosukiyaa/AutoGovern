@@ -389,3 +389,13 @@ def _rewrite_dacl(path: Path, user_sid, *, add_deny: bool) -> None:
     )
     if code != 0:
         raise _win_error(f"SetNamedSecurityInfoW {path}", int(code))
+
+
+def freeze_worktree(root: Path) -> None:
+    """Freeze tracked worktree files until the intent map is confirmed."""
+    _freeze_windows(Path(root)) if os.name == "nt" else _freeze_readonly_bit(Path(root))
+
+
+def thaw_worktree(root: Path) -> None:
+    """Remove the intent-map freeze from a worktree."""
+    _thaw_windows(Path(root)) if os.name == "nt" else _thaw_readonly_bit(Path(root))

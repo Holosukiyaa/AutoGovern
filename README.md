@@ -31,7 +31,7 @@ Critic config lives in `~/.ag/projects/<key>/critic.json`. Audit: sqlite `ag.sql
 
 ## Intent anchors
 
-Starting a task requires at least one anchor. `ag_start` refuses an empty portrait and returns the absolute paths to an automatically generated intent SVG and matching Unicode preview under `.ag-artifacts/anchor-maps/`; the Unicode preview is also returned as `anchor_preview`. The SVG marks `current_anchor` as current attention, never as anchor completion. Write anchors as lines in the portrait:
+Starting a task requires at least one anchor. `ag_start` refuses an empty portrait and returns the absolute paths to an automatically generated intent SVG and matching Unicode preview under `.ag-artifacts/anchor-maps/`; the Unicode preview is also returned as `anchor_preview`. The SVG marks `current_anchor` as current attention, never as anchor completion. Write anchors as lines in the portrait: before any product file is written, the AI must show the Unicode preview and the absolute SVG path to the user and wait for explicit approval. AG freezes the worktree until `confirm-map`; `ag_status` reports `intent-map-unconfirmed` as a hazard; `ag_verify` and `ag_finish` refuse while the map is unconfirmed. AG copies the SVG and Unicode preview into `AG_HOME/projects/<key>/anchor-maps/` and records an `anchor-preview` timeline step, so the evidence survives worktree cleanup.
 
 ```text
 anchor: keep the semantic workbench behavior unchanged
