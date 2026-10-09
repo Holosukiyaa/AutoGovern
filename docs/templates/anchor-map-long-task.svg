@@ -140,7 +140,7 @@
     <rect class="terminal" x="2260" y="200" width="140" height="90" rx="20" />
     <text class="terminal-tag" x="2280" y="227">终点</text>
     <text class="card-title" x="2280" y="250">可发布</text>
-    <text class="small" x="2280" y="271">0.2.0</text>
+    <text class="small" x="2280" y="271">0.2.1</text>
   </g>
 
   <path class="branch" d="M1902 185 C1902 150 1980 150 2130 150 C2200 150 2235 175 2235 190" marker-end="url(#gray-arrow)" />
