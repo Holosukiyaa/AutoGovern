@@ -23,6 +23,8 @@ def create_task(
     anchors: list[dict[str, Any]],
     write_allow: list[str] | None = None,
     worker_id: str = "",
+    intent_map_path: str = "",
+    anchor_preview: str = "",
 ) -> dict[str, Any]:
     if not str(portrait or "").strip():
         raise ValueError("worker task requires a portrait")
@@ -44,6 +46,8 @@ def create_task(
             "modify anchors or verification gates",
             "claim acceptance",
         ],
+        "intent_map_path": intent_map_path,
+        "anchor_preview": anchor_preview,
     }
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "task.json").write_text(json.dumps(dossier, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -54,6 +58,13 @@ def create_task(
         "",
         "## Portrait",
         portrait.strip(),
+        "",
+        "## Intent map",
+        f"- SVG: `{intent_map_path}`",
+        "",
+        "```text",
+        anchor_preview.strip(),
+        "```",
         "",
         "## Anchors",
         *[f"- `{item.get('id')}` [{item.get('kind', 'soft')}]: {item.get('text')}" for item in dossier["anchors"]],

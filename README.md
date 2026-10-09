@@ -38,7 +38,7 @@ anchor: do not add a new CSS layer
 
 `lift-12` reads these lines as attention anchors, not as a step plan. `anchor!:` is a hard anchor when it follows from an explicit user rule such as `必须`, `禁止`, `不要`, `must`, `forbidden`, or `do not`. The AI may propose a hard anchor, but may not invent one from its own guess.
 
-`ag_start` reports an optional `subagent` object. AG does not bind to Codex, Grok, Claude, or any other worker implementation. A commander may use any subagent as an adapter: give that process the worker dossier, let it work only in the isolated AG worktree, then collect its `result.json`. Workers never run `ag_finish`, merge, modify anchors, or claim acceptance.
+`ag_start` reports an optional `subagent` object. AG does not bind to Codex, Grok, Claude, or any other worker implementation. A commander may use any subagent as an adapter: show the `anchor_preview`, wait for the user to call `confirm-map`, create 1-3 workers, then collect each `result.json`. Workers never run `ag_finish`, merge, modify anchors, or claim acceptance. `confirm-map` must be called by the user, not self-invoked by the AI.
 
 Anchor kinds are attention metadata, not a delivery gate:
 
@@ -50,7 +50,7 @@ Anchor kinds are attention metadata, not a delivery gate:
 - `anchor-:` avoid zone; crossing it requires a user-approved anchor revision.
 - `anchorx:` obsolete anchor; keep the history and stop pursuing it.
 
-## Optional subagents
+## Mandatory worker flow
 
 Create a vendor-neutral worker dossier inside the active AG worktree:
 
@@ -65,6 +65,7 @@ python -m ag worker-read C:\repo <worker-id>
 ```
 
 `anchor_receipt` records attention, not acceptance. AG still decides delivery through `ag_verify` and `ag_finish`.
+Every worker dossier carries the current Unicode intent map and the absolute SVG path. AG allows at most 3 worker dossiers per task. `ag_verify` fails while any dossier is missing its `result.json`; the missing worker ids are returned as `verify.missing_worker_results` and `evidence.workers.missing_results`.
 
 ## Change-aware advice
 
@@ -93,6 +94,6 @@ python -m ag anchor-map --portrait "anchor: 先看见症状`nanchor!: 禁止自�
 
 By default, generated maps go to `.ag-artifacts/anchor-maps/`, which is git-ignored. Use `--out` only when the user explicitly requests another location. The map widens with anchor count and keeps font size fixed. Nine or more anchors trigger a consolidation warning. During an active task `status` regenerates both views; after `verify`, the current-attention marker moves to the last route anchor.
 
-`ag_verify` returns an `evidence` object with test status/tails, probe verdicts/tails, critic and switch outcomes/report ids/stores/models, the anchor SVG and Unicode paths/preview, current attention anchor, verified tree digest, and timings. Report the evidence, not only the report ids.
+`ag_verify` returns an `evidence` object with test status/tails, probe verdicts/tails, critic and switch outcomes/report ids/stores/models, the anchor SVG and Unicode paths/preview, current attention anchor, worker result status, verified tree digest, and timings. Report the evidence, not only the report ids.
 
 `ag_finish` returns `anchor_progress`: every anchor with id/kind/text, the absolute intent-SVG path, and a reminder to compare the final result with the intent map before accepting delivery. Soft anchors are not marked complete automatically.

@@ -455,8 +455,11 @@ def status(root: Path) -> dict[str, Any]:
         "timeline_path": str(latest_timeline_path(root, str((task or {}).get("id") or "")) or latest_timeline_path(root) or ""),
         "subagent": {
             "optional": True,
+            "ready": False,
+            "min_workers": 1,
+            "max_workers": 3,
             "contract": "ag.worker.task.v1 / ag.worker.result.v1",
-            "note": "Use any subagent CLI as an adapter. Give it the worker dossier; collect result.json. Workers write only their isolated worktree and cannot finish or merge.",
+            "note": "Show the anchor preview to the user, run confirm-map only after user approval, then create 1-3 workers. Workers write only their isolated worktree and cannot finish or merge.",
         },
     }
     if task:
@@ -489,6 +492,8 @@ def status(root: Path) -> dict[str, Any]:
             out["anchor_preview_path"] = task["anchor_preview_path"]
             out["anchor_preview"] = anchor_preview
             out["current_anchor"] = current_anchor
+            out["intent_map_confirmed"] = bool(task.get("intent_map_confirmed"))
+            out["subagent"]["ready"] = bool(task.get("intent_map_confirmed"))
         except Exception:
             pass
     try:
@@ -567,6 +572,7 @@ def start(root: Path, *, portrait: str = "", anchors: list[dict[str, Any]] | Non
             "anchors": task_anchors,
             "anchor_map_path": str(anchor_map.resolve()),
             "anchor_preview_path": str(anchor_map.with_suffix(".txt").resolve()),
+            "intent_map_confirmed": False,
             "current_anchor": (task_anchors or [{}])[0].get("id", ""),
             "verified_tree": "",
             "verify": None,
@@ -673,6 +679,26 @@ def verify(root: Path) -> dict[str, Any]:
     from .probe import missing_fragments
 
     record["missing"] = missing_fragments(Path(state["root"]), list(record["probe_red"]))
+    worker_root = worktree / ".ag-artifacts" / "workers"
+    worker_dirs = [item for item in worker_root.iterdir() if item.is_dir()] if worker_root.is_dir() else []
+    missing_worker_results: list[str] = []
+    for worker_path in worker_dirs:
+        if not (worker_path / "task.json").is_file():
+            continue
+        if not (worker_path / "result.json").is_file():
+            missing_worker_results.append(worker_path.name)
+    if missing_worker_results:
+        record["exit"] = 1
+        record["stderr"] = (
+            (record.get("stderr") or "")
+            + ("\n" if record.get("stderr") else "")
+            + "missing worker results: " + ", ".join(missing_worker_results)
+        )
+        record["missing_worker_results"] = missing_worker_results
+    record["evidence"]["workers"] = {
+        "count": len(worker_dirs),
+        "missing_results": missing_worker_results,
+    }
     timings["probes_s"] = round(time.perf_counter() - t_tests - timings["tests_s"], 3)
     append_task_step(enrolled, task_id, "verify-probes", probe_red=list(record["probe_red"]), seconds=timings["probes_s"])
     try:
@@ -798,6 +824,7 @@ def verify(root: Path) -> dict[str, Any]:
         "anchor_preview_path": str((task or {}).get("anchor_preview_path") or ""),
         "anchor_preview": str((task or {}).get("anchor_preview") or ""),
         "current_anchor": str((task or {}).get("current_anchor") or ""),
+        "workers": dict((task.get("verify") or {}).get("evidence", {}).get("workers", {})),
         "verified_tree": task.get("verified_tree") or "",
         "timings": dict(record.get("timings") or {}),
     }
@@ -808,6 +835,19 @@ def verify(root: Path) -> dict[str, Any]:
     except Exception:
         pass
     return out
+
+
+def confirm_map(root: Path) -> dict[str, Any]:
+    state = status(root)
+    key = str(state["key"])
+    task = load_task(key)
+    if not task:
+        raise ChainBroken("no open task; ag_start first")
+    if not bool(task.get("intent_map_confirmed")):
+        task["intent_map_confirmed"] = True
+        save_task(key, task)
+        append_task_step(root, str(task.get("id") or ""), "intent-map-confirmed")
+    return status(root)
 
 
 def _cleanup(root: Path, task: dict[str, Any]) -> None:

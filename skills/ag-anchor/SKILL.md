@@ -33,6 +33,14 @@ start, while working, and before verification.
 6. If a blocking unknown remains (endpoint, method, scope, or finish cannot be
    determined), stop and ask one concise question instead of inventing work.
 
+## Mandatory intent-map confirmation
+
+After `ag_start`, paste the returned `anchor_preview` to the user, give the
+absolute SVG path, and wait. Do not create any worker/subagent or start
+implementation until the user explicitly confirms the intent map and
+`confirm-map` has been run. The AI must never self-invoke `confirm-map`; it
+represents the user's approval.
+
 ## While working
 
 - Re-read anchors before file edits and before changing direction.
@@ -53,6 +61,7 @@ font size fixed; 9 or more anchors should prompt consolidation.
 ## Delivery
 
 - Use `ag_start` with the portrait and explicit anchors when available.
-- Pass anchors to any worker prompt.
+- Create workers only with `ag worker-create`; use at most 3 workers.
+- Pass the anchor preview, SVG path, and anchors to any worker prompt.
 - Before completion, run `ag_verify`; do not self-certify.
 - Report absolute paths for generated files.

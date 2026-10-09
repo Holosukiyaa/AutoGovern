@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from .loop import abandon, enroll, finish, hook_main, start, status, unenroll, verify
+from .loop import abandon, confirm_map, enroll, finish, hook_main, start, status, unenroll, verify
 from .gui import resolve_gui_root, write_dashboard
 from .heal import run as heal_run
 from .lift import run as lift_run
@@ -76,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         help="do not pop a mess repair ticket; use --portrait as given",
     )
     sub.add_parser("verify", help="run enrolled tests and pin the tree").add_argument("root")
+    sub.add_parser("confirm-map", help="record user approval of the current intent map").add_argument("root")
     sub.add_parser("finish", help="ff-only if digest matches").add_argument("root")
     sub.add_parser("abandon", help="drop the open worktree").add_argument("root")
     sub.add_parser("unenroll", help="remove the hook and restore previous hooksPath").add_argument("root")
@@ -330,6 +331,12 @@ def main(argv: list[str] | None = None) -> int:
             worktree = Path(str((state.get("task") or {}).get("worktree") or ""))
             if not worktree.is_dir():
                 raise ChainBroken("no active AG worktree; ag_start first")
+            if not bool(state.get("intent_map_confirmed")):
+                raise ChainBroken("intent map is not confirmed; user approval required")
+            worker_root = worktree / ".ag-artifacts" / "workers"
+            existing = [item for item in worker_root.iterdir() if item.is_dir()] if worker_root.is_dir() else []
+            if len(existing) >= 3:
+                raise ChainBroken("worker limit reached: at most 3 workers per task")
             anchors = [
                 *[{"id": f"a{index}", "text": text, "kind": "soft"} for index, text in enumerate(args.anchor, 1)],
                 *[
@@ -345,6 +352,8 @@ def main(argv: list[str] | None = None) -> int:
                         anchors=anchors,
                         write_allow=args.write_allow,
                         worker_id=args.worker_id,
+                        intent_map_path=str(state.get("anchor_map_path") or ""),
+                        anchor_preview=str(state.get("anchor_preview") or ""),
                     ),
                     ensure_ascii=False,
                     indent=2,
@@ -359,6 +368,9 @@ def main(argv: list[str] | None = None) -> int:
             if not worktree.is_dir():
                 raise ChainBroken("no active AG worktree; ag_start first")
             print(json.dumps(read_result(worktree, args.worker_id), ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "confirm-map":
+            print(json.dumps(confirm_map(Path(args.root)), ensure_ascii=False, indent=2))
             return 0
         root = Path(args.root)
         if args.cmd == "enroll":
