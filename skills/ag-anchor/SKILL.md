@@ -57,6 +57,10 @@ Keep the route honest:
 
 - Route anchors are middle stations toward the endpoint, not restated
   acceptance rules.
+- Use verb-bearing declarative sentences of at least 20 characters. Name the
+  object, the direction, and the reason this station moves toward the endpoint.
+- Do not collapse an anchor into a bare slogan such as "make it trustworthy";
+  a good anchor can be followed without becoming a command list.
 - Guards are mandatory rules, passed as `--guard` / MCP `guards`. They render
   in the GUARDS section and never join the START→END path.
 - Defaults are negotiable choices, passed as `--default` / MCP `defaults`.

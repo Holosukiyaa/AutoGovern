@@ -45,6 +45,7 @@ anchor: do not add a new CSS layer
 Intent route, guard, default, and avoid are different layers:
 
 - **Route anchors** are middle stations that carry attention toward the endpoint. They may be soft or hard, but they should not merely restate acceptance rules.
+- Write route anchors as verb-bearing declarative sentences with at least 20 characters: name the object, the direction, and why the step moves toward the endpoint. They are directional landmarks, not bare slogans or task-list commands.
 - **Guards** are mandatory acceptance rules. Pass them to `ag_start --guard` or MCP `guards`; they render beside the route, never as nodes on the START→END path.
 - **Defaults** are negotiable choices. Pass them to `ag_start --default` or MCP `defaults`; they render beside the route and do not prove completion by themselves.
 - **Avoid** keeps its separate zone: it prevents drift and is not a middle station toward the endpoint.

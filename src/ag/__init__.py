@@ -1,3 +1,3 @@
 """ag: four lanes. Only ship (交货) may set product or refuse finish."""
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"

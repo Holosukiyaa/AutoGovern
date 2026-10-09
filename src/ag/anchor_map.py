@@ -30,6 +30,35 @@ def _text(value, limit):
     return str(value or "").strip()[:limit]
 
 
+def _visual_width(text):
+    return sum(2 if ord(char) > 127 else 1 for char in text)
+
+
+def _wrap_anchor_text(value, max_width=34, max_lines=2):
+    text = str(value or "").strip()
+    if not text:
+        return [""]
+    units = text.split()
+    if len(units) <= 1:
+        units = list(text)
+    lines = []
+    current = ""
+    for unit in units:
+        candidate = unit if not current else current + (" " if len(text.split()) > 1 and " " in text else "") + unit
+        if current and _visual_width(candidate) > max_width:
+            lines.append(current)
+            current = unit
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    if len(lines) > max_lines:
+        kept = lines[:max_lines]
+        kept[-1] = kept[-1][:-1] + "…" if len(kept[-1]) > 1 else "…"
+        return kept
+    return lines
+
+
 def default_artifact_path(title: str) -> Path:
     from subprocess import DEVNULL, check_output
 
@@ -90,13 +119,16 @@ def render_map(
         is_current = current_anchor and str(item.get("id") or "") == current_anchor
         if is_current:
             cls += " current"
-        svg.append(f'<rect class="{cls}" x="{x}" y="140" width="205" height="82" rx="16"/>')
+        svg.append(f'<rect class="{cls}" x="{x}" y="138" width="205" height="92" rx="16"/>')
         svg.append(f'<text class="{tag}" x="{x + 18}" y="163">{escape(item.get("id") or f"a{index}")}</text>')
-        svg.append(f'<text class="text" x="{x + 18}" y="187">{escape(_text(item.get("text"), 14))}</text>')
-        svg.append(f'<text class="{"current-tag" if is_current else "warn"}" x="{x + 18}" y="208">{escape(_KIND_LABELS[kind])}</text>')
+        wrapped = _wrap_anchor_text(item.get("text"), max_width=34, max_lines=2)
+        svg.append(f'<text class="text" x="{x + 18}" y="180">{escape(wrapped[0])}</text>')
+        if len(wrapped) > 1:
+            svg.append(f'<text class="text" x="{x + 18}" y="197">{escape(wrapped[1])}</text>')
+        svg.append(f'<text class="{"current-tag" if is_current else "warn"}" x="{x + 18}" y="212">{escape(_KIND_LABELS[kind])}</text>')
         if is_current:
-            svg.append(f'<rect class="current-badge" x="{x + 122}" y="149" width="70" height="21" rx="10"/>')
-            svg.append(f'<text class="current-tag" x="{x + 132}" y="164">当前</text>')
+            svg.append(f'<rect class="current-badge" x="{x + 122}" y="147" width="70" height="21" rx="10"/>')
+            svg.append(f'<text class="current-tag" x="{x + 132}" y="162">当前</text>')
         x += _SLOT
     svg.append(f'<line class="route" x1="{x - 25}" y1="{center}" x2="{x}" y2="{center}"/>')
     svg.append(f'<rect class="terminal" x="{x}" y="140" width="140" height="72" rx="18"/>')
