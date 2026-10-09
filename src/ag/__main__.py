@@ -324,7 +324,6 @@ def main(argv: list[str] | None = None) -> int:
             print(install_skill(target=args.target))
             return 0
         if args.cmd == "worker-create":
-            from .loop import status
             from .worker import create_task
 
             state = status(Path(args.root))
@@ -353,7 +352,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
         if args.cmd == "worker-read":
-            from .loop import status
             from .worker import read_result
 
             state = status(Path(args.root))
