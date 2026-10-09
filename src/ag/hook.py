@@ -27,11 +27,11 @@ def hook_main() -> int:
         return 1
     if _is_canonical(toplevel):
         usage_note(canonical, "ship", 3, "block", "canonical commit")
-        sys.stderr.write("ag: canonical checkout is not a work site; use ag_start\n")
+        sys.stderr.write("ag: canonical commit refused; use MCP ag_start or CLI: python -m ag start <root>\n")
         return 1
     if os.environ.get("AG_DELIVER") != "1":
         usage_note(canonical, "ship", 4, "block", "worktree commit")
-        sys.stderr.write("ag: only ag_finish can commit\n")
+        sys.stderr.write("ag: only ag_finish may commit; use MCP ag_verify then ag_finish\n")
         return 1
     if not _deliver_token_ok(canonical):
         usage_note(canonical, "ship", 4, "block", "deliver token")

@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="660" viewBox="0 0 1280 660">
+  <defs>
+    <style>
+      .bg { fill: #0e1218; }
+      .panel { fill: #141b24; stroke: #252f3c; }
+      .route { fill: none; stroke: #4d9dd8; stroke-width: 5; stroke-linecap: round; opacity: .82; }
+      .discoverable-line { fill: none; stroke: #8b97a8; stroke-width: 2; stroke-dasharray: 6 6; }
+      .blocking-line { fill: none; stroke: #d96d6d; stroke-width: 2; stroke-dasharray: 6 6; }
+      .avoid-line { fill: none; stroke: #d96d6d; stroke-width: 2; stroke-dasharray: 6 6; opacity: .75; }
+      .start { fill: #182432; stroke: #6ea8ff; stroke-width: 2; }
+      .anchor { fill: #182432; stroke: #4d9dd8; stroke-width: 2; }
+      .hard { stroke: #e0b34a; stroke-width: 3; }
+      .terminal { fill: #173528; stroke: #3dbe8c; stroke-width: 3; }
+      .unknown { fill: #191d24; stroke: #8b97a8; stroke-width: 2; stroke-dasharray: 7 7; }
+      .blocking { fill: #241719; stroke: #d96d6d; stroke-width: 2.5; stroke-dasharray: 7 7; }
+      .avoid { fill: #241719; stroke: #d96d6d; stroke-width: 2; stroke-dasharray: 7 7; }
+      .title { fill: #e8eef6; font: 700 24px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .subtitle { fill: #8b97a8; font: 14px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .card-title { fill: #e8eef6; font: 700 15px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .text { fill: #d7e2ee; font: 13px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .small { fill: #8b97a8; font: 12px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .tag { fill: #4d9dd8; font: 700 11px "Segoe UI", sans-serif; }
+      .hard-tag { fill: #e0b34a; font: 700 11px "Segoe UI", sans-serif; }
+      .terminal-tag { fill: #3dbe8c; font: 700 11px "Segoe UI", sans-serif; }
+      .unknown-tag { fill: #a8b4c4; font: 700 11px "Segoe UI", sans-serif; }
+      .blocking-tag { fill: #e08f8f; font: 700 11px "Segoe UI", sans-serif; }
+      .avoid-text { fill: #e3a0a0; font: 600 12px "Microsoft YaHei", "Segoe UI", sans-serif; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4d9dd8" />
+    </marker>
+    <marker id="gray-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b97a8" />
+    </marker>
+    <marker id="red-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#d96d6d" />
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1280" height="660" rx="20" />
+  <rect class="panel" x="28" y="24" width="1224" height="532" rx="20" />
+  <text class="title" x="58" y="68">意图锚点图 · ag 记住用户路线</text>
+  <text class="subtitle" x="58" y="96">起点是用户一句话；终点不是完成任务，而是 AI 在关键节点仍看见同一条路线。</text>
+
+  <path class="route" d="M108 245 L190 245" />
+  <path class="route" d="M395 245 L420 245" />
+  <path class="route" d="M625 245 L650 245" />
+  <path class="route" d="M855 245 L880 245" />
+  <path class="route" d="M1085 245 L1110 245" marker-end="url(#arrow)" />
+
+  <g>
+    <rect class="start" x="42" y="205" width="112" height="82" rx="18" />
+    <text class="tag" x="62" y="232">起点</text>
+    <text class="card-title" x="62" y="255">用户一句话</text>
+    <text class="small" x="62" y="276">优化 ag 意图锚点</text>
+  </g>
+
+  <g>
+    <rect class="anchor" x="190" y="185" width="205" height="120" rx="18" />
+    <text class="tag" x="210" y="212">A · 对象</text>
+    <text class="text" x="210" y="237">任务里的 anchors</text>
+    <text class="small" x="210" y="259">不是聊天记忆，不是知识库</text>
+    <text class="small" x="210" y="280">不进产品树，不跨任务</text>
+  </g>
+
+  <g>
+    <rect class="anchor" x="420" y="185" width="205" height="120" rx="18" />
+    <text class="tag" x="440" y="212">B · 入口</text>
+    <text class="text" x="440" y="237">start 写入，status 回显</text>
+    <text class="small" x="440" y="259">lift-12 读任务状态</text>
+    <text class="small" x="440" y="280">worker prompt 必须携带</text>
+  </g>
+
+  <g>
+    <rect class="anchor" x="650" y="185" width="205" height="120" rx="18" />
+    <text class="tag" x="670" y="212">C · 范围</text>
+    <text class="text" x="670" y="237">记忆、回放、披露偏离</text>
+    <text class="small" x="670" y="259">不做自动冲突裁决</text>
+    <text class="small" x="670" y="280">不把软锚点变成验收</text>
+  </g>
+
+  <g>
+    <rect class="anchor hard" x="880" y="185" width="205" height="120" rx="18" />
+    <text class="hard-tag" x="900" y="212">D · 结束条件</text>
+    <text class="text" x="900" y="237">开工、执行、verify 同锚</text>
+    <text class="small" x="900" y="259">critic/switch 能看到锚点</text>
+    <text class="small" x="900" y="280">用户能随时修订锚点</text>
+  </g>
+
+  <g>
+    <rect class="terminal" x="1110" y="200" width="140" height="90" rx="20" />
+    <text class="terminal-tag" x="1130" y="227">终点</text>
+    <text class="card-title" x="1130" y="250">不忘路线</text>
+    <text class="small" x="1130" y="271">AI 能拒绝偏离建议</text>
+  </g>
+
+  <path class="discoverable-line" d="M292 305 C292 370 250 390 217 390" marker-end="url(#gray-arrow)" />
+  <g>
+    <rect class="unknown" x="42" y="390" width="205" height="110" rx="18" />
+    <text class="unknown-tag" x="62" y="417">未知 A · discoverable</text>
+    <text class="text" x="62" y="442">task JSON 是否可直接加字段？</text>
+    <text class="small" x="62" y="464">AI 可查现有任务结构</text>
+    <text class="small" x="62" y="485">查完必须回填锚点</text>
+  </g>
+
+  <path class="blocking-line" d="M982 305 C982 370 940 390 907 390" marker-end="url(#red-arrow)" />
+  <g>
+    <rect class="blocking" x="712" y="390" width="205" height="110" rx="18" />
+    <text class="blocking-tag" x="732" y="417">已定 D · 权限边界</text>
+    <text class="text" x="732" y="442">hard 来自用户话术/规则</text>
+    <text class="small" x="732" y="464">AI 只能建议，不能自封</text>
+    <text class="small" x="732" y="485">用户懒也要保住拒绝权</text>
+  </g>
+
+  <path class="avoid-line" d="M1180 300 C1180 350 1120 375 1065 390" marker-end="url(#red-arrow)" />
+  <g>
+    <rect class="avoid" x="980" y="390" width="205" height="110" rx="18" />
+    <text class="blocking-tag" x="1000" y="417">避让区</text>
+    <text class="avoid-text" x="1000" y="442">不让 lift 挡 finish</text>
+    <text class="avoid-text" x="1000" y="464">不做锚点满足度评分</text>
+    <text class="avoid-text" x="1000" y="486">不自封 hard anchor</text>
+  </g>
+
+  <g>
+    <rect x="300" y="405" width="365" height="80" rx="18" fill="#182432" stroke="#252f3c" />
+    <text class="small" x="322" y="435">AG 负责账本和回放；skill 负责改变注意力。</text>
+    <text class="small" x="322" y="458">锚点是注意力，不是步骤。</text>
+    <text class="small" x="322" y="480">未知必须显式，禁止脑补成合理故事。</text>
+  </g>
+
+  <text class="small" x="58" y="594">图例：蓝 = 软锚点　黄 = 硬锚点　绿 = 终点　灰虚线 = 可查未知　红虚线 = 阻塞未知 / 避让</text>
+</svg>

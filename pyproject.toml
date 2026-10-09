@@ -1,6 +1,6 @@
 [project]
 name = "ag"
-version = "0.1.0"
+version = "0.2.0"
 description = "MCP delivery loop: worktree, enrolled tests, git hook, ff-only."
 requires-python = ">=3.11"
 readme = "README.md"
@@ -17,3 +17,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 ag = ["strategies.sqlite", "critic_prompt.md"]
+
+[tool.setuptools.data-files]
+"share/ag/skills/ag-anchor" = ["skills/ag-anchor/SKILL.md"]

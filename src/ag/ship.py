@@ -37,6 +37,19 @@ TOOLS = [
             "properties": {
                 "root": {"type": "string"},
                 "portrait": {"type": "string"},
+                "anchors": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {"type": "string"},
+                            "text": {"type": "string"},
+                            "hard": {"type": "boolean"},
+                            "source": {"type": "string"},
+                        },
+                        "required": ["text"],
+                    },
+                },
                 "skip_pending": {"type": "boolean"},
             },
             "required": ["root"],
@@ -74,9 +87,12 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         test_argv = [str(x) for x in raw] if isinstance(raw, list) else None
         return enroll(root, test_argv=test_argv, note=str(args.get("note") or ""))
     if name == "ag_start":
+        raw = args.get("anchors")
+        anchors = [dict(item) for item in raw if isinstance(item, dict)] if isinstance(raw, list) else None
         return start(
             root,
             portrait=str(args.get("portrait") or ""),
+            anchors=anchors,
             skip_pending=bool(args.get("skip_pending")),
         )
     if name == "ag_verify":

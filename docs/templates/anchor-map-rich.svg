@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="660" viewBox="0 0 1280 660">
+  <defs>
+    <style>
+      .bg { fill: #0e1218; }
+      .panel { fill: #141b24; stroke: #252f3c; }
+      .route { fill: none; stroke: #4d9dd8; stroke-width: 5; stroke-linecap: round; opacity: .82; }
+      .unknown-line { fill: none; stroke: #8b97a8; stroke-width: 2; stroke-dasharray: 6 6; }
+      .blocking-line { fill: none; stroke: #d96d6d; stroke-width: 2; stroke-dasharray: 6 6; }
+      .avoid-line { fill: none; stroke: #d96d6d; stroke-width: 2; stroke-dasharray: 6 6; opacity: .75; }
+      .start { fill: #182432; stroke: #6ea8ff; stroke-width: 2; }
+      .anchor { fill: #182432; stroke: #4d9dd8; stroke-width: 2; }
+      .hard { stroke: #e0b34a; stroke-width: 3; }
+      .terminal { fill: #173528; stroke: #3dbe8c; stroke-width: 3; }
+      .unknown { fill: #191d24; stroke: #8b97a8; stroke-width: 2; stroke-dasharray: 7 7; }
+      .blocking { fill: #241719; stroke: #d96d6d; stroke-width: 2.5; stroke-dasharray: 7 7; }
+      .avoid { fill: #241719; stroke: #d96d6d; stroke-width: 2; stroke-dasharray: 7 7; }
+      .title { fill: #e8eef6; font: 700 24px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .subtitle { fill: #8b97a8; font: 14px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .card-title { fill: #e8eef6; font: 700 15px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .text { fill: #d7e2ee; font: 13px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .small { fill: #8b97a8; font: 12px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .tag { fill: #4d9dd8; font: 700 11px "Segoe UI", sans-serif; }
+      .hard-tag { fill: #e0b34a; font: 700 11px "Segoe UI", sans-serif; }
+      .terminal-tag { fill: #3dbe8c; font: 700 11px "Segoe UI", sans-serif; }
+      .unknown-tag { fill: #a8b4c4; font: 700 11px "Segoe UI", sans-serif; }
+      .blocking-tag { fill: #e08f8f; font: 700 11px "Segoe UI", sans-serif; }
+      .avoid-text { fill: #e3a0a0; font: 600 12px "Microsoft YaHei", "Segoe UI", sans-serif; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4d9dd8" />
+    </marker>
+    <marker id="gray-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b97a8" />
+    </marker>
+    <marker id="red-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#d96d6d" />
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1280" height="660" rx="20" />
+  <rect class="panel" x="28" y="24" width="1224" height="532" rx="20" />
+  <text class="title" x="58" y="68">意图锚点图 · 测试登录功能</text>
+  <text class="subtitle" x="58" y="96">锚点不是计划，也不是验收标准；它固定会改变行动的未知，让用户和 AI 快速对齐。</text>
+
+  <path class="route" d="M108 245 L190 245" />
+  <path class="route" d="M395 245 L420 245" />
+  <path class="route" d="M625 245 L650 245" />
+  <path class="route" d="M855 245 L880 245" />
+  <path class="route" d="M1085 245 L1110 245" marker-end="url(#arrow)" />
+
+  <g>
+    <rect class="start" x="42" y="205" width="112" height="82" rx="18" />
+    <text class="tag" x="62" y="232">起点</text>
+    <text class="card-title" x="62" y="255">用户一句话</text>
+    <text class="small" x="62" y="276">测试登录功能</text>
+  </g>
+
+  <g>
+    <rect class="anchor" x="190" y="185" width="205" height="120" rx="18" />
+    <text class="tag" x="210" y="212">A · 被测对象</text>
+    <text class="text" x="210" y="237">登录表单到 POST /api/login</text>
+    <text class="small" x="210" y="259">入口未定位时先查，不脑补</text>
+    <text class="small" x="210" y="280">不把登录扩大成账号系统</text>
+  </g>
+
+  <g>
+    <rect class="anchor" x="420" y="185" width="205" height="120" rx="18" />
+    <text class="tag" x="440" y="212">B · 测试方式</text>
+    <text class="text" x="440" y="237">Playwright 打开真实页面</text>
+    <text class="small" x="440" y="259">输入账号密码，而不是只看代码</text>
+    <text class="small" x="440" y="280">只能测 API 时先说明降级原因</text>
+  </g>
+
+  <g>
+    <rect class="anchor" x="650" y="185" width="205" height="120" rx="18" />
+    <text class="tag" x="670" y="212">C · 测试范围</text>
+    <text class="text" x="670" y="237">成功 / 密码错误 / 空输入</text>
+    <text class="small" x="670" y="259">不测记住密码、找回密码</text>
+    <text class="small" x="670" y="280">不测会话过期和其他入口</text>
+  </g>
+
+  <g>
+    <rect class="anchor hard" x="880" y="185" width="205" height="120" rx="18" />
+    <text class="hard-tag" x="900" y="212">D · 结束条件</text>
+    <text class="text" x="900" y="237">三种场景都有工具输出</text>
+    <text class="small" x="900" y="259">结论只能是通过 / 不通过</text>
+    <text class="small" x="900" y="280">没验证到要明说，不许脑补</text>
+  </g>
+
+  <g>
+    <rect class="terminal" x="1110" y="200" width="140" height="90" rx="20" />
+    <text class="terminal-tag" x="1130" y="227">终点</text>
+    <text class="card-title" x="1130" y="250">测试结论</text>
+    <text class="small" x="1130" y="271">不改产品代码</text>
+  </g>
+
+  <path class="unknown-line" d="M292 305 C292 370 250 390 217 390" marker-end="url(#gray-arrow)" />
+  <g>
+    <rect class="unknown" x="42" y="390" width="205" height="110" rx="18" />
+    <text class="unknown-tag" x="62" y="417">未知 A · discoverable</text>
+    <text class="text" x="62" y="442">登录入口在哪个文件？</text>
+    <text class="small" x="62" y="464">AI 可以先查，但查完必须回填</text>
+    <text class="small" x="62" y="485">不许猜一个大概在这里</text>
+  </g>
+
+  <path class="blocking-line" d="M982 305 C982 370 940 390 907 390" marker-end="url(#red-arrow)" />
+  <g>
+    <rect class="blocking" x="712" y="390" width="205" height="110" rx="18" />
+    <text class="blocking-tag" x="732" y="417">未知 D · blocking</text>
+    <text class="text" x="732" y="442">测完只报告还是允许修复？</text>
+    <text class="small" x="732" y="464">这个必须问用户</text>
+    <text class="small" x="732" y="485">不解决就不能开工</text>
+  </g>
+
+  <path class="avoid-line" d="M1180 300 C1180 350 1120 375 1065 390" marker-end="url(#red-arrow)" />
+  <g>
+    <rect class="avoid" x="980" y="390" width="205" height="110" rx="18" />
+    <text class="blocking-tag" x="1000" y="417">避让区</text>
+    <text class="avoid-text" x="1000" y="442">不修复发现的 bug</text>
+    <text class="avoid-text" x="1000" y="464">不重构认证代码</text>
+    <text class="avoid-text" x="1000" y="486">不新增测试框架</text>
+  </g>
+
+  <g>
+    <rect x="300" y="405" width="365" height="80" rx="18" fill="#182432" stroke="#252f3c" />
+    <text class="small" x="322" y="435">锚点粒度：会改变行动、错了用户会在意、能被确认。</text>
+    <text class="small" x="322" y="458">太大没用，太小变成计划。</text>
+    <text class="small" x="322" y="480">未知必须显式，不能自动填成合理故事。</text>
+  </g>
+
+  <text class="small" x="58" y="594">图例：蓝 = 软锚点　黄 = 硬锚点　绿 = 终点　灰虚线 = 可查未知　红虚线 = 阻塞未知 / 避让</text>
+</svg>

@@ -183,6 +183,65 @@ def lift_11(root: Path, item: dict[str, Any]) -> dict[str, Any]:
     return lift_4(root, item)
 
 
+def _anchors(task: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = task.get("anchors") if isinstance(task.get("anchors"), list) else []
+    anchors = []
+    for index, item in enumerate(rows, 1):
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        if text:
+            anchors.append({"id": str(item.get("id") or f"a{index}"), "text": text, "kind": str(item.get("kind") or ("hard" if item.get("hard") else "soft"))})
+    return anchors
+
+
+def _lift_signal(root: Path) -> dict[str, Any]:
+    task = _task(root) or {}
+    cwd = _wt(root) or _repo(root)
+    touched = _touched(root)
+    verify = task.get("verify") if isinstance(task.get("verify"), dict) else {}
+    return {
+        "portrait_sha": hashlib.sha256(str(task.get("portrait") or "").encode("utf-8")).hexdigest()[:16],
+        "touched_sha": hashlib.sha256("\n".join(touched).encode("utf-8")).hexdigest()[:16],
+        "tree": _git(cwd, "rev-parse", "HEAD"),
+        "verify_exit": verify.get("exit"),
+        "touched": touched,
+    }
+
+
+def lift_12(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
+    task = _task(root) or {}
+    anchors = _anchors(task)
+    return {
+        "anchors": anchors,
+        "reminder": "Keep attention on anchors; do not turn them into fixed steps unless hard.",
+    }
+
+
+def lift_13(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
+    task = _task(root) or {}
+    signal = _lift_signal(root)
+    path = plug_dir(root, "lift", 13) / "signal.json"
+    previous = _read_json(path, {})
+    changed = previous != signal
+    if changed:
+        _write_json(path, signal)
+    return {"changed": changed, "signal": signal}
+
+
+def lift_14(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
+    path = plug_dir(root, "lift", 14) / "notes.jsonl"
+    payload = {
+        "t": time.time(),
+        "portrait": str((_task(root) or {}).get("portrait") or ""),
+        "touched": _touched(root)[:24],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+    return {"note": "raw task snapshot stored out-of-tree; discarded on unplug/task end"}
+
+
 def _tree(root: Path) -> Path:
     return _wt(root) or _repo(root)
 
@@ -396,6 +455,19 @@ def see_4(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     return {"blocks": blocks}
 
 
+def _hook_ok(root: Path) -> bool:
+    configured = _git(root, "config", "--local", "--get", "core.hooksPath")
+    if not configured:
+        return False
+    key = _git(root, "config", "--local", "--get", "ag.key") or project_key(root)
+    folder = Path(os.environ.get("AG_HOME") or Path.home() / ".ag") / "hooks" / key
+    return (
+        Path(configured).resolve() == folder.resolve()
+        and (folder / "pre-commit").is_file()
+        and (folder / "prepare-commit-msg").is_file()
+    )
+
+
 def see_5(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     repo = _repo(root)
     u = see_1(root, _item)
@@ -407,9 +479,9 @@ def see_5(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
             continue
         dirty = True
         break
-    hook = _git(repo, "config", "--local", "--get", "core.hooksPath")
+    hook = _hook_ok(repo)
     return {
-        "hook_ok": bool(hook),
+        "hook_ok": hook,
         "dirty": dirty,
         "never_used_n": len(u.get("never_used") or []),
         "last_block": last,
@@ -447,6 +519,191 @@ def see_9(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     return {"chain": chain}
 
 
+
+def _css_symptoms(root: Path) -> list[dict[str, Any]]:
+    """Record repeated CSS selectors as symptoms; this is not a diagnosis."""
+    cwd = _tree(root)
+    owners: dict[str, list[str]] = {}
+    file_details: dict[str, list[dict[str, int]]] = {}
+    consumers: dict[str, list[str]] = {}
+    for rel in _scan_files(cwd):
+        path = cwd / rel
+        suffix = Path(rel).suffix.lower()
+        if suffix not in {".css", ".tsx", ".ts", ".js", ".mjs"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if suffix == ".css":
+            lines = text.splitlines()
+            for name in dict.fromkeys(_CSS_CLASS.findall(text)):
+                selectors = sum(1 for line in lines if name in line)
+                important = sum(1 for line in lines if name in line and "!important" in line)
+                owners.setdefault(name, []).append(rel)
+                file_details.setdefault(name, []).append(
+                    {"file": rel, "selectors": selectors, "important": important}
+                )
+        else:
+            for name in dict.fromkeys(_CSS_CLASS.findall(text)):
+                consumers.setdefault(name, []).append(rel)
+
+    rows: list[dict[str, Any]] = []
+    for name, files in owners.items():
+        details = file_details.get(name) or []
+        important = sum(int(item.get("important") or 0) for item in details)
+        selectors = sum(int(item.get("selectors") or 0) for item in details)
+        if len(files) < 2 or (important == 0 and len(files) < 3):
+            continue
+        commit_sets = []
+        for rel in files[:8]:
+            commit_sets.append(set(_git(cwd, "log", "--format=%H", "--", rel).splitlines()))
+        co_change = 0
+        if len(commit_sets) > 1:
+            pairs = [left & right for left, right in zip(commit_sets, commit_sets[1:])]
+            co_change = len(set().union(*pairs)) if pairs else 0
+        rows.append(
+            {
+                "kind": "css-selector",
+                "locator": f".{name}",
+                "files": files,
+                "file_details": details,
+                "important": important,
+                "selectors": selectors,
+                "consumers": list(dict.fromkeys(consumers.get(name) or [])),
+                "co_change": co_change,
+            }
+        )
+    rows.sort(key=lambda row: (len(row["files"]), row["important"], row["selectors"]), reverse=True)
+    return rows[:12]
+
+
+def see_10(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
+    symptoms = _css_symptoms(root)
+    _write_json(
+        plug_dir(root, "see", 10) / "symptoms.json",
+        {"t": time.time(), "symptoms": symptoms},
+    )
+    return {"symptoms": symptoms[:8]}
+
+
+def see_11(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
+    blob = _read_json(plug_dir(root, "see", 10) / "symptoms.json", {})
+    symptoms = blob.get("symptoms") if isinstance(blob, dict) else []
+    if not isinstance(symptoms, list) or not symptoms:
+        symptoms = _css_symptoms(root)
+        _write_json(
+            plug_dir(root, "see", 10) / "symptoms.json",
+            {"t": time.time(), "symptoms": symptoms},
+        )
+    rows = []
+    for symptom in symptoms[:8]:
+        if not isinstance(symptom, dict):
+            continue
+        details = symptom.get("file_details") or []
+        owners = [str(item.get("file") or "") for item in details if item.get("file")]
+        modifiers = [
+            str(item.get("file") or "")
+            for item in details
+            if int(item.get("selectors") or 0) > 1
+        ]
+        overriders = [
+            str(item.get("file") or "")
+            for item in details
+            if int(item.get("important") or 0) > 0
+        ]
+        rows.append(
+            {
+                "locator": symptom.get("locator"),
+                "definers": owners,
+                "modifiers": list(dict.fromkeys(modifiers)),
+                "overriders": list(dict.fromkeys(overriders)),
+                "consumers": symptom.get("consumers") or [],
+            }
+        )
+    return {"ownership": rows}
+
+
+def _symptom_class(symptom: dict[str, Any]) -> dict[str, Any]:
+    files = len(symptom.get("files") or [])
+    important = int(symptom.get("important") or 0)
+    co_change = int(symptom.get("co_change") or 0)
+    consumers = len(symptom.get("consumers") or [])
+    if files < 2:
+        classification = "noise"
+    elif important == 0:
+        classification = "incident"
+    elif co_change == 0:
+        classification = "risk"
+    elif files >= 3 and important >= 5 and co_change >= 3:
+        classification = "confirmed"
+    else:
+        classification = "suspected"
+    return {
+        "locator": symptom.get("locator"),
+        "classification": classification,
+        "reason": {
+            "files": files,
+            "important": important,
+            "co_change": co_change,
+            "consumers": consumers,
+        },
+    }
+
+
+def heal_5(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
+    blob = _read_json(plug_dir(root, "see", 10) / "symptoms.json", {})
+    symptoms = blob.get("symptoms") if isinstance(blob, dict) else []
+    if not isinstance(symptoms, list) or not symptoms:
+        symptoms = _css_symptoms(root)
+    classifications = [_symptom_class(item) for item in symptoms[:8] if isinstance(item, dict)]
+    _write_json(
+        plug_dir(root, "heal", 5) / "triage.json",
+        {"t": time.time(), "items": classifications},
+    )
+    return {"items": classifications}
+
+
+def heal_6(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
+    blob = _read_json(plug_dir(root, "see", 10) / "symptoms.json", {})
+    symptoms = blob.get("symptoms") if isinstance(blob, dict) else []
+    if not isinstance(symptoms, list) or not symptoms:
+        symptoms = _css_symptoms(root)
+    ticket = None
+    for symptom in symptoms:
+        if not isinstance(symptom, dict):
+            continue
+        if _symptom_class(symptom).get("classification") != "confirmed":
+            continue
+        details = symptom.get("file_details") or []
+        if not details:
+            continue
+        keep = max(
+            details,
+            key=lambda item: (int(item.get("important") or 0), int(item.get("selectors") or 0)),
+        )
+        remove = [
+            str(item.get("file") or "")
+            for item in details
+            if str(item.get("file") or "") != str(keep.get("file") or "")
+        ]
+        ticket = {
+            "case": symptom.get("locator"),
+            "keep": str(keep.get("file") or ""),
+            "remove": remove,
+            "observe": [
+                "build passes",
+                "visual regression snapshot unchanged",
+                "duplicate selector count decreases",
+                "!important count does not increase",
+            ],
+            "cut": False,
+        }
+        break
+    if ticket is not None:
+        _write_json(plug_dir(root, "heal", 6) / "ticket.json", {"t": time.time(), **ticket})
+    return {"ticket": ticket}
+
 HANDLERS = {
     ("lift", 1): lift_1,
     ("lift", 2): lift_2,
@@ -459,10 +716,15 @@ HANDLERS = {
     ("lift", 9): lift_9,
     ("lift", 10): lift_10,
     ("lift", 11): lift_11,
+    ("lift", 12): lift_12,
+    ("lift", 13): lift_13,
+    ("lift", 14): lift_14,
     ("heal", 1): heal_1,
     ("heal", 2): heal_2,
     ("heal", 3): heal_3,
     ("heal", 4): heal_4,
+    ("heal", 5): heal_5,
+    ("heal", 6): heal_6,
     ("see", 1): see_1,
     ("see", 2): see_2,
     ("see", 3): see_3,
@@ -472,6 +734,8 @@ HANDLERS = {
     ("see", 7): see_7,
     ("see", 8): see_8,
     ("see", 9): see_9,
+    ("see", 10): see_10,
+    ("see", 11): see_11,
 }
 
 

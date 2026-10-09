@@ -368,6 +368,44 @@ def enroll(root: Path, *, test_argv: list[str] | None = None, note: str = "") ->
     return status(root)
 
 
+def parse_anchors(portrait: str) -> list[dict[str, Any]]:
+    """Parse anchor lines from a portrait. AI guesses never become hard anchors."""
+    valid_kinds = {"soft", "hard", "discoverable", "blocking", "defaulted", "avoid", "obsolete"}
+    markers = {"!": "hard", "?": "blocking", "~": "discoverable", "=": "defaulted", "-": "avoid", "x": "obsolete"}
+    anchors: list[dict[str, Any]] = []
+    for raw in str(portrait or "").splitlines():
+        line = raw.strip()
+        if not line.lower().startswith("anchor"):
+            continue
+        if ":" in line:
+            prefix, body = line.split(":", 1)
+        elif chr(0xff1a) in line:
+            prefix, body = line.split(chr(0xff1a), 1)
+        else:
+            continue
+        body = body.strip()
+        if not body:
+            continue
+        marker = prefix.strip().lower()[-1:]
+        kind = markers.get(marker, "soft")
+        if kind not in valid_kinds:
+            kind = "soft"
+        anchors.append({"id": f"a{len(anchors) + 1}", "text": body, "kind": kind})
+    return anchors
+
+def _anchor_exam(task: dict[str, Any]) -> str:
+    anchors = task.get("anchors") if isinstance(task.get("anchors"), list) else []
+    if not anchors:
+        return ""
+    lines = ["意图锚点："]
+    for index, item in enumerate(anchors, 1):
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or ("hard" if item.get("hard") else "soft"))
+        lines.append(f"[{kind}] {item.get('text') or ''}")
+    return "\n".join(lines)
+
+
 def status(root: Path) -> dict[str, Any]:
     root = real_root(root)
     item = lookup_project(root)
@@ -409,6 +447,7 @@ def status(root: Path) -> dict[str, Any]:
         "worker_note": "After ag_verify cite critic.report_id and switch.report_id. No report bodies. Switch is the finish gate; critic is not.",
         "task": task,
         "portrait": (task or {}).get("portrait") if task else "",
+        "anchors": (task or {}).get("anchors") if task else [],
         "worktree": (task or {}).get("worktree") if task else "",
         "critic_report_id": _critic_report_id(verify if isinstance(verify, dict) else None),
         "switch_report_id": _switch_report_id(verify if isinstance(verify, dict) else None),
@@ -429,7 +468,7 @@ def status(root: Path) -> dict[str, Any]:
     return out
 
 
-def start(root: Path, *, portrait: str = "", skip_pending: bool = False) -> dict[str, Any]:
+def start(root: Path, *, portrait: str = "", anchors: list[dict[str, Any]] | None = None, skip_pending: bool = False) -> dict[str, Any]:
     """Open a worktree. Tracked canonical files become read-only until finish or abandon."""
     state = status(root)
     root = Path(state["root"])
@@ -474,6 +513,7 @@ def start(root: Path, *, portrait: str = "", skip_pending: bool = False) -> dict
             "source_head": git(root, "rev-parse", "HEAD"),
             "worktree": str(worktree),
             "portrait": chosen,
+            "anchors": parse_anchors(chosen) if anchors is None else anchors,
             "verified_tree": "",
             "verify": None,
         },
@@ -572,6 +612,9 @@ def verify(root: Path) -> dict[str, Any]:
     from .critic import attach_verify
 
     portrait = str(task.get("portrait") or "").strip()
+    anchor_exam = _anchor_exam(task)
+    if anchor_exam:
+        portrait = f"{portrait}\n\n{anchor_exam}" if portrait else anchor_exam
     probe_red = list(record["probe_red"])
     critic, planted = attach_verify(
         enrolled,

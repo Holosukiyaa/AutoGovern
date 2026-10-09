@@ -1,0 +1,58 @@
+﻿---
+name: ag-anchor
+description: >
+  Use for any ag-governed delivery task, especially before ag_start and when
+  the user's one-sentence request hides a route. Extract user-facing intent
+  anchors, keep them as attention rather than a plan, persist them through ag,
+  and disclose deviations. Also use when the user says 锚点, 意图锚点, route,
+  or when a later suggestion conflicts with an existing anchor. This skill does
+  not replace ag; delivery still goes through ag_start → ag_verify → ag_finish.
+---
+
+# ag intent anchors
+
+Intent anchors make the user's hidden route explicit without turning it into a
+step plan. `ag` remembers them in task state; the AI must read them at the
+start, while working, and before verification.
+
+## Opening
+
+1. Read the user's actual words and the project instructions.
+2. Identify the endpoint, then work backwards:
+   - object: what concrete surface or code path is in play?
+   - method: which real mechanism will be used?
+   - scope: what is included and what is explicitly excluded?
+   - finish: what evidence makes this round complete?
+3. Do not ask for permission to proceed. Put reasonable defaults under
+   `我替你定的`.
+4. Write short anchor lines into the `ag_start` portrait:
+   - `anchor: <soft attention>`
+   - `anchor!: <hard rule only when it follows from an explicit user/project rule>`
+5. A hard anchor is never invented from an AI guess. The AI may propose an
+   upgrade, but must label the source.
+6. If a blocking unknown remains (endpoint, method, scope, or finish cannot be
+   determined), stop and ask one concise question instead of inventing work.
+
+## While working
+
+- Re-read anchors before file edits and before changing direction.
+- Anchors are attention, not a checklist. They may be approached approximately.
+- If a suggestion drifts from a soft anchor, continue but disclose the drift.
+- If it conflicts with a hard anchor, state the conflict first and ask whether
+  the anchor should be revised.
+- Never silently rewrite or delete an anchor.
+- Do not turn soft anchors into a finish gate.
+
+## Anchor map
+
+When useful, generate an SVG map in the user's requested location. The map
+shows: start, object/method/scope/finish anchors, endpoint, discoverable
+unknowns, blocking unknowns, and avoid zone. Long tasks widen the SVG and keep
+font size fixed; 9 or more anchors should prompt consolidation.
+
+## Delivery
+
+- Use `ag_start` with the portrait and explicit anchors when available.
+- Pass anchors to any worker prompt.
+- Before completion, run `ag_verify`; do not self-certify.
+- Report absolute paths for generated files.

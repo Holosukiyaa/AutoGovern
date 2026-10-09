@@ -1,0 +1,205 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2420" height="660" viewBox="0 0 2420 660">
+  <defs>
+    <style>
+      .bg { fill: #0e1218; }
+      .panel { fill: #141b24; stroke: #252f3c; }
+      .route { fill: none; stroke: #4d9dd8; stroke-width: 5; stroke-linecap: round; opacity: .82; }
+      .branch { fill: none; stroke: #8b97a8; stroke-width: 2; stroke-dasharray: 6 6; }
+      .unknown-line { fill: none; stroke: #8b97a8; stroke-width: 2; stroke-dasharray: 6 6; }
+      .blocking-line { fill: none; stroke: #d96d6d; stroke-width: 2; stroke-dasharray: 6 6; }
+      .obsolete-line { fill: none; stroke: #5d6875; stroke-width: 2; stroke-dasharray: 6 6; }
+      .start { fill: #182432; stroke: #6ea8ff; stroke-width: 2; }
+      .anchor { fill: #182432; stroke: #4d9dd8; stroke-width: 2; }
+      .hard { stroke: #e0b34a; stroke-width: 3; }
+      .obsolete { fill: #171b20; stroke: #5d6875; stroke-width: 2; stroke-dasharray: 7 7; }
+      .terminal { fill: #173528; stroke: #3dbe8c; stroke-width: 3; }
+      .unknown { fill: #191d24; stroke: #8b97a8; stroke-width: 2; stroke-dasharray: 7 7; }
+      .blocking { fill: #241719; stroke: #d96d6d; stroke-width: 2.5; stroke-dasharray: 7 7; }
+      .avoid { fill: #241719; stroke: #d96d6d; stroke-width: 2; stroke-dasharray: 7 7; }
+      .title { fill: #e8eef6; font: 700 24px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .subtitle { fill: #8b97a8; font: 14px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .card-title { fill: #e8eef6; font: 700 15px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .obsolete-title { fill: #8b97a8; font: 700 15px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .text { fill: #d7e2ee; font: 13px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .small { fill: #8b97a8; font: 12px "Microsoft YaHei", "Segoe UI", sans-serif; }
+      .tag { fill: #4d9dd8; font: 700 11px "Segoe UI", sans-serif; }
+      .hard-tag { fill: #e0b34a; font: 700 11px "Segoe UI", sans-serif; }
+      .terminal-tag { fill: #3dbe8c; font: 700 11px "Segoe UI", sans-serif; }
+      .unknown-tag { fill: #a8b4c4; font: 700 11px "Segoe UI", sans-serif; }
+      .blocking-tag { fill: #e08f8f; font: 700 11px "Segoe UI", sans-serif; }
+      .obsolete-tag { fill: #77828f; font: 700 11px "Segoe UI", sans-serif; }
+      .avoid-text { fill: #e3a0a0; font: 600 12px "Microsoft YaHei", "Segoe UI", sans-serif; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4d9dd8" />
+    </marker>
+    <marker id="gray-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b97a8" />
+    </marker>
+    <marker id="red-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#d96d6d" />
+    </marker>
+  </defs>
+
+  <rect class="bg" width="2420" height="660" rx="20" />
+  <rect class="panel" x="28" y="24" width="2364" height="532" rx="20" />
+  <text class="title" x="58" y="68">长任务意图锚点图 · release 前的 ag 优化</text>
+  <text class="subtitle" x="58" y="96">锚点随任务增长；SVG 横向延展，文本尺寸不变。节点超过 8 个时提醒合并或拆任务。</text>
+
+  <path class="route" d="M108 245 L190 245" />
+  <path class="route" d="M395 245 L420 245" />
+  <path class="route" d="M625 245 L650 245" />
+  <path class="route" d="M855 245 L880 245" />
+  <path class="route" d="M1085 245 L1110 245" />
+  <path class="route" d="M1315 245 L1340 245" />
+  <path class="route" d="M1545 245 L1570 245" />
+  <path class="route" d="M1775 245 L1800 245" />
+  <path class="route" d="M2005 245 L2030 245" />
+  <path class="route" d="M2235 245 L2260 245" marker-end="url(#arrow)" />
+
+  <g>
+    <rect class="start" x="42" y="205" width="112" height="82" rx="18" />
+    <text class="tag" x="62" y="232">起点</text>
+    <text class="card-title" x="62" y="255">用户一句话</text>
+    <text class="small" x="62" y="276">准备 release</text>
+  </g>
+
+  <g>
+    <rect class="anchor" x="190" y="185" width="205" height="120" rx="18" />
+    <text class="tag" x="210" y="212">A · 对象</text>
+    <text class="text" x="210" y="237">ag 本仓，不动项目</text>
+    <text class="small" x="210" y="259">只改 ag 和文档</text>
+    <text class="small" x="210" y="280">不修改被治理项目</text>
+  </g>
+
+  <g>
+    <rect class="anchor" x="420" y="185" width="205" height="120" rx="18" />
+    <text class="tag" x="440" y="212">B · 状态</text>
+    <text class="text" x="440" y="237">锚点进 task JSON</text>
+    <text class="small" x="440" y="259">status / lift 可见</text>
+    <text class="small" x="440" y="280">worker prompt 携带</text>
+  </g>
+
+  <g>
+    <rect class="anchor" x="650" y="185" width="205" height="120" rx="18" />
+    <text class="tag" x="670" y="212">C · 入口</text>
+    <text class="text" x="670" y="237">start 接收 anchors</text>
+    <text class="small" x="670" y="259">兼容 portrait 里的 anchor:</text>
+    <text class="small" x="670" y="280">不要求用户填表</text>
+  </g>
+
+  <g>
+    <rect class="anchor hard" x="880" y="185" width="205" height="120" rx="18" />
+    <text class="hard-tag" x="900" y="212">D · 权限</text>
+    <text class="text" x="900" y="237">hard 不自封</text>
+    <text class="small" x="900" y="259">来自用户话术/规则</text>
+    <text class="small" x="900" y="280">AI 可建议，不可升级</text>
+  </g>
+
+  <g>
+    <rect class="anchor" x="1110" y="185" width="205" height="120" rx="18" />
+    <text class="tag" x="1130" y="212">E · 观测</text>
+    <text class="text" x="1130" y="237">see-10/11 记账</text>
+    <text class="small" x="1130" y="259">所有权表先列事实</text>
+    <text class="small" x="1130" y="280">不诊断、不自动修</text>
+  </g>
+
+  <g>
+    <rect class="anchor hard" x="1340" y="185" width="205" height="120" rx="18" />
+    <text class="hard-tag" x="1360" y="212">F · 门诊</text>
+    <text class="text" x="1360" y="237">先 see 后 heal</text>
+    <text class="small" x="1360" y="259">顺序不能乱</text>
+    <text class="small" x="1360" y="280">heal 不自动开刀</text>
+  </g>
+
+  <g>
+    <rect class="anchor" x="1570" y="185" width="205" height="120" rx="18" />
+    <text class="tag" x="1590" y="212">G · 验收</text>
+    <text class="text" x="1590" y="237">verify 带 anchors</text>
+    <text class="small" x="1590" y="259">critic/switch 可见</text>
+    <text class="small" x="1590" y="280">lift 不挡 finish</text>
+  </g>
+
+  <g>
+    <rect class="anchor obsolete" x="1800" y="185" width="205" height="120" rx="18" />
+    <text class="obsolete-tag" x="1820" y="212">H · 已失效</text>
+    <text class="text" x="1820" y="237">MCP 单独解决</text>
+    <text class="small" x="1820" y="259">用户确认不够</text>
+    <text class="small" x="1820" y="280">必须配套 skill</text>
+  </g>
+
+  <g>
+    <rect class="anchor" x="2030" y="185" width="205" height="120" rx="18" />
+    <text class="tag" x="2050" y="212">I · 行为</text>
+    <text class="text" x="2050" y="237">skill 引导 AI</text>
+    <text class="small" x="2050" y="259">hook 报错给出下一步</text>
+    <text class="small" x="2050" y="280">不是数据就能自律</text>
+  </g>
+
+  <g>
+    <rect class="terminal" x="2260" y="200" width="140" height="90" rx="20" />
+    <text class="terminal-tag" x="2280" y="227">终点</text>
+    <text class="card-title" x="2280" y="250">可发布</text>
+    <text class="small" x="2280" y="271">0.2.0</text>
+  </g>
+
+  <path class="branch" d="M1902 185 C1902 150 1980 150 2130 150 C2200 150 2235 175 2235 190" marker-end="url(#gray-arrow)" />
+  <text class="small" x="1940" y="140">失效锚点只保留痕迹，不再占据主路线注意力</text>
+
+  <path class="unknown-line" d="M292 305 C292 370 250 390 217 390" marker-end="url(#gray-arrow)" />
+  <g>
+    <rect class="unknown" x="42" y="390" width="205" height="110" rx="18" />
+    <text class="unknown-tag" x="62" y="417">未知 A · discoverable</text>
+    <text class="text" x="62" y="442">任务字段结构细节？</text>
+    <text class="small" x="62" y="464">AI 可查，查完回填</text>
+    <text class="small" x="62" y="485">不许猜</text>
+  </g>
+
+  <path class="blocking-line" d="M982 305 C982 370 940 390 907 390" marker-end="url(#red-arrow)" />
+  <g>
+    <rect class="blocking" x="712" y="390" width="205" height="110" rx="18" />
+    <text class="blocking-tag" x="732" y="417">未知 D · blocking</text>
+    <text class="text" x="732" y="442">hard 来源边界？</text>
+    <text class="small" x="732" y="464">用户话术/项目规则</text>
+    <text class="small" x="732" y="485">已定：不能自封</text>
+  </g>
+
+  <path class="unknown-line" d="M1672 305 C1672 370 1630 390 1597 390" marker-end="url(#gray-arrow)" />
+  <g>
+    <rect class="unknown" x="1402" y="390" width="205" height="110" rx="18" />
+    <text class="unknown-tag" x="1422" y="417">未知 G · discoverable</text>
+    <text class="text" x="1422" y="442">verify 怎么拼接锚点？</text>
+    <text class="small" x="1422" y="464">需查 exam 生成链</text>
+    <text class="small" x="1422" y="485">保持 critic/switch 同源</text>
+  </g>
+
+  <path class="blocking-line" d="M2132 305 C2132 370 2090 390 2057 390" marker-end="url(#red-arrow)" />
+  <g>
+    <rect class="blocking" x="1862" y="390" width="205" height="110" rx="18" />
+    <text class="blocking-tag" x="1882" y="417">未知 I · blocking</text>
+    <text class="text" x="1882" y="442">skill 放哪里？</text>
+    <text class="small" x="1882" y="464">ag 内维护，外部安装</text>
+    <text class="small" x="1882" y="485">安装命令待定</text>
+  </g>
+
+  <g>
+    <rect class="avoid" x="2120" y="390" width="205" height="110" rx="18" />
+    <text class="blocking-tag" x="2140" y="417">避让区</text>
+    <text class="avoid-text" x="2140" y="442">不做满足度评分</text>
+    <text class="avoid-text" x="2140" y="464">不把锚点变计划</text>
+    <text class="avoid-text" x="2140" y="486">不让 lift 挡 finish</text>
+  </g>
+
+  <g>
+    <rect x="300" y="405" width="365" height="80" rx="18" fill="#182432" stroke="#252f3c" />
+    <text class="small" x="322" y="435">0–4 个锚点：单行。</text>
+    <text class="small" x="322" y="458">5–8 个：宽图横向滚动。</text>
+    <text class="small" x="322" y="480">9+ 个：提醒合并或拆任务。</text>
+  </g>
+
+  <g>
+    <rect x="712" y="505" width="365" height="32" rx="16" fill="#182432" stroke="#252f3c" />
+    <text class="small" x="732" y="526">图例：蓝 = 软锚点　黄 = 硬锚点　灰虚 = 可查未知</text>
+  </g>
+  <text class="small" x="58" y="594">图例：绿 = 终点　灰实虚 = 失效锚点　红虚 = 阻塞未知 / 避让</text>
+</svg>

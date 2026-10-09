@@ -12,7 +12,9 @@ from .lift import run as lift_run
 from .see import run as see_run
 from .see import usage
 from .catalog import plug, plug_list
+from .anchor_map import render_map
 from .managed import ChainBroken
+from .skill_install import install_skill
 
 
 def _probe_main(args: argparse.Namespace) -> int:
@@ -66,6 +68,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     start_p.add_argument("root")
     start_p.add_argument("--portrait", default="")
+    start_p.add_argument("--anchor", action="append", default=[], help="soft intent anchor; repeatable")
+    start_p.add_argument("--hard-anchor", action="append", default=[], help="hard anchor only from explicit user/project rule; repeatable")
     start_p.add_argument(
         "--skip-pending",
         action="store_true",
@@ -79,6 +83,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("lift", help="lift advice; does not refuse finish").add_argument("root")
     sub.add_parser("heal", help="heal findings; does not refuse finish").add_argument("root")
     sub.add_parser("see", help="see snapshot; does not refuse finish").add_argument("root")
+    anchor_p = sub.add_parser("anchor-map", help="render an SVG intent-anchor map from anchor lines")
+    anchor_p.add_argument("--portrait", default="")
+    anchor_p.add_argument("--out", required=True)
+    anchor_p.add_argument("--title", default="意图锚点图")
+    install_p = sub.add_parser("install-skill", help="install bundled ag-anchor skill to the user skills directory")
+    install_p.add_argument("--target", choices=("codex", "grok"), required=True)
     gui_p = sub.add_parser("gui", help="open HTML table of critic sqlite rows")
     gui_p.add_argument("root", nargs="?", default="", help="enrolled repo; omit to pick from managed.json")
     plug_p = sub.add_parser("plug", help="list/on/off a pluggable strategy by lane-seq")
@@ -292,6 +302,13 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "probe":
             return _probe_main(args)
+        if args.cmd == "anchor-map":
+            path = render_map(title=args.title, portrait=args.portrait, out=Path(args.out))
+            print(str(path.resolve()))
+            return 0
+        if args.cmd == "install-skill":
+            print(install_skill(target=args.target))
+            return 0
         root = Path(args.root)
         if args.cmd == "enroll":
             print(json.dumps(enroll(root, test_argv=args.test_argv, note=args.note), ensure_ascii=False, indent=2))
@@ -300,9 +317,23 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(status(root), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "start":
+            anchors = None
+            if args.anchor or args.hard_anchor:
+                anchors = [
+                    *[{"id": f"a{index}", "text": text, "kind": "soft"} for index, text in enumerate(args.anchor, 1)],
+                    *[
+                        {"id": f"a{len(args.anchor) + index}", "text": text, "kind": "hard"}
+                        for index, text in enumerate(args.hard_anchor, 1)
+                    ],
+                ]
             print(
                 json.dumps(
-                    start(root, portrait=args.portrait, skip_pending=bool(args.skip_pending)),
+                    start(
+                        root,
+                        portrait=args.portrait,
+                        anchors=anchors,
+                        skip_pending=bool(args.skip_pending),
+                    ),
                     ensure_ascii=False,
                     indent=2,
                 )
