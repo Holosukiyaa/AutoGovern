@@ -69,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
     start_p.add_argument("root")
     start_p.add_argument("--portrait", default="")
     start_p.add_argument("--anchor", action="append", default=[], help="soft intent anchor; repeatable")
+    start_p.add_argument("--guard", action="append", default=[], help="guard rule shown beside the route; repeatable")
+    start_p.add_argument("--default", action="append", default=[], help="negotiable default shown beside the route; repeatable")
     start_p.add_argument("--hard-anchor", action="append", default=[], help="hard anchor only from explicit user/project rule; repeatable")
     start_p.add_argument(
         "--skip-pending",
@@ -96,6 +98,8 @@ def main(argv: list[str] | None = None) -> int:
     worker_create_p.add_argument("--portrait", required=True)
     worker_create_p.add_argument("--anchor", action="append", default=[], help="soft anchor; repeatable")
     worker_create_p.add_argument("--hard-anchor", action="append", default=[], help="hard anchor; repeatable")
+    worker_create_p.add_argument("--guard", action="append", default=[], help="guard rule; repeatable")
+    worker_create_p.add_argument("--default", action="append", default=[], help="negotiable default; repeatable")
     worker_create_p.add_argument("--write-allow", action="append", default=[], help="repository-relative write scope; repeatable")
     worker_create_p.add_argument("--worker-id", default="")
     worker_read_p = sub.add_parser("worker-read", help="read and validate a worker result.json")
@@ -350,6 +354,8 @@ def main(argv: list[str] | None = None) -> int:
                         worktree=worktree,
                         portrait=args.portrait,
                         anchors=anchors,
+                        guards=args.guard or [str(item) for item in (state.get("guards") or [])],
+                        defaults=args.default or [str(item) for item in (state.get("defaults") or [])],
                         write_allow=args.write_allow,
                         worker_id=args.worker_id,
                         intent_map_path=str(state.get("anchor_map_path") or ""),
@@ -395,6 +401,8 @@ def main(argv: list[str] | None = None) -> int:
                         root,
                         portrait=args.portrait,
                         anchors=anchors,
+                        guards=args.guard,
+                        defaults=args.default,
                         skip_pending=bool(args.skip_pending),
                     ),
                     ensure_ascii=False,

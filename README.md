@@ -42,7 +42,15 @@ anchor: do not add a new CSS layer
 
 `ag_start` reports an optional `subagent` object. AG does not bind to Codex, Grok, Claude, or any other worker implementation. A commander may use any subagent as an adapter: show the `anchor_preview`, wait for the user to call `confirm-map`, create 1-3 workers, then collect each `result.json`. Workers never run `ag_finish`, merge, modify anchors, or claim acceptance. `confirm-map` must be called by the user, not self-invoked by the AI.
 
-Anchor kinds are attention metadata, not a delivery gate:
+Intent route, guard, default, and avoid are different layers:
+
+- **Route anchors** are middle stations that carry attention toward the endpoint. They may be soft or hard, but they should not merely restate acceptance rules.
+- **Guards** are mandatory acceptance rules. Pass them to `ag_start --guard` or MCP `guards`; they render beside the route, never as nodes on the START→END path.
+- **Defaults** are negotiable choices. Pass them to `ag_start --default` or MCP `defaults`; they render beside the route and do not prove completion by themselves.
+- **Avoid** keeps its separate zone: it prevents drift and is not a middle station toward the endpoint.
+
+Anchor kinds remain compatible:
+
 
 - `anchor:` soft attention; drift is allowed when disclosed.
 - `anchor!:` hard rule from an explicit user/project rule.

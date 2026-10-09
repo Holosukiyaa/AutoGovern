@@ -51,12 +51,21 @@ represents the user's approval.
 - Never silently rewrite or delete an anchor.
 - Do not turn soft anchors into a finish gate.
 
-## Anchor map
+## Layered intent map
 
-When useful, generate an SVG map in the user's requested location. The map
-shows: start, object/method/scope/finish anchors, endpoint, discoverable
-unknowns, blocking unknowns, and avoid zone. Long tasks widen the SVG and keep
-font size fixed; 9 or more anchors should prompt consolidation.
+Keep the route honest:
+
+- Route anchors are middle stations toward the endpoint, not restated
+  acceptance rules.
+- Guards are mandatory rules, passed as `--guard` / MCP `guards`. They render
+  in the GUARDS section and never join the START→END path.
+- Defaults are negotiable choices, passed as `--default` / MCP `defaults`.
+  They render in the DEFAULTS section and are not completion proof.
+- Avoid is a separate boundary, not a middle station.
+
+The map shows the route, endpoint, discoverable unknowns, blocking unknowns,
+guards, defaults, and avoid zone. Long tasks widen the SVG and keep font size
+fixed; 9 or more route anchors should prompt consolidation.
 
 ## Canonical freeze
 

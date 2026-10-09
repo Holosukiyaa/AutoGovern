@@ -25,6 +25,8 @@ def create_task(
     worker_id: str = "",
     intent_map_path: str = "",
     anchor_preview: str = "",
+    guards: list[str] | None = None,
+    defaults: list[str] | None = None,
 ) -> dict[str, Any]:
     if not str(portrait or "").strip():
         raise ValueError("worker task requires a portrait")
@@ -48,6 +50,8 @@ def create_task(
         ],
         "intent_map_path": intent_map_path,
         "anchor_preview": anchor_preview,
+        "guards": [str(item) for item in (guards or []) if str(item).strip()],
+        "defaults": [str(item) for item in (defaults or []) if str(item).strip()],
     }
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "task.json").write_text(json.dumps(dossier, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -68,6 +72,10 @@ def create_task(
         "",
         "## Anchors",
         *[f"- `{item.get('id')}` [{item.get('kind', 'soft')}]: {item.get('text')}" for item in dossier["anchors"]],
+        "## Guards",
+        *[f"- {item}" for item in dossier["guards"]],
+        "## Defaults",
+        *[f"- {item}" for item in dossier["defaults"]],
         "",
         "## Boundaries",
         *[f"- Do not {item.removeprefix('run ')}." for item in dossier["do_not"]],

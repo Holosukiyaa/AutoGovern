@@ -53,6 +53,8 @@ TOOLS = [
                         "required": ["text"],
                     },
                 },
+                "guards": {"type": "array", "items": {"type": "string"}},
+                "defaults": {"type": "array", "items": {"type": "string"}},
                 "skip_pending": {"type": "boolean"},
             },
             "required": ["root"],
@@ -92,10 +94,16 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "ag_start":
         raw = args.get("anchors")
         anchors = [dict(item) for item in raw if isinstance(item, dict)] if isinstance(raw, list) else None
+        raw_guards = args.get("guards")
+        guards = [str(item) for item in raw_guards] if isinstance(raw_guards, list) else None
+        raw_defaults = args.get("defaults")
+        defaults = [str(item) for item in raw_defaults] if isinstance(raw_defaults, list) else None
         return start(
             root,
             portrait=str(args.get("portrait") or ""),
             anchors=anchors,
+            guards=guards,
+            defaults=defaults,
             skip_pending=bool(args.get("skip_pending")),
         )
     if name == "ag_verify":

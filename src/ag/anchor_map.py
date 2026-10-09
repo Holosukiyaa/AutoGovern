@@ -46,6 +46,8 @@ def render_map(
     *,
     anchors: list[dict[str, Any]] | None = None,
     current_anchor: str = "",
+    guards: list[str] | None = None,
+    defaults: list[str] | None = None,
 ) -> Path:
     if anchors is None:
         from .loop import parse_anchors
@@ -54,9 +56,11 @@ def render_map(
     route_anchors = [item for item in anchors if _kind(item) not in {"blocking", "avoid"}]
     blockers = [item for item in anchors if _kind(item) == "blocking"]
     avoids = [item for item in anchors if _kind(item) == "avoid"]
-    count = len(anchors)
+    guards = [str(item).strip() for item in (guards or []) if str(item).strip()]
+    defaults = [str(item).strip() for item in (defaults or []) if str(item).strip()]
+    count = len(route_anchors)
     width = _MARGIN + _START + max(1, len(route_anchors)) * _SLOT + _TERMINAL + _MARGIN
-    height = 430 if blockers or avoids else 360
+    height = 430 if blockers or avoids or guards or defaults else 360
     center = 180
     current_anchor = str(current_anchor or "").strip()
     svg: list[str] = []
@@ -98,22 +102,31 @@ def render_map(
     svg.append(f'<rect class="terminal" x="{x}" y="140" width="140" height="72" rx="18"/>')
     svg.append('<text class="terminal-tag" x="' + str(x + 18) + '" y="163">终点</text>')
     svg.append(f'<text class="text" x="{x + 18}" y="187">任务目标</text>')
-    if blockers or avoids:
-        svg.append('<text class="zone-title" x="50" y="300">阻塞未知：不问清不开工</text>')
-        for index, item in enumerate(blockers[:6]):
-            svg.append(f'<text class="warn" x="50" y="{324 + index * 20}">· {escape(_text(item.get("text"), 46))}</text>')
-        svg.append('<text class="zone-title" x="360" y="300">避让区：偏离即披露</text>')
-        for index, item in enumerate(avoids[:6]):
-            svg.append(f'<text class="warn" x="360" y="{324 + index * 20}">· {escape(_text(item.get("text"), 40))}</text>')
-        if len(blockers) > 6 or len(avoids) > 6:
-            svg.append('<text class="warn" x="50" y="410">下方只显示前 6 条；完整清单仍在 portrait / task anchors。</text>')
+    if blockers or avoids or guards or defaults:
+        sections = [("阻塞未知：不问清不开工", [str(item.get("text") or "") for item in blockers]), ("避让区：偏离即披露", [str(item.get("text") or "") for item in avoids]), ("GUARDS：验收时必须成立", guards), ("DEFAULTS：默认选择，可协商调整", defaults)]
+        section_x = 50
+        active_sections = [(title_text, rows) for title_text, rows in sections if rows]
+        section_width = max(220, min(300, (width - 100) // max(1, len(active_sections))))
+        for title_text, rows in active_sections:
+            svg.append(f'<text class="zone-title" x="{section_x}" y="300">{escape(title_text[:18])}</text>')
+            for index, item in enumerate(rows[:6]):
+                svg.append(f'<text class="warn" x="{section_x}" y="{324 + index * 20}">· {escape(_text(item, 28))}</text>')
+            section_x += section_width
+        if len(blockers) > 6 or len(avoids) > 6 or len(guards) > 6 or len(defaults) > 6:
+            svg.append('<text class="warn" x="50" y="410">下方只显示前 6 条；完整清单仍保存在任务数据中。</text>')
     svg.append('</svg>')
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("\n".join(svg), encoding="utf-8")
     return out
 
 
-def render_unicode(title: str, anchors: list[dict[str, Any]], current_anchor: str = "") -> str:
+def render_unicode(
+    title: str,
+    anchors: list[dict[str, Any]],
+    current_anchor: str = "",
+    guards: list[str] | None = None,
+    defaults: list[str] | None = None,
+) -> str:
     current_anchor = str(current_anchor or "").strip()
     symbols = {
         "soft": "◇",
@@ -146,5 +159,11 @@ def render_unicode(title: str, anchors: list[dict[str, Any]], current_anchor: st
         lines.extend(["x BLOCKING", *[f"  {item.get('text')}" for item in blockers], ""])
     if avoids:
         lines.extend(["x AVOID", *[f"  {item.get('text')}" for item in avoids], ""])
-    lines.extend(["图例", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "◇ soft  ■ hard  ? unknown  x avoid/blocking  ● terminal"])
+    guards = [str(item).strip() for item in (guards or []) if str(item).strip()]
+    defaults = [str(item).strip() for item in (defaults or []) if str(item).strip()]
+    if guards:
+        lines.extend(["■ GUARDS", *[f"  {item}" for item in guards], ""])
+    if defaults:
+        lines.extend(["◇ DEFAULTS", *[f"  {item}" for item in defaults], ""])
+    lines.extend(["图例", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "◇ soft  ■ hard  ? unknown  x avoid/blocking  ● terminal", "■ guards 独立验收规则  ◇ defaults 可协商默认"])
     return "\n".join(lines)

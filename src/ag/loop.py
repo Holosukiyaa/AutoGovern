@@ -480,13 +480,21 @@ def status(root: Path) -> dict[str, Any]:
                     out=anchor_map_path,
                     anchors=anchors,
                     current_anchor=current_anchor,
+                    guards=[str(item) for item in (task.get("guards") or [])],
+                    defaults=[str(item) for item in (task.get("defaults") or [])],
                 )
             if not anchor_map_text:
                 raise ChainBroken("active task has no anchor map path")
             anchor_preview_text = str(task.get("anchor_preview_path") or "").strip()
             anchor_preview_path = Path(anchor_preview_text) if anchor_preview_text else anchor_map_path.with_suffix(".txt")
             anchor_preview_path.parent.mkdir(parents=True, exist_ok=True)
-            anchor_preview = render_unicode(f"ag-{task.get('id') or 'task'}", anchors, current_anchor)
+            anchor_preview = render_unicode(
+                f"ag-{task.get('id') or 'task'}",
+                anchors,
+                current_anchor,
+                guards=[str(item) for item in (task.get("guards") or [])],
+                defaults=[str(item) for item in (task.get("defaults") or [])],
+            )
             anchor_preview_path.write_text(anchor_preview, encoding="utf-8")
             task["anchor_preview_path"] = str(anchor_preview_path.resolve())
             task["anchor_preview"] = anchor_preview
@@ -520,7 +528,15 @@ def status(root: Path) -> dict[str, Any]:
     return out
 
 
-def start(root: Path, *, portrait: str = "", anchors: list[dict[str, Any]] | None = None, skip_pending: bool = False) -> dict[str, Any]:
+def start(
+    root: Path,
+    *,
+    portrait: str = "",
+    anchors: list[dict[str, Any]] | None = None,
+    skip_pending: bool = False,
+    guards: list[str] | None = None,
+    defaults: list[str] | None = None,
+) -> dict[str, Any]:
     """Open a worktree. Tracked canonical files stay frozen until finish or abandon.
 
     Windows freeze is a recoverable ACL deny-write entry. Elsewhere it is the
@@ -567,12 +583,16 @@ def start(root: Path, *, portrait: str = "", anchors: list[dict[str, Any]] | Non
     if not chosen.strip() or not task_anchors:
         usage_note(root, "ship", 8, "block", "start without intent anchors")
         raise ChainBroken("intent sync required: provide portrait with at least one anchor line")
+    task_guards = [str(item).strip() for item in (guards or []) if str(item).strip()]
+    task_defaults = [str(item).strip() for item in (defaults or []) if str(item).strip()]
     anchor_map = render_map(
         title=f"ag-{task_id}",
         portrait=chosen,
         out=worktree / ".ag-artifacts" / "anchor-maps" / f"ag-{task_id}.svg",
         anchors=task_anchors,
         current_anchor=(task_anchors or [{}])[0].get("id", ""),
+        guards=task_guards,
+        defaults=task_defaults,
     )
     save_task(
         key,
@@ -587,6 +607,8 @@ def start(root: Path, *, portrait: str = "", anchors: list[dict[str, Any]] | Non
             "anchor_preview_path": str(anchor_map.with_suffix(".txt").resolve()),
             "intent_map_confirmed": False,
             "current_anchor": (task_anchors or [{}])[0].get("id", ""),
+            "guards": task_guards,
+            "defaults": task_defaults,
             "verified_tree": "",
             "verify": None,
         },

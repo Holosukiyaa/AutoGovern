@@ -1,6 +1,6 @@
 [project]
 name = "ag"
-version = "0.2.3"
+version = "0.2.4"
 description = "MCP delivery loop: worktree, enrolled tests, git hook, ff-only."
 requires-python = ">=3.11"
 readme = "README.md"
