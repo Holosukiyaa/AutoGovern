@@ -454,6 +454,38 @@ def status(root: Path) -> dict[str, Any]:
         "switch_report_id": _switch_report_id(verify if isinstance(verify, dict) else None),
         "timeline_path": str(latest_timeline_path(root, str((task or {}).get("id") or "")) or latest_timeline_path(root) or ""),
     }
+    if task:
+        try:
+            from .anchor_map import render_map, render_unicode
+
+            anchors = [dict(item) for item in (task.get("anchors") or []) if isinstance(item, dict)]
+            current_anchor = str(task.get("current_anchor") or (anchors[0].get("id") if anchors else ""))
+            anchor_map_text = str(task.get("anchor_map_path") or "").strip()
+            anchor_map_path = Path(anchor_map_text)
+            if anchor_map_text:
+                render_map(
+                    title=f"ag-{task.get('id') or 'task'}",
+                    portrait=str(task.get("portrait") or ""),
+                    out=anchor_map_path,
+                    anchors=anchors,
+                    current_anchor=current_anchor,
+                )
+            if not anchor_map_text:
+                raise ChainBroken("active task has no anchor map path")
+            anchor_preview_text = str(task.get("anchor_preview_path") or "").strip()
+            anchor_preview_path = Path(anchor_preview_text) if anchor_preview_text else anchor_map_path.with_suffix(".txt")
+            anchor_preview_path.parent.mkdir(parents=True, exist_ok=True)
+            anchor_preview = render_unicode(f"ag-{task.get('id') or 'task'}", anchors, current_anchor)
+            anchor_preview_path.write_text(anchor_preview, encoding="utf-8")
+            task["anchor_preview_path"] = str(anchor_preview_path.resolve())
+            task["anchor_preview"] = anchor_preview
+            task["current_anchor"] = current_anchor
+            save_task(key, task)
+            out["anchor_preview_path"] = task["anchor_preview_path"]
+            out["anchor_preview"] = anchor_preview
+            out["current_anchor"] = current_anchor
+        except Exception:
+            pass
     try:
         from .store import pending_summary
 
@@ -516,6 +548,8 @@ def start(root: Path, *, portrait: str = "", anchors: list[dict[str, Any]] | Non
         title=f"ag-{task_id}",
         portrait=chosen,
         out=worktree / ".ag-artifacts" / "anchor-maps" / f"ag-{task_id}.svg",
+        anchors=task_anchors,
+        current_anchor=(task_anchors or [{}])[0].get("id", ""),
     )
     save_task(
         key,
@@ -527,6 +561,8 @@ def start(root: Path, *, portrait: str = "", anchors: list[dict[str, Any]] | Non
             "portrait": chosen,
             "anchors": task_anchors,
             "anchor_map_path": str(anchor_map.resolve()),
+            "anchor_preview_path": str(anchor_map.with_suffix(".txt").resolve()),
+            "current_anchor": (task_anchors or [{}])[0].get("id", ""),
             "verified_tree": "",
             "verify": None,
         },
@@ -689,6 +725,9 @@ def verify(root: Path) -> dict[str, Any]:
     timings["total_s"] = round(time.perf_counter() - t0, 3)
     record["timings"] = timings
     record["evidence"]["anchor_map_path"] = str(task.get("anchor_map_path") or "")
+    record["evidence"]["anchor_preview_path"] = str(task.get("anchor_preview_path") or "")
+    record["evidence"]["anchor_preview"] = str(task.get("anchor_preview") or "")
+    record["evidence"]["current_anchor"] = task.get("current_anchor") or ""
     record["evidence"]["timings"] = dict(timings)
     try:
         from .gui import write_dashboard
@@ -697,6 +736,8 @@ def verify(root: Path) -> dict[str, Any]:
     except Exception:
         pass
     digest = tree_digest(worktree)
+    route_anchors = [item for item in (task.get("anchors") or []) if isinstance(item, dict) and str(item.get("kind") or "soft") not in {"blocking", "avoid"}]
+    task["current_anchor"] = str((route_anchors[-1] if route_anchors else {}).get("id") or "")
     task["verify"] = record
     task["verified_tree"] = digest if record["exit"] == 0 else ""
     record["evidence"]["verified_tree"] = task["verified_tree"]
@@ -749,6 +790,9 @@ def verify(root: Path) -> dict[str, Any]:
             "model": switch.get("model"),
         },
         "anchor_map_path": str((task or {}).get("anchor_map_path") or ""),
+        "anchor_preview_path": str((task or {}).get("anchor_preview_path") or ""),
+        "anchor_preview": str((task or {}).get("anchor_preview") or ""),
+        "current_anchor": str((task or {}).get("current_anchor") or ""),
         "verified_tree": task.get("verified_tree") or "",
         "timings": dict(record.get("timings") or {}),
     }
@@ -853,9 +897,13 @@ def _finish_after_thaw(
     head = git(root, "rev-parse", "HEAD")
     vblob = task.get("verify") if isinstance(task.get("verify"), dict) else None
     anchors = [dict(item) for item in (task.get("anchors") or []) if isinstance(item, dict)]
+    current_anchor = str(task.get("current_anchor") or (anchors[0].get("id") if anchors else ""))
     anchor_progress = {
         "anchors": anchors,
         "anchor_map_path": str(task.get("anchor_map_path") or ""),
+        "anchor_preview_path": str(task.get("anchor_preview_path") or ""),
+        "anchor_preview": str(task.get("anchor_preview") or ""),
+        "current_anchor": current_anchor,
         "reminder": "Before accepting delivery, re-read the intent map and compare each anchor with the final result; soft anchors are not auto-completion states.",
     }
     append_task_step(root, str(task.get("id") or ""), "finish", head=head, product=product, critic_report_id=_critic_report_id(vblob), switch_report_id=_switch_report_id(vblob), anchor_progress=anchor_progress)

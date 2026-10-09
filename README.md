@@ -29,7 +29,7 @@ Critic config lives in `~/.ag/projects/<key>/critic.json`. Audit: sqlite `ag.sql
 
 ## Intent anchors
 
-Starting a task requires at least one anchor. `ag_start` refuses an empty portrait and returns the absolute path to an automatically generated intent SVG under `.ag-artifacts/anchor-maps/`. Write anchors as lines in the portrait:
+Starting a task requires at least one anchor. `ag_start` refuses an empty portrait and returns the absolute paths to an automatically generated intent SVG and matching Unicode preview under `.ag-artifacts/anchor-maps/`; the Unicode preview is also returned as `anchor_preview`. The SVG marks `current_anchor` as current attention, never as anchor completion. Write anchors as lines in the portrait:
 
 ```text
 anchor: keep the semantic workbench behavior unchanged
@@ -73,8 +73,8 @@ Render an SVG attention route from portrait anchor lines:
 python -m ag anchor-map --portrait "anchor: 先看见症状`nanchor!: 禁止自动开刀" --title "意图锚点图"
 ```
 
-By default, generated maps go to `.ag-artifacts/anchor-maps/`, which is git-ignored. Use `--out` only when the user explicitly requests another location. The map widens with anchor count and keeps font size fixed. Nine or more anchors trigger a consolidation warning.
+By default, generated maps go to `.ag-artifacts/anchor-maps/`, which is git-ignored. Use `--out` only when the user explicitly requests another location. The map widens with anchor count and keeps font size fixed. Nine or more anchors trigger a consolidation warning. During an active task `status` regenerates both views; after `verify`, the current-attention marker moves to the last route anchor.
 
-`ag_verify` returns an `evidence` object with test status/tails, probe verdicts/tails, critic and switch outcomes/report ids/stores/models, the anchor SVG path, verified tree digest, and timings. Report the evidence, not only the report ids.
+`ag_verify` returns an `evidence` object with test status/tails, probe verdicts/tails, critic and switch outcomes/report ids/stores/models, the anchor SVG and Unicode paths/preview, current attention anchor, verified tree digest, and timings. Report the evidence, not only the report ids.
 
 `ag_finish` returns `anchor_progress`: every anchor with id/kind/text, the absolute intent-SVG path, and a reminder to compare the final result with the intent map before accepting delivery. Soft anchors are not marked complete automatically.
