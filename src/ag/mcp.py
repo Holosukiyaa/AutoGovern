@@ -21,7 +21,7 @@ INSTRUCTIONS = (
     "Unconfigured switch does not refuse finish. No enrolled tests and switch allow → product undeclared. "
     "Git hook refuses commits on canonical, including git commit --no-verify. "
     "This server does not intercept host Write; edits on canonical dirty it and start/finish refuse. "
-    "While a task is open, tracked canonical files are read-only. "
+    "While a task is open, tracked canonical files are frozen: Windows uses ACL deny-write; other systems use the read-only bit. "
     "ag_usage (see) counts how often each ship item helped or blocked; it is not product green. "
     "ag_lift / ag_see are advice. ag_heal is stacked-door treatment and is NOT on the delivery path: "
     "do not run it until stacked doors are found; it must not become a finish gate. "

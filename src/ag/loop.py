@@ -512,7 +512,11 @@ def status(root: Path) -> dict[str, Any]:
 
 
 def start(root: Path, *, portrait: str = "", anchors: list[dict[str, Any]] | None = None, skip_pending: bool = False) -> dict[str, Any]:
-    """Open a worktree. Tracked canonical files become read-only until finish or abandon."""
+    """Open a worktree. Tracked canonical files stay frozen until finish or abandon.
+
+    Windows freeze is a recoverable ACL deny-write entry. Elsewhere it is the
+    user-write bit. Either mechanism is friction, not an absolute security boundary.
+    """
     state = status(root)
     root = Path(state["root"])
     key = str(state["key"])
@@ -589,6 +593,38 @@ def start(root: Path, *, portrait: str = "", anchors: list[dict[str, Any]] | Non
     return status(root)
 
 
+def _refuse_dirty_verify(root: Path, key: str, task: dict[str, Any], state: dict[str, Any]) -> None:
+    reason = "canonical-dirty: canonical is dirty; ag_verify refused before tests, probes, critic, and switch"
+    porcelain = git(root, "status", "--porcelain", check=False)[:4000]
+    evidence = {
+        "refused": "canonical-dirty",
+        "reason": reason,
+        "canonical_dirty": True,
+        "hazards": [str(item) for item in (state.get("hazards") or [])],
+        "porcelain": porcelain,
+    }
+    task["verify"] = {
+        "exit": 1,
+        "stdout": "",
+        "stderr": reason,
+        "undeclared": not bool(state.get("test_argv")),
+        "refused": "canonical-dirty",
+        "evidence": {"canonical_dirty": evidence},
+    }
+    task["verified_tree"] = ""
+    save_task(key, task)
+    usage_note(root, "ship", 8, "block", "verify canonical dirty")
+    append_task_step(
+        root,
+        str(task.get("id") or ""),
+        "verify-refused",
+        reason=reason,
+        refused="canonical-dirty",
+        porcelain=porcelain,
+    )
+    raise ChainBroken(reason)
+
+
 def verify(root: Path) -> dict[str, Any]:
     state = status(root)
     key = str(state["key"])
@@ -598,6 +634,8 @@ def verify(root: Path) -> dict[str, Any]:
     worktree = Path(str(task.get("worktree") or ""))
     if not worktree.is_dir():
         raise ChainBroken(f"worktree missing: {worktree}")
+    if state.get("canonical_dirty"):
+        _refuse_dirty_verify(Path(state["root"]), key, task, state)
     task_id = str(task.get("id") or "")
     enrolled = Path(state["root"])
     ensure_start_step(enrolled, task_id, task.get("portrait"), worktree)

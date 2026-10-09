@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("status", help="hook / dirty / process vs product").add_argument("root")
     start_p = sub.add_parser(
         "start",
-        help="open a worktree; tracked canonical files are read-only until finish or abandon",
+        help="open a worktree; tracked canonical files stay frozen until finish or abandon",
     )
     start_p.add_argument("root")
     start_p.add_argument("--portrait", default="")

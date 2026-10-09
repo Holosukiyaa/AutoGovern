@@ -58,6 +58,10 @@ shows: start, object/method/scope/finish anchors, endpoint, discoverable
 unknowns, blocking unknowns, and avoid zone. Long tasks widen the SVG and keep
 font size fixed; 9 or more anchors should prompt consolidation.
 
+## Canonical freeze
+
+While a task is open, AG freezes tracked files on the canonical checkout. Windows uses a recoverable ACL deny-write entry for the current user. Other systems use the read-only bit. The read-only bit and the ACL are strong friction against accidental edits. They are not an absolute security boundary. If that checkout is dirty during an open task, `ag_verify` refuses immediately and records `canonical-dirty`.
+
 ## Delivery
 
 - Use `ag_start` with the portrait and explicit anchors when available.

@@ -4,11 +4,13 @@ Four lanes that must not mix: **ship (交货)** · **heal (治病)** · **lift (
 
 Only ship may set `product` or refuse `finish`. heal / lift / see are advice or observation.
 
-MCP delivery loop. Canonical checkout is not a work site. While a task is open, tracked canonical files are read-only.
+MCP delivery loop. Canonical checkout is not a work site.
 
 ```
 ag_status → ag_start → write only in worktree → ag_verify → ag_finish
 ```
+
+While a task is open, AG freezes tracked files on the canonical checkout. Windows adds a recoverable ACL deny-write entry for the current user. Other systems clear the user-write bit. The read-only bit and the ACL are strong friction against accidental edits. They are not an absolute security boundary. `ag_verify` refuses immediately when that checkout is dirty during an open task, records `canonical-dirty`, and does not run tests, probes, critic, or the switch.
 
 Do **not** store long-lived tests in this repo. Worker checks belong in worktree `.ag-check/` (gitignored, discarded at finish). Old `tests/` is a standing answer key for the next AI; it is forbidden here.
 
@@ -19,7 +21,7 @@ ag enroll <repo>
 ag mcp
 ```
 
-Critic config lives in `~/.ag/projects/<key>/critic.json`. Audit: sqlite `ag.sqlite`. Task step chain (not in git): `~/.ag/projects/<key>/tasks/<task_id>.json` — one object with a `steps` array, appended at start / verify-tests / verify-probes / verify-critic / verify-switch / finish / finish-refused. `ag_status.timeline_path` points at the current or latest file. `ag critic-log` / `ag-gui.bat` (pick an enrolled repo) shows that timeline at the top.
+Critic config lives in `~/.ag/projects/<key>/critic.json`. Audit: sqlite `ag.sqlite`. Task step chain (not in git): `~/.ag/projects/<key>/tasks/<task_id>.json` — one object with a `steps` array, appended at start / verify-refused / verify-tests / verify-probes / verify-critic / verify-switch / finish / finish-refused. `ag_status.timeline_path` points at the current or latest file. `ag critic-log` / `ag-gui.bat` (pick an enrolled repo) shows that timeline at the top.
 
 ## Strategy lanes
 
