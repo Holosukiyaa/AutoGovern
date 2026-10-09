@@ -70,7 +70,7 @@ python -m ag install-skill --target grok
 Render an SVG attention route from portrait anchor lines:
 
 ```powershell
-python -m ag anchor-map --portrait "anchor: 先看见症状`nanchor!: 禁止自动开刀" --out .\anchor-map.svg --title "意图锚点图"
+python -m ag anchor-map --portrait "anchor: 先看见症状`nanchor!: 禁止自动开刀" --title "意图锚点图"
 ```
 
-The map widens with anchor count and keeps font size fixed. Nine or more anchors trigger a consolidation warning.
+By default, generated maps go to `.ag-artifacts/anchor-maps/`, which is git-ignored. Use `--out` only when the user explicitly requests another location. The map widens with anchor count and keeps font size fixed. Nine or more anchors trigger a consolidation warning.

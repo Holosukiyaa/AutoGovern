@@ -12,7 +12,7 @@ from .lift import run as lift_run
 from .see import run as see_run
 from .see import usage
 from .catalog import plug, plug_list
-from .anchor_map import render_map
+from .anchor_map import default_artifact_path, render_map
 from .managed import ChainBroken
 from .skill_install import install_skill
 
@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("see", help="see snapshot; does not refuse finish").add_argument("root")
     anchor_p = sub.add_parser("anchor-map", help="render an SVG intent-anchor map from anchor lines")
     anchor_p.add_argument("--portrait", default="")
-    anchor_p.add_argument("--out", required=True)
+    anchor_p.add_argument("--out", default="", help="output SVG; default is .ag-artifacts/anchor-maps/")
     anchor_p.add_argument("--title", default="意图锚点图")
     install_p = sub.add_parser("install-skill", help="install bundled ag-anchor skill to the user skills directory")
     install_p.add_argument("--target", choices=("codex", "grok"), required=True)
@@ -303,7 +303,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "probe":
             return _probe_main(args)
         if args.cmd == "anchor-map":
-            path = render_map(title=args.title, portrait=args.portrait, out=Path(args.out))
+            out = Path(args.out) if args.out else default_artifact_path(args.title)
+            path = render_map(title=args.title, portrait=args.portrait, out=out)
             print(str(path.resolve()))
             return 0
         if args.cmd == "install-skill":

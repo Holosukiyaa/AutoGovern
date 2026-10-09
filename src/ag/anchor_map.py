@@ -32,6 +32,15 @@ def _text(value, limit):
     return str(value or "").strip()[:limit]
 
 
+def default_artifact_path(title: str) -> Path:
+    from subprocess import DEVNULL, check_output
+
+    root = Path.cwd()
+    output = check_output(["git", "rev-parse", "--show-toplevel"], cwd=root, stderr=DEVNULL, text=True).strip()
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in title).strip("-")
+    return Path(output) / ".ag-artifacts" / "anchor-maps" / f"{safe or 'anchor-map'}.svg"
+
+
 def render_map(title: str, portrait: str, out: Path) -> Path:
     anchors = parse_anchors(portrait)
     route_anchors = [item for item in anchors if _kind(item) not in {"blocking", "avoid"}]
