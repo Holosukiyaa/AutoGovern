@@ -852,7 +852,13 @@ def _finish_after_thaw(
     product = _product([str(x) for x in (state.get("test_argv") or [])], task.get("verify") if isinstance(task.get("verify"), dict) else None)
     head = git(root, "rev-parse", "HEAD")
     vblob = task.get("verify") if isinstance(task.get("verify"), dict) else None
-    append_task_step(root, str(task.get("id") or ""), "finish", head=head, product=product, critic_report_id=_critic_report_id(vblob), switch_report_id=_switch_report_id(vblob))
+    anchors = [dict(item) for item in (task.get("anchors") or []) if isinstance(item, dict)]
+    anchor_progress = {
+        "anchors": anchors,
+        "anchor_map_path": str(task.get("anchor_map_path") or ""),
+        "reminder": "Before accepting delivery, re-read the intent map and compare each anchor with the final result; soft anchors are not auto-completion states.",
+    }
+    append_task_step(root, str(task.get("id") or ""), "finish", head=head, product=product, critic_report_id=_critic_report_id(vblob), switch_report_id=_switch_report_id(vblob), anchor_progress=anchor_progress)
     _cleanup(root, task)
     save_task(key, None)
     blob = load_managed()
@@ -873,6 +879,7 @@ def _finish_after_thaw(
         "product": product,
         "reminder": "process complete is not product passed",
         "portrait": portrait,
+        "anchor_progress": anchor_progress,
         "critic_report_id": _critic_report_id(task.get("verify") if isinstance(task.get("verify"), dict) else None),
         "switch_report_id": _switch_report_id(task.get("verify") if isinstance(task.get("verify"), dict) else None),
         "head": head,
