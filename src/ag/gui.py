@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 import html
+import json
 import os
 import sys
 import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
 from .managed import ChainBroken, ag_home, load_managed, real_root
 from .probe import list_probes
-from .store import db_path, list_critic_events, list_probe_rows, list_switch_events, load_task_timeline, upsert_probe
+from .store import db_path, list_critic_events, list_probe_rows, list_switch_events, load_task_timeline, project_dir, upsert_probe
 
 TOOLS = [
     {
@@ -239,9 +241,88 @@ def resolve_gui_root(explicit: str | None = None, *, reader=input) -> Path:
     raise ChainBroken("请输入列表中的编号")
 
 
+def resolve_dashboard_root(explicit: str | None = None) -> Path:
+    if explicit and str(explicit).strip():
+        return Path(str(explicit).strip())
+    roots = enrolled_roots()
+    if not roots:
+        raise ChainBroken("没有已入学的仓库，请把路径拖到脚本上")
+    return _active_root(roots) or roots[0]
+
+
 def html_path(root: Path) -> Path:
     repo = real_root(root)
     return ag_home() / "projects" / db_path(repo).parent.name / "critic-log.html"
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return blob if isinstance(blob, dict) else {}
+
+
+def _active_task(root: Path) -> dict[str, Any]:
+    repo = real_root(root)
+    path = project_dir(repo) / "task.json"
+    blob = _read_json(path)
+    if not blob:
+        return {}
+    blob["state_path"] = str(path)
+    return blob
+
+
+def _active_root(roots: list[Path] | None = None) -> Path | None:
+    candidates = roots if roots is not None else enrolled_roots()
+    active = [(path, task) for path in candidates if (task := _active_task(path))]
+    if not active:
+        return None
+    return max(active, key=lambda pair: Path(str(pair[1].get("state_path") or "")).stat().st_mtime)[0]
+
+
+def _live_paths(task: dict[str, Any], root: Path) -> list[tuple[str, Path]]:
+    repo = real_root(root)
+    project = project_dir(repo)
+    paths: list[tuple[str, Path]] = [
+        ("Critic", project / "critic-live.jsonl"),
+        ("Switch", project / "switch-live.jsonl"),
+    ]
+    worktree = Path(str(task.get("worktree") or ""))
+    workers = worktree / ".ag-artifacts" / "workers"
+    if workers.is_dir():
+        for worker in workers.iterdir():
+            if worker.is_dir() and (worker / "live.jsonl").is_file():
+                paths.append((f"Worker {worker.name}", worker / "live.jsonl"))
+    return paths
+
+
+def _live_rows(paths: list[tuple[str, Path]], limit: int = 200) -> tuple[str, int]:
+    rows: list[tuple[str, dict[str, Any]]] = []
+    for source, path in paths:
+        if not path.is_file():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()[-limit:]
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                blob = json.loads(line)
+            except json.JSONDecodeError:
+                blob = {"text": line}
+            if isinstance(blob, dict):
+                rows.append((source, blob))
+    if not rows:
+        return "<div class='empty'>暂无实时输出。任务进行中会自动出现。</div>", 0
+    body = []
+    for source, row in reversed(rows[-limit:]):
+        text = str(row.get("text") or row.get("content") or row.get("reasoning") or row.get("summary") or "")
+        phase = str(row.get("phase") or "")
+        stamp = str(row.get("ts") or "")
+        label = " · ".join(part for part in (source, phase, stamp) if part)
+        body.append(f"<article><header>{_cell(label)}</header><pre>{_cell(text[-8000:]) or '无内容'}</pre></article>")
+    return "\n".join(body), len(rows)
 
 
 def write_live(
@@ -281,6 +362,8 @@ def write_live(
 
 def write_dashboard(root: Path, *, browse: bool = True) -> Path:
     repo = real_root(root)
+    task = _active_task(root)
+    live_body, live_count = _live_rows(_live_paths(task, root))
     events = list_critic_events(repo, limit=200)
     rows = []
     for event in reversed(events):
@@ -360,7 +443,6 @@ def write_dashboard(root: Path, *, browse: bool = True) -> Path:
     time_body = "\n".join(time_rows) or "<tr><td colspan='4'>暂无任务步骤</td></tr>"
     page = f"""<!doctype html>
 <meta charset="utf-8">
-<meta http-equiv="refresh" content="5">
 <title>治理看板</title>
 <style>
 body {{ font-family: "微软雅黑", sans-serif; margin: 1.5rem; }}
@@ -369,9 +451,16 @@ th, td {{ border: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: left; vert
 th {{ background: #f4f4f4; }}
 .meta {{ color: #555; margin-bottom: 1rem; }}
 pre {{ white-space: pre-wrap; background: #111; color: #eee; padding: 1rem; max-height: 24rem; overflow: auto; }}
+#live article {{ border: 1px solid #ddd; border-radius: 8px; margin: 0 0 1rem; overflow: hidden; }}
+#live article header {{ background: #f4f4f4; color: #333; padding: 0.35rem 0.6rem; font-size: 0.9rem; }}
+#live pre {{ max-height: 14rem; margin: 0; border-radius: 0; }}
+.empty {{ border: 1px dashed #bbb; border-radius: 8px; color: #666; padding: 1rem; }}
 </style>
 <h1>任务时间线</h1>
 <p class="meta">任务编号 {_cell(timeline.get('task_id') or '无')}　账本 {_cell(timeline.get('path') or '无')}　（当前任务或上一轮已结束任务）</p>
+<h1>实时对话</h1>
+<p class="meta">自动发现当前任务，不需要输入任务编号。这里是观察窗，不能开票、确认、验证或交货。当前实时行数 {_cell(live_count)}。</p>
+<div id="live">{live_body}</div>
 <table>
 <thead><tr><th>阶段</th><th>时间</th><th>秒</th><th>编号 / 说明</th></tr></thead>
 <tbody>
@@ -379,7 +468,7 @@ pre {{ white-space: pre-wrap; background: #111; color: #eee; padding: 1rem; max-
 </tbody>
 </table>
 <h1>纠错账</h1>
-<p class="meta">仓库 {_cell(repo)}　数据库 {_cell(db_path(repo))}。每 5 秒刷新。请先打开本页再跑验货，才能看到思考。</p>
+<p class="meta">仓库 {_cell(repo)}　数据库 {_cell(db_path(repo))}。实时页由本地只读服务每 5 秒刷新；静态文件需要手动重新生成。</p>
 <p class="meta">最近耗时：{_cell(timing_bits)}。合计很久时，多半是冒烟测试。</p>
 <h2>最近一次纠错思考</h2>
 <p class="meta">以下为席位原文，界面不改写。</p>
@@ -426,3 +515,48 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         raise ChainBroken("root is required")
     path = write_dashboard(Path(str(root)), browse=False)
     return {"schema": "ag.gui.v1", "path": str(path), "reminder": "HTML reads sqlite, not a lane"}
+
+
+def make_live_handler(root: Path) -> type[BaseHTTPRequestHandler]:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802 - stdlib interface
+            if self.path not in ("/", "/index.html"):
+                self.send_error(404)
+                return
+            path = write_dashboard(root, browse=False)
+            page = path.read_text(encoding="utf-8")
+            payload = page.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Refresh", "5; url=/")
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    return Handler
+
+
+
+def serve_dashboard(root: Path, *, host: str = "127.0.0.1", port: int = 8765) -> None:
+    Handler = make_live_handler(root)
+
+    for candidate_port in (port, 0):
+        try:
+            server = ThreadingHTTPServer((host, candidate_port), Handler)
+            break
+        except OSError:
+            if candidate_port == 0:
+                raise
+            continue
+    url = f"http://{host}:{server.server_port}/"
+    print(url, flush=True)
+    webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()

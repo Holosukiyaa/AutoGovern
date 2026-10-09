@@ -98,6 +98,14 @@ Configured critic and switch chats stream their incremental reasoning/content in
 
 ## Skill installation
 
+Open the read-only governance dashboard without a project or task id:
+
+```powershell
+python -m ag gui --live
+```
+
+When one project has an active task, the dashboard opens that project automatically. With multiple active projects it opens the most recently started one. The local server refreshes the page every five seconds without embedded JavaScript, while the newest live output stays at the top. The dashboard shows the current task, aggregated worker/critic/switch live output, the task timeline, and the audit tables. It is observation only: it cannot start, confirm, verify, finish, or merge. Close the terminal window to stop the server.
+
 Install the bundled attention skill for Codex or Grok:
 
 ```powershell

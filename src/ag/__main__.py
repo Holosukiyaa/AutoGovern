@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from .loop import abandon, confirm_map, enroll, finish, hook_main, start, status, unenroll, verify
-from .gui import resolve_gui_root, write_dashboard
+from .gui import resolve_dashboard_root, serve_dashboard, write_dashboard
 from .heal import run as heal_run
 from .lift import run as lift_run
 from .see import run as see_run
@@ -126,8 +126,9 @@ def main(argv: list[str] | None = None) -> int:
     worker_read_p.add_argument("worker_id")
     install_p = sub.add_parser("install-skill", help="install bundled ag-anchor skill to the user skills directory")
     install_p.add_argument("--target", choices=("codex", "grok"), required=True)
-    gui_p = sub.add_parser("gui", help="open HTML table of critic sqlite rows")
-    gui_p.add_argument("root", nargs="?", default="", help="enrolled repo; omit to pick from managed.json")
+    gui_p = sub.add_parser("gui", help="open the live read-only governance dashboard")
+    gui_p.add_argument("root", nargs="?", default="", help="enrolled repo; omit to auto-open the active task")
+    gui_p.add_argument("--live", action="store_true", help="keep refreshing the dashboard from a local read-only server")
     plug_p = sub.add_parser("plug", help="list/on/off a pluggable strategy by lane-seq")
     plug_p.add_argument("action", choices=["list", "on", "off"])
     plug_p.add_argument("root")
@@ -241,7 +242,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "hook":
             return hook_main()
         if args.cmd == "gui":
-            root = resolve_gui_root(str(args.root or ""))
+            root = resolve_dashboard_root(str(args.root or ""))
+            if args.live:
+                serve_dashboard(root)
+                return 0
             path = write_dashboard(root, browse=True)
             print(str(path))
             return 0
