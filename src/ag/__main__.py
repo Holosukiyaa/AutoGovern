@@ -87,6 +87,19 @@ def main(argv: list[str] | None = None) -> int:
     anchor_p.add_argument("--portrait", default="")
     anchor_p.add_argument("--out", default="", help="output SVG; default is .ag-artifacts/anchor-maps/")
     anchor_p.add_argument("--title", default="意图锚点图")
+    worker_create_p = sub.add_parser(
+        "worker-create",
+        help="write a vendor-neutral worker dossier in the active AG worktree",
+    )
+    worker_create_p.add_argument("root")
+    worker_create_p.add_argument("--portrait", required=True)
+    worker_create_p.add_argument("--anchor", action="append", default=[], help="soft anchor; repeatable")
+    worker_create_p.add_argument("--hard-anchor", action="append", default=[], help="hard anchor; repeatable")
+    worker_create_p.add_argument("--write-allow", action="append", default=[], help="repository-relative write scope; repeatable")
+    worker_create_p.add_argument("--worker-id", default="")
+    worker_read_p = sub.add_parser("worker-read", help="read and validate a worker result.json")
+    worker_read_p.add_argument("root")
+    worker_read_p.add_argument("worker_id")
     install_p = sub.add_parser("install-skill", help="install bundled ag-anchor skill to the user skills directory")
     install_p.add_argument("--target", choices=("codex", "grok"), required=True)
     gui_p = sub.add_parser("gui", help="open HTML table of critic sqlite rows")
@@ -309,6 +322,45 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "install-skill":
             print(install_skill(target=args.target))
+            return 0
+        if args.cmd == "worker-create":
+            from .loop import status
+            from .worker import create_task
+
+            state = status(Path(args.root))
+            worktree = Path(str((state.get("task") or {}).get("worktree") or ""))
+            if not worktree.is_dir():
+                raise ChainBroken("no active AG worktree; ag_start first")
+            anchors = [
+                *[{"id": f"a{index}", "text": text, "kind": "soft"} for index, text in enumerate(args.anchor, 1)],
+                *[
+                    {"id": f"a{len(args.anchor) + index}", "text": text, "kind": "hard"}
+                    for index, text in enumerate(args.hard_anchor, 1)
+                ],
+            ]
+            print(
+                json.dumps(
+                    create_task(
+                        worktree=worktree,
+                        portrait=args.portrait,
+                        anchors=anchors,
+                        write_allow=args.write_allow,
+                        worker_id=args.worker_id,
+                    ),
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        if args.cmd == "worker-read":
+            from .loop import status
+            from .worker import read_result
+
+            state = status(Path(args.root))
+            worktree = Path(str((state.get("task") or {}).get("worktree") or ""))
+            if not worktree.is_dir():
+                raise ChainBroken("no active AG worktree; ag_start first")
+            print(json.dumps(read_result(worktree, args.worker_id), ensure_ascii=False, indent=2))
             return 0
         root = Path(args.root)
         if args.cmd == "enroll":

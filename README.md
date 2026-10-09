@@ -38,6 +38,8 @@ anchor: do not add a new CSS layer
 
 `lift-12` reads these lines as attention anchors, not as a step plan. `anchor!:` is a hard anchor when it follows from an explicit user rule such as `必须`, `禁止`, `不要`, `must`, `forbidden`, or `do not`. The AI may propose a hard anchor, but may not invent one from its own guess.
 
+`ag_start` reports an optional `subagent` object. AG does not bind to Codex, Grok, Claude, or any other worker implementation. A commander may use any subagent as an adapter: give that process the worker dossier, let it work only in the isolated AG worktree, then collect its `result.json`. Workers never run `ag_finish`, merge, modify anchors, or claim acceptance.
+
 Anchor kinds are attention metadata, not a delivery gate:
 
 - `anchor:` soft attention; drift is allowed when disclosed.
@@ -47,6 +49,22 @@ Anchor kinds are attention metadata, not a delivery gate:
 - `anchor=:` reasonable default chosen by the AI; disclose it.
 - `anchor-:` avoid zone; crossing it requires a user-approved anchor revision.
 - `anchorx:` obsolete anchor; keep the history and stop pursuing it.
+
+## Optional subagents
+
+Create a vendor-neutral worker dossier inside the active AG worktree:
+
+```powershell
+python -m ag worker-create C:\repo --portrait "Done looks like ..." --anchor "keep auth behavior unchanged" --hard-anchor "do not run ag finish" --write-allow src/auth --write-allow tests/auth
+```
+
+The dossier contains `task.json` and `TASK.md` under `.ag-artifacts/workers/<worker-id>/`. Any subagent CLI can implement it as an adapter. The worker writes `result.json` with schema `ag.worker.result.v1`, including `status`, `changed_files`, `anchor_receipt`, `evidence`, and `open_questions`. Read and validate it with:
+
+```powershell
+python -m ag worker-read C:\repo <worker-id>
+```
+
+`anchor_receipt` records attention, not acceptance. AG still decides delivery through `ag_verify` and `ag_finish`.
 
 ## Change-aware advice
 

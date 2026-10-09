@@ -453,6 +453,11 @@ def status(root: Path) -> dict[str, Any]:
         "critic_report_id": _critic_report_id(verify if isinstance(verify, dict) else None),
         "switch_report_id": _switch_report_id(verify if isinstance(verify, dict) else None),
         "timeline_path": str(latest_timeline_path(root, str((task or {}).get("id") or "")) or latest_timeline_path(root) or ""),
+        "subagent": {
+            "optional": True,
+            "contract": "ag.worker.task.v1 / ag.worker.result.v1",
+            "note": "Use any subagent CLI as an adapter. Give it the worker dossier; collect result.json. Workers write only their isolated worktree and cannot finish or merge.",
+        },
     }
     if task:
         try:
