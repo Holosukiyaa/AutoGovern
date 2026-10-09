@@ -29,7 +29,7 @@ Critic config lives in `~/.ag/projects/<key>/critic.json`. Audit: sqlite `ag.sql
 
 ## Intent anchors
 
-When starting a task, write anchors as lines in the portrait:
+Starting a task requires at least one anchor. `ag_start` refuses an empty portrait and returns the absolute path to an automatically generated intent SVG under `.ag-artifacts/anchor-maps/`. Write anchors as lines in the portrait:
 
 ```text
 anchor: keep the semantic workbench behavior unchanged
@@ -74,3 +74,5 @@ python -m ag anchor-map --portrait "anchor: 先看见症状`nanchor!: 禁止自�
 ```
 
 By default, generated maps go to `.ag-artifacts/anchor-maps/`, which is git-ignored. Use `--out` only when the user explicitly requests another location. The map widens with anchor count and keeps font size fixed. Nine or more anchors trigger a consolidation warning.
+
+`ag_verify` returns an `evidence` object with test status/tails, probe verdicts/tails, critic and switch outcomes/report ids/stores/models, the anchor SVG path, verified tree digest, and timings. Report the evidence, not only the report ids.

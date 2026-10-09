@@ -31,7 +31,7 @@ TOOLS = [
     },
     {
         "name": "ag_start",
-        "description": "Open a worktree. Write only there. Optional portrait is 'done looks like'. skip_pending ignores the mess repair queue.",
+        "description": "Open a worktree. Write only there. Portrait and at least one anchor are required; ag renders an intent SVG and status returns its absolute path.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -44,7 +44,10 @@ TOOLS = [
                         "properties": {
                             "id": {"type": "string"},
                             "text": {"type": "string"},
-                            "hard": {"type": "boolean"},
+                            "kind": {
+                                "type": "string",
+                                "enum": ["soft", "hard", "discoverable", "blocking", "defaulted", "avoid", "obsolete"],
+                            },
                             "source": {"type": "string"},
                         },
                         "required": ["text"],

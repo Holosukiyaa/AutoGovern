@@ -448,6 +448,7 @@ def status(root: Path) -> dict[str, Any]:
         "task": task,
         "portrait": (task or {}).get("portrait") if task else "",
         "anchors": (task or {}).get("anchors") if task else [],
+        "anchor_map_path": (task or {}).get("anchor_map_path") if task else "",
         "worktree": (task or {}).get("worktree") if task else "",
         "critic_report_id": _critic_report_id(verify if isinstance(verify, dict) else None),
         "switch_report_id": _switch_report_id(verify if isinstance(verify, dict) else None),
@@ -505,6 +506,17 @@ def start(root: Path, *, portrait: str = "", anchors: list[dict[str, Any]] | Non
         head = pop_pending(root)
         if isinstance(head, dict) and str(head.get("repair_portrait") or "").strip():
             chosen = str(head.get("repair_portrait") or "")
+    from .anchor_map import render_map
+
+    task_anchors = parse_anchors(chosen) if anchors is None else [dict(item) for item in (anchors or []) if isinstance(item, dict)]
+    if not chosen.strip() or not task_anchors:
+        usage_note(root, "ship", 8, "block", "start without intent anchors")
+        raise ChainBroken("intent sync required: provide portrait with at least one anchor line")
+    anchor_map = render_map(
+        title=f"ag-{task_id}",
+        portrait=chosen,
+        out=worktree / ".ag-artifacts" / "anchor-maps" / f"ag-{task_id}.svg",
+    )
     save_task(
         key,
         {
@@ -513,7 +525,8 @@ def start(root: Path, *, portrait: str = "", anchors: list[dict[str, Any]] | Non
             "source_head": git(root, "rev-parse", "HEAD"),
             "worktree": str(worktree),
             "portrait": chosen,
-            "anchors": parse_anchors(chosen) if anchors is None else anchors,
+            "anchors": task_anchors,
+            "anchor_map_path": str(anchor_map.resolve()),
             "verified_tree": "",
             "verify": None,
         },
@@ -594,6 +607,24 @@ def verify(root: Path) -> dict[str, Any]:
         probe_out = probe_run(Path(state["root"]), paths=paths, awaken=True, tree=worktree)
         raw = probe_out.get("results") if isinstance(probe_out, dict) else []
         probe_results = [row for row in raw if isinstance(row, dict)] if isinstance(raw, list) else []
+    record["evidence"] = {
+        "tests": {
+            "declared": not bool(record.get("undeclared")),
+            "exit": record.get("exit"),
+            "stdout_tail": str(record.get("stdout") or "")[-1200:],
+            "stderr_tail": str(record.get("stderr") or "")[-1200:],
+        },
+        "probes": [
+            {
+                "id": row.get("id"),
+                "verdict": row.get("verdict"),
+                "exit": row.get("exit"),
+                "tail": str(row.get("tail") or "")[-600:],
+            }
+            for row in probe_results
+            if isinstance(row, dict)
+        ],
+    }
     record["probes"] = probe_results
     record["probe_red"] = [
         str(row.get("id") or "") for row in probe_results if row.get("verdict") == "red" and row.get("id")
@@ -627,6 +658,12 @@ def verify(root: Path) -> dict[str, Any]:
     if planted:
         record["probes_planted"] = planted
     record["critic"] = critic
+    record["evidence"]["critic"] = {
+        "outcome": critic.get("outcome"),
+        "report_id": critic.get("report_id"),
+        "store": critic.get("store"),
+        "model": critic.get("model"),
+    }
     timings["critic_s"] = round(time.perf_counter() - t0 - timings.get("tests_s", 0) - timings.get("probes_s", 0), 3)
     append_task_step(enrolled, task_id, "verify-critic", report_id=str(critic.get("report_id") or ""), outcome=str(critic.get("outcome") or ""), seconds=timings["critic_s"])
     from .switch import attach_verify as attach_switch
@@ -641,10 +678,18 @@ def verify(root: Path) -> dict[str, Any]:
         tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
     )
     record["switch"] = switch
+    record["evidence"]["switch"] = {
+        "outcome": switch.get("outcome"),
+        "report_id": switch.get("report_id"),
+        "store": switch.get("store"),
+        "model": switch.get("model"),
+    }
     timings["switch_s"] = round(time.perf_counter() - t0 - timings.get("tests_s", 0) - timings.get("probes_s", 0) - timings.get("critic_s", 0), 3)
     append_task_step(enrolled, task_id, "verify-switch", report_id=str(switch.get("report_id") or ""), outcome=str(switch.get("outcome") or ""), seconds=timings["switch_s"])
     timings["total_s"] = round(time.perf_counter() - t0, 3)
     record["timings"] = timings
+    record["evidence"]["anchor_map_path"] = str(task.get("anchor_map_path") or "")
+    record["evidence"]["timings"] = dict(timings)
     try:
         from .gui import write_dashboard
 
@@ -654,6 +699,7 @@ def verify(root: Path) -> dict[str, Any]:
     digest = tree_digest(worktree)
     task["verify"] = record
     task["verified_tree"] = digest if record["exit"] == 0 else ""
+    record["evidence"]["verified_tree"] = task["verified_tree"]
     save_task(key, task)
     if record.get("undeclared"):
         usage_note(root, "ship", 1, "help", "verify without tests")
@@ -673,6 +719,39 @@ def verify(root: Path) -> dict[str, Any]:
     out["switch_report_id"] = str(switch.get("report_id") or "")
     out["probes_planted"] = list(record.get("probes_planted") or [])
     out["timings"] = dict(record.get("timings") or {})
+    out["evidence"] = {
+        "tests": {
+            "declared": not bool(record.get("undeclared")),
+            "exit": record.get("exit"),
+            "stdout_tail": str(record.get("stdout") or "")[-1200:],
+            "stderr_tail": str(record.get("stderr") or "")[-1200:],
+        },
+        "probes": [
+            {
+                "id": row.get("id"),
+                "verdict": row.get("verdict"),
+                "exit": row.get("exit"),
+                "tail": str(row.get("tail") or "")[-600:],
+            }
+            for row in probe_results
+            if isinstance(row, dict)
+        ],
+        "critic": {
+            "outcome": critic.get("outcome"),
+            "report_id": critic.get("report_id"),
+            "store": critic.get("store"),
+            "model": critic.get("model"),
+        },
+        "switch": {
+            "outcome": switch.get("outcome"),
+            "report_id": switch.get("report_id"),
+            "store": switch.get("store"),
+            "model": switch.get("model"),
+        },
+        "anchor_map_path": str((task or {}).get("anchor_map_path") or ""),
+        "verified_tree": task.get("verified_tree") or "",
+        "timings": dict(record.get("timings") or {}),
+    }
     try:
         from .lift import run as lift_run
 
