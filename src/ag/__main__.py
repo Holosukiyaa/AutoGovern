@@ -67,7 +67,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     start_p.add_argument("root")
     start_p.add_argument("--portrait", default="")
-    start_p.add_argument("--anchor", action="append", default=[], help="soft intent anchor; repeatable")
+    start_p.add_argument("--fixed", action="append", default=[], help="locked done-state line; repeatable; not rewritten before confirm-map")
+    start_p.add_argument("--anchor", action="append", default=[], help="attention anchor for what is still unsettled; repeatable")
     start_p.add_argument("--guard", action="append", default=[], help="guard rule shown beside the route; repeatable")
     start_p.add_argument("--default", action="append", default=[], help="negotiable default shown beside the route; repeatable")
     start_p.add_argument("--hard-anchor", action="append", default=[], help="hard anchor only from explicit user/project rule; repeatable")
@@ -497,6 +498,7 @@ def main(argv: list[str] | None = None) -> int:
                         anchors=anchors,
                         guards=args.guard,
                         defaults=args.default,
+                        fixed=args.fixed,
                         skip_pending=bool(args.skip_pending),
                     ),
                     ensure_ascii=False,

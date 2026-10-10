@@ -31,7 +31,7 @@ TOOLS = [
     },
     {
         "name": "ag_start",
-        "description": "Open a worktree. Write only there. Portrait and at least one anchor are required; ag writes a Unicode intent map and status returns its text and path.",
+        "description": "Open a worktree. Write only there. The portrait or fixed lines lock the done-state on the map. Attention anchors are the unsettled route. Later status calls do not rewrite the locked lines.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -53,6 +53,7 @@ TOOLS = [
                         "required": ["text"],
                     },
                 },
+                "fixed": {"type": "array", "items": {"type": "string"}},
                 "guards": {"type": "array", "items": {"type": "string"}},
                 "defaults": {"type": "array", "items": {"type": "string"}},
                 "skip_pending": {"type": "boolean"},
@@ -94,6 +95,8 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if name == "ag_start":
         raw = args.get("anchors")
         anchors = [dict(item) for item in raw if isinstance(item, dict)] if isinstance(raw, list) else None
+        raw_fixed = args.get("fixed")
+        fixed = [str(item) for item in raw_fixed] if isinstance(raw_fixed, list) else None
         raw_guards = args.get("guards")
         guards = [str(item) for item in raw_guards] if isinstance(raw_guards, list) else None
         raw_defaults = args.get("defaults")
@@ -104,6 +107,7 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
             anchors=anchors,
             guards=guards,
             defaults=defaults,
+            fixed=fixed,
             skip_pending=bool(args.get("skip_pending")),
         )
     if name == "ag_verify":

@@ -53,10 +53,17 @@ represents the user's approval.
 
 ## Layered intent map
 
-Keep the route honest:
+The map has a locked block above the route.
 
-- Route anchors are middle stations toward the endpoint, not restated
-  acceptance rules.
+- Put the observable done-state in `fixed` or in portrait lines `固定:` / `做成之后:`.
+  That text is snapshotted at `ag_start`. Later `ag_status` redraws the route
+  but does not replace those lines. To change them, abandon the ticket and
+  start again after the user rejects the map.
+- Hard anchors are locked rules. They render inside the fixed block, not as
+  route stations. A hard anchor still comes only from an explicit user or
+  project rule.
+- Route anchors are only unsettled attention: soft, discoverable, defaulted,
+  or obsolete. They are middle stations, not restated acceptance rules.
 - Use verb-bearing declarative sentences of at least 20 characters. Name the
   object, the direction, and the reason this station moves toward the endpoint.
 - Do not collapse an anchor into a bare slogan such as "make it trustworthy";

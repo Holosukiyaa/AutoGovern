@@ -467,10 +467,15 @@ def status(root: Path) -> dict[str, Any]:
     }
     if task:
         try:
-            from .anchor_map import write_unicode
+            from .anchor_map import attention_anchors, hard_rules, resolve_fixed, write_unicode
 
             anchors = [dict(item) for item in (task.get("anchors") or []) if isinstance(item, dict)]
-            current_anchor = str(task.get("current_anchor") or (anchors[0].get("id") if anchors else ""))
+            route = attention_anchors(anchors)
+            current_anchor = str(task.get("current_anchor") or (route[0].get("id") if route else ""))
+            if "fixed" not in task:
+                task["fixed"] = resolve_fixed(str(task.get("portrait") or ""), None)
+            if "fixed_rules" not in task:
+                task["fixed_rules"] = hard_rules(anchors)
             stored = str(task.get("anchor_preview_path") or task.get("anchor_map_path") or "").strip()
             if not stored:
                 raise ChainBroken("active task has no anchor map path")
@@ -482,6 +487,8 @@ def status(root: Path) -> dict[str, Any]:
                 current_anchor=current_anchor,
                 guards=[str(item) for item in (task.get("guards") or [])],
                 defaults=[str(item) for item in (task.get("defaults") or [])],
+                fixed=list(task.get("fixed") or []),
+                fixed_rules=list(task.get("fixed_rules") or []),
             )
             anchor_preview = preview_path.read_text(encoding="utf-8")
             task["anchor_map_path"] = str(preview_path.resolve())
@@ -498,6 +505,8 @@ def status(root: Path) -> dict[str, Any]:
             out["anchor_preview_path"] = task["anchor_preview_path"]
             out["anchor_preview"] = anchor_preview
             out["current_anchor"] = current_anchor
+            out["fixed"] = list(task.get("fixed") or [])
+            out["fixed_rules"] = list(task.get("fixed_rules") or [])
             out["intent_map_confirmed"] = bool(task.get("intent_map_confirmed"))
             out["subagent"]["ready"] = bool(task.get("intent_map_confirmed"))
         except Exception:
@@ -533,6 +542,7 @@ def start(
     skip_pending: bool = False,
     guards: list[str] | None = None,
     defaults: list[str] | None = None,
+    fixed: list[str] | None = None,
 ) -> dict[str, Any]:
     """Open a worktree. Tracked canonical files stay frozen until finish or abandon.
 
@@ -574,23 +584,29 @@ def start(
         head = pop_pending(root)
         if isinstance(head, dict) and str(head.get("repair_portrait") or "").strip():
             chosen = str(head.get("repair_portrait") or "")
-    from .anchor_map import write_unicode
+    from .anchor_map import attention_anchors, hard_rules, resolve_fixed, write_unicode
     from .worker import artifacts_dir
 
     task_anchors = parse_anchors(chosen) if anchors is None else [dict(item) for item in (anchors or []) if isinstance(item, dict)]
-    if not chosen.strip() or not task_anchors:
+    task_fixed = resolve_fixed(chosen, fixed)
+    task_rules = hard_rules(task_anchors)
+    if not task_fixed and not task_anchors:
         usage_note(root, "ship", 8, "block", "start without intent anchors")
-        raise ChainBroken("intent sync required: provide portrait with at least one anchor line")
+        raise ChainBroken("intent sync required: provide a locked result or at least one attention anchor")
     task_guards = [str(item).strip() for item in (guards or []) if str(item).strip()]
     task_defaults = [str(item).strip() for item in (defaults or []) if str(item).strip()]
+    route = attention_anchors(task_anchors)
+    current_id = str(route[0].get("id") or "") if route else ""
     anchor_map = write_unicode(
         title=f"ag-{task_id}",
         portrait=chosen,
         out=artifacts_dir(worktree) / "anchor-maps" / f"ag-{task_id}.txt",
         anchors=task_anchors,
-        current_anchor=str((task_anchors or [{}])[0].get("id") or ""),
+        current_anchor=current_id,
         guards=task_guards,
         defaults=task_defaults,
+        fixed=task_fixed,
+        fixed_rules=task_rules,
     )
     save_task(
         key,
@@ -604,7 +620,9 @@ def start(
             "anchor_map_path": str(anchor_map.resolve()),
             "anchor_preview_path": str(anchor_map.resolve()),
             "intent_map_confirmed": False,
-            "current_anchor": (task_anchors or [{}])[0].get("id", ""),
+            "current_anchor": current_id,
+            "fixed": task_fixed,
+            "fixed_rules": task_rules,
             "guards": task_guards,
             "defaults": task_defaults,
             "verified_tree": "",
