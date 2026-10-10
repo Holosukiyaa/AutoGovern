@@ -326,7 +326,7 @@ def create_task(
         portrait.strip(),
         "",
         "## Intent map",
-        f"- SVG: `{intent_map_path}`",
+        f"- Unicode map: `{intent_map_path}`",
         "",
         "```text",
         anchor_preview.strip(),

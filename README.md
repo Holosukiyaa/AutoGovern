@@ -31,7 +31,7 @@ Critic config lives in `~/.ag/projects/<key>/critic.json`. Audit: sqlite `ag.sql
 
 ## Intent anchors
 
-Starting a task requires at least one anchor. `ag_start` refuses an empty portrait and returns the absolute paths to an automatically generated intent SVG and matching Unicode preview under `.ag-artifacts/anchor-maps/`; the Unicode preview is also returned as `anchor_preview`. The SVG marks `current_anchor` as current attention, never as anchor completion. Write anchors as lines in the portrait: before any product file is written, the AI must show the Unicode preview and the absolute SVG path to the user and wait for explicit approval. AG freezes the worktree until `confirm-map`; `ag_status` reports `intent-map-unconfirmed` as a hazard; `ag_verify` and `ag_finish` refuse while the map is unconfirmed. AG copies the SVG and Unicode preview into `AG_HOME/projects/<key>/anchor-maps/` and records an `anchor-preview` timeline step, so the evidence survives worktree cleanup.
+Starting a task requires at least one anchor. `ag_start` refuses an empty portrait and writes one Unicode intent map under `.ag-artifacts/anchor-maps/`; the same text is returned as `anchor_preview`, and its path is `anchor_preview_path`. The map marks `current_anchor` as current attention, never as anchor completion. Before any product file is written, the AI must show that Unicode text to the user and wait for explicit approval. AG freezes the worktree until `confirm-map`; `ag_status` reports `intent-map-unconfirmed` as a hazard; `ag_verify` and `ag_finish` refuse while the map is unconfirmed. AG copies the Unicode map into `AG_HOME/projects/<key>/anchor-maps/` and records an `anchor-preview` timeline step, so the evidence survives worktree cleanup.
 
 ```text
 anchor: keep the semantic workbench behavior unchanged
@@ -76,7 +76,7 @@ python -m ag worker-read C:\repo <worker-id>
 ```
 
 `anchor_receipt` records attention, not acceptance. AG still decides delivery through `ag_verify` and `ag_finish`.
-Every worker dossier carries the current Unicode intent map and the absolute SVG path. AG allows at most 3 worker dossiers per task. `ag_verify` fails while any dossier is missing its `result.json`; the missing worker ids are returned as `verify.missing_worker_results` and `evidence.workers.missing_results`.
+Every worker dossier carries the current Unicode intent map and its absolute path. AG allows at most 3 worker dossiers per task. `ag_verify` fails while any dossier is missing its `result.json`; the missing worker ids are returned as `verify.missing_worker_results` and `evidence.workers.missing_results`.
 
 AG can launch a Grok dossier as an external worker provider:
 
@@ -118,14 +118,14 @@ python -m ag install-skill --target grok
 
 ## Anchor map
 
-Render an SVG attention route from portrait anchor lines:
+Write a Unicode attention route from portrait anchor lines:
 
 ```powershell
 python -m ag anchor-map --portrait "anchor: 先看见症状`nanchor!: 禁止自动开刀" --title "意图锚点图"
 ```
 
-By default, generated maps go to `.ag-artifacts/anchor-maps/`, which is git-ignored. Use `--out` only when the user explicitly requests another location. The map widens with anchor count and keeps font size fixed. Nine or more anchors trigger a consolidation warning. During an active task `status` regenerates both views; after `verify`, the current-attention marker moves to the last route anchor.
+By default, generated maps go to `.ag-artifacts/anchor-maps/` as a `.txt` file, which is git-ignored. Use `--out` only when the user explicitly requests another location. During an active task `status` rewrites that Unicode file; after `verify`, the current-attention marker moves to the last route anchor.
 
-`ag_verify` returns an `evidence` object with test status/tails, probe verdicts/tails, critic and switch outcomes/report ids/stores/models, the anchor SVG and Unicode paths/preview, current attention anchor, worker result status, verified tree digest, and timings. Report the evidence, not only the report ids.
+`ag_verify` returns an `evidence` object with test status/tails, probe verdicts/tails, critic and switch outcomes/report ids/stores/models, the Unicode anchor path and preview, current attention anchor, worker result status, verified tree digest, and timings. Report the evidence, not only the report ids.
 
-`ag_finish` returns `anchor_progress`: every anchor with id/kind/text, the absolute intent-SVG path, and a reminder to compare the final result with the intent map before accepting delivery. Soft anchors are not marked complete automatically.
+`ag_finish` returns `anchor_progress`: every anchor with id/kind/text, the absolute Unicode map path, and a reminder to compare the final result with the intent map before accepting delivery. Soft anchors are not marked complete automatically.

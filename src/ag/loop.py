@@ -447,7 +447,7 @@ def status(root: Path) -> dict[str, Any]:
         "product": product,
         "reminder": "process complete is not product passed",
         "worker_note": "After ag_verify cite critic.report_id and switch.report_id. No report bodies. Switch is the finish gate; critic is not.",
-        "intent_gate": "STOP: show anchor_preview and the absolute anchor_map_path to the user; wait for explicit user approval, then run confirm-map.",
+        "intent_gate": "STOP: show anchor_preview to the user; the unicode file is anchor_preview_path. Wait for explicit user approval, then run confirm-map.",
         "task": task,
         "portrait": (task or {}).get("portrait") if task else "",
         "anchors": (task or {}).get("anchors") if task else [],
@@ -467,45 +467,34 @@ def status(root: Path) -> dict[str, Any]:
     }
     if task:
         try:
-            from .anchor_map import render_map, render_unicode
+            from .anchor_map import write_unicode
 
             anchors = [dict(item) for item in (task.get("anchors") or []) if isinstance(item, dict)]
             current_anchor = str(task.get("current_anchor") or (anchors[0].get("id") if anchors else ""))
-            anchor_map_text = str(task.get("anchor_map_path") or "").strip()
-            anchor_map_path = Path(anchor_map_text)
-            if anchor_map_text:
-                render_map(
-                    title=f"ag-{task.get('id') or 'task'}",
-                    portrait=str(task.get("portrait") or ""),
-                    out=anchor_map_path,
-                    anchors=anchors,
-                    current_anchor=current_anchor,
-                    guards=[str(item) for item in (task.get("guards") or [])],
-                    defaults=[str(item) for item in (task.get("defaults") or [])],
-                )
-            if not anchor_map_text:
+            stored = str(task.get("anchor_preview_path") or task.get("anchor_map_path") or "").strip()
+            if not stored:
                 raise ChainBroken("active task has no anchor map path")
-            anchor_preview_text = str(task.get("anchor_preview_path") or "").strip()
-            anchor_preview_path = Path(anchor_preview_text) if anchor_preview_text else anchor_map_path.with_suffix(".txt")
-            anchor_preview_path.parent.mkdir(parents=True, exist_ok=True)
-            anchor_preview = render_unicode(
-                f"ag-{task.get('id') or 'task'}",
-                anchors,
-                current_anchor,
+            preview_path = write_unicode(
+                title=f"ag-{task.get('id') or 'task'}",
+                portrait=str(task.get("portrait") or ""),
+                out=Path(stored),
+                anchors=anchors,
+                current_anchor=current_anchor,
                 guards=[str(item) for item in (task.get("guards") or [])],
                 defaults=[str(item) for item in (task.get("defaults") or [])],
             )
-            anchor_preview_path.write_text(anchor_preview, encoding="utf-8")
-            task["anchor_preview_path"] = str(anchor_preview_path.resolve())
+            anchor_preview = preview_path.read_text(encoding="utf-8")
+            task["anchor_map_path"] = str(preview_path.resolve())
+            task["anchor_preview_path"] = str(preview_path.resolve())
             task["anchor_preview"] = anchor_preview
             task["current_anchor"] = current_anchor
-            task["audit_anchor_map_path"] = str(ag_home() / "projects" / key / "anchor-maps" / f"ag-{task.get('id') or 'task'}.svg")
-            task["audit_anchor_preview_path"] = str(ag_home() / "projects" / key / "anchor-maps" / f"ag-{task.get('id') or 'task'}.txt")
-            audit_dir = Path(task["audit_anchor_map_path"]).parent
-            audit_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(anchor_map_path, task["audit_anchor_map_path"])
-            shutil.copyfile(anchor_preview_path, task["audit_anchor_preview_path"])
+            audit_preview = ag_home() / "projects" / key / "anchor-maps" / f"ag-{task.get('id') or 'task'}.txt"
+            audit_preview.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(preview_path, audit_preview)
+            task["audit_anchor_map_path"] = str(audit_preview)
+            task["audit_anchor_preview_path"] = str(audit_preview)
             save_task(key, task)
+            out["anchor_map_path"] = task["anchor_map_path"]
             out["anchor_preview_path"] = task["anchor_preview_path"]
             out["anchor_preview"] = anchor_preview
             out["current_anchor"] = current_anchor
@@ -577,7 +566,7 @@ def start(
         head = pop_pending(root)
         if isinstance(head, dict) and str(head.get("repair_portrait") or "").strip():
             chosen = str(head.get("repair_portrait") or "")
-    from .anchor_map import render_map
+    from .anchor_map import write_unicode
 
     task_anchors = parse_anchors(chosen) if anchors is None else [dict(item) for item in (anchors or []) if isinstance(item, dict)]
     if not chosen.strip() or not task_anchors:
@@ -585,12 +574,12 @@ def start(
         raise ChainBroken("intent sync required: provide portrait with at least one anchor line")
     task_guards = [str(item).strip() for item in (guards or []) if str(item).strip()]
     task_defaults = [str(item).strip() for item in (defaults or []) if str(item).strip()]
-    anchor_map = render_map(
+    anchor_map = write_unicode(
         title=f"ag-{task_id}",
         portrait=chosen,
-        out=worktree / ".ag-artifacts" / "anchor-maps" / f"ag-{task_id}.svg",
+        out=worktree / ".ag-artifacts" / "anchor-maps" / f"ag-{task_id}.txt",
         anchors=task_anchors,
-        current_anchor=(task_anchors or [{}])[0].get("id", ""),
+        current_anchor=str((task_anchors or [{}])[0].get("id") or ""),
         guards=task_guards,
         defaults=task_defaults,
     )
@@ -604,7 +593,7 @@ def start(
             "portrait": chosen,
             "anchors": task_anchors,
             "anchor_map_path": str(anchor_map.resolve()),
-            "anchor_preview_path": str(anchor_map.with_suffix(".txt").resolve()),
+            "anchor_preview_path": str(anchor_map.resolve()),
             "intent_map_confirmed": False,
             "current_anchor": (task_anchors or [{}])[0].get("id", ""),
             "guards": task_guards,

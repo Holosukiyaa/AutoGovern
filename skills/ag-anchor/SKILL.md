@@ -36,7 +36,7 @@ start, while working, and before verification.
 ## Mandatory intent-map confirmation
 
 After `ag_start`, stop immediately. Paste the returned `anchor_preview` to the user, give the
-absolute SVG path, and wait. Do not create any worker/subagent or start
+absolute Unicode map path, and wait. Do not create any worker/subagent or start
 implementation until the user explicitly confirms the intent map and
 `confirm-map` has been run. The AI must never self-invoke `confirm-map`; it
 represents the user's approval.
@@ -68,8 +68,8 @@ Keep the route honest:
 - Avoid is a separate boundary, not a middle station.
 
 The map shows the route, endpoint, discoverable unknowns, blocking unknowns,
-guards, defaults, and avoid zone. Long tasks widen the SVG and keep font size
-fixed; 9 or more route anchors should prompt consolidation.
+guards, defaults, and avoid zone. The map is Unicode text. Nine or more
+route anchors should prompt consolidation.
 
 ## Canonical freeze
 
@@ -79,6 +79,6 @@ While a task is open, AG freezes tracked files on the canonical checkout. Window
 
 - Use `ag_start` with the portrait and explicit anchors when available.
 - Create workers only with `ag worker-create`; use at most 3 workers.
-- Pass the anchor preview, SVG path, and anchors to any worker prompt.
+- Pass the anchor preview, Unicode map path, and anchors to any worker prompt.
 - Before completion, run `ag_verify`; do not self-certify.
 - Report absolute paths for generated files.

@@ -31,7 +31,7 @@ TOOLS = [
     },
     {
         "name": "ag_start",
-        "description": "Open a worktree. Write only there. Portrait and at least one anchor are required; ag renders an intent SVG and status returns its absolute path.",
+        "description": "Open a worktree. Write only there. Portrait and at least one anchor are required; ag writes a Unicode intent map and status returns its text and path.",
         "inputSchema": {
             "type": "object",
             "properties": {
