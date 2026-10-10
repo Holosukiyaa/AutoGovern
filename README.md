@@ -104,7 +104,7 @@ Open the read-only governance dashboard without a project or task id:
 python -m ag gui --live
 ```
 
-When one project has an active task, the dashboard opens that project automatically. With multiple active projects it opens the most recently started one. The local server refreshes the page every five seconds without embedded JavaScript, while the newest live output stays at the top. The dashboard shows the current task, aggregated worker/critic/switch live output, the task timeline, and the audit tables. It is observation only: it cannot start, confirm, verify, finish, or merge. Close the terminal window to stop the server.
+When one project has an active task, the dashboard opens that project automatically. The local server exposes a read-only `/live` projection. Worker, critic, and switch each render as an independent terminal card with its latest 24 rows, and the browser refreshes only that section every 500ms. The full audit snapshot remains static. It is observation only: it cannot start, confirm, verify, finish, merge, or send prompts. Close the terminal window to stop the server.
 
 Install the bundled attention skill for Codex or Grok:
 

@@ -238,14 +238,35 @@ def run_task(
         process.wait()
         append_log(worktree, worker_id, phase="timeout", timeout=timeout)
         raise TimeoutError(f"Grok worker timed out after {timeout} seconds") from exc
-    append_log(worktree, worker_id, phase="exit", exit=exit_code)
+    result_path = directory / "result.json"
+    delivery_ok = result_path.is_file()
+    if exit_code == 0 and not delivery_ok:
+        append_log(
+            worktree,
+            worker_id,
+            phase="failed",
+            reason="result.json is missing after provider exit",
+            exit=exit_code,
+        )
+    else:
+        append_log(worktree, worker_id, phase="exit", exit=exit_code)
     return {
         "schema": "ag.worker-run.v1",
         "task_id": worker_id,
         "provider": provider,
         "exit": exit_code,
+        "status": "done" if delivery_ok and exit_code == 0 else "failed",
+        "reason": (
+            ""
+            if delivery_ok and exit_code == 0
+            else (
+                "result.json is missing after provider exit"
+                if exit_code == 0
+                else "provider exited with a non-zero code"
+            )
+        ),
         "log_path": str(log_path.resolve()),
-        "result_path": str((directory / "result.json").resolve()),
+        "result_path": str(result_path.resolve()),
         "output_tail": "\n".join(output[-200:]),
     }
 
