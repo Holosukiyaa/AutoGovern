@@ -12,3 +12,4 @@ tests/
 build/
 dist/
 src/ag.egg-info/
+docs/
