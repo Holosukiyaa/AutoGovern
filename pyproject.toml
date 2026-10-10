@@ -19,4 +19,4 @@ where = ["src"]
 ag = ["strategies.sqlite", "critic_prompt.md"]
 
 [tool.setuptools.data-files]
-"share/ag/skills/ag-anchor" = ["skills/ag-anchor/SKILL.md"]
+"share/ag/skills/ag-anchor" = ["skills/ag-anchor/SKILL.md", "skills/ag-anchor/brief.json"]

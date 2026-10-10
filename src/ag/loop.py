@@ -502,6 +502,14 @@ def status(root: Path) -> dict[str, Any]:
             out["subagent"]["ready"] = bool(task.get("intent_map_confirmed"))
         except Exception:
             pass
+        if not bool(task.get("intent_map_confirmed")):
+            from .anchor_brief import anchor_guidance
+
+            issued = bool(task.get("anchor_template_issued"))
+            out.update(anchor_guidance(issued))
+            if not issued:
+                task["anchor_template_issued"] = True
+                save_task(key, task)
     try:
         from .store import pending_summary
 
