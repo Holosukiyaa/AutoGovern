@@ -690,12 +690,6 @@ def verify(root: Path) -> dict[str, Any]:
     ]
     timings: dict[str, float] = {}
     t0 = time.perf_counter()
-    try:
-        from .gui import write_live
-
-        write_live(enrolled, phase="tests", timings=timings)
-    except Exception:
-        pass
     record: dict[str, Any] = {
         "exit": 0,
         "stdout": "",
@@ -721,12 +715,6 @@ def verify(root: Path) -> dict[str, Any]:
         }
     timings["tests_s"] = round(time.perf_counter() - t_tests, 3)
     append_task_step(enrolled, task_id, "verify-tests", seconds=timings["tests_s"])
-    try:
-        from .gui import write_live
-
-        write_live(enrolled, phase="probes", timings=timings)
-    except Exception:
-        pass
     paths = _ticket_paths(worktree, str(task.get("source_head") or ""))
     probe_results: list[Any] = []
     if paths:
@@ -782,12 +770,6 @@ def verify(root: Path) -> dict[str, Any]:
     }
     timings["probes_s"] = round(time.perf_counter() - t_tests - timings["tests_s"], 3)
     append_task_step(enrolled, task_id, "verify-probes", probe_red=list(record["probe_red"]), seconds=timings["probes_s"])
-    try:
-        from .gui import write_live
-
-        write_live(enrolled, phase="critic", timings=timings)
-    except Exception:
-        pass
     from .critic import attach_verify
 
     portrait = str(task.get("portrait") or "").strip()
@@ -841,12 +823,6 @@ def verify(root: Path) -> dict[str, Any]:
     record["evidence"]["anchor_preview"] = str(task.get("anchor_preview") or "")
     record["evidence"]["current_anchor"] = task.get("current_anchor") or ""
     record["evidence"]["timings"] = dict(timings)
-    try:
-        from .gui import write_dashboard
-
-        write_dashboard(enrolled, browse=False)
-    except Exception:
-        pass
     digest = tree_digest(worktree)
     route_anchors = [item for item in (task.get("anchors") or []) if isinstance(item, dict) and str(item.get("kind") or "soft") not in {"blocking", "avoid"}]
     task["current_anchor"] = str((route_anchors[-1] if route_anchors else {}).get("id") or "")

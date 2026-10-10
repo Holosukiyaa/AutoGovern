@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 from .loop import abandon, confirm_map, enroll, finish, hook_main, start, status, unenroll, verify
-from .gui import resolve_dashboard_root, serve_dashboard, write_dashboard
 from .heal import run as heal_run
 from .lift import run as lift_run
 from .see import run as see_run
@@ -126,9 +125,8 @@ def main(argv: list[str] | None = None) -> int:
     worker_read_p.add_argument("worker_id")
     install_p = sub.add_parser("install-skill", help="install bundled ag-anchor skill to the user skills directory")
     install_p.add_argument("--target", choices=("codex", "grok"), required=True)
-    gui_p = sub.add_parser("gui", help="open the live read-only governance dashboard")
-    gui_p.add_argument("root", nargs="?", default="", help="enrolled repo; omit to auto-open the active task")
-    gui_p.add_argument("--live", action="store_true", help="keep refreshing the dashboard from a local read-only server")
+    config_p = sub.add_parser("config", help="print critic.json; create a template only when the file is missing")
+    config_p.add_argument("root", nargs="?", default="", help="checkout whose critic.json to open; default is the current directory")
     plug_p = sub.add_parser("plug", help="list/on/off a pluggable strategy by lane-seq")
     plug_p.add_argument("action", choices=["list", "on", "off"])
     plug_p.add_argument("root")
@@ -241,13 +239,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "hook":
             return hook_main()
-        if args.cmd == "gui":
-            root = resolve_dashboard_root(str(args.root or ""))
-            if args.live:
-                serve_dashboard(root)
-                return 0
-            path = write_dashboard(root, browse=True)
-            print(str(path))
+        if args.cmd == "config":
+            from .critic import ensure_config_file
+
+            raw = str(args.root or "").strip()
+            root = Path(raw).expanduser() if raw else Path.cwd()
+            print(ensure_config_file(root))
             return 0
         if args.cmd == "plug":
             root = Path(args.root)

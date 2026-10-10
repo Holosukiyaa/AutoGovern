@@ -331,6 +331,40 @@ def config_path(root: Path) -> Path:
     return ag_home() / "projects" / project_key(real_root(root)) / CONFIG_NAME
 
 
+def config_template() -> dict[str, Any]:
+    """Fields a person edits. enabled stays false until they turn a seat on."""
+    return {
+        "enabled": False,
+        "endpoint": "https://api.deepseek.com",
+        "model": "deepseek-flash",
+        "api_key_env": DEFAULT_API_KEY_ENV,
+        "timeout": DEFAULT_TIMEOUT,
+        "worker_model": "grok",
+        "allow_same_family": False,
+    }
+
+
+def ensure_config_file(root: Path) -> Path:
+    """Return critic.json. Create the template only when the file is absent."""
+    root = real_root(root)
+    if not root.is_dir():
+        raise ChainBroken(f"config root is not a directory: {root}")
+    path = config_path(root)
+    if path.is_file():
+        return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(config_template(), ensure_ascii=False, indent=2) + "\n"
+    try:
+        fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return path
+    try:
+        os.write(fd, payload.encode("utf-8"))
+    finally:
+        os.close(fd)
+    return path
+
+
 def report_path(root: Path) -> Path:
     return ag_home() / "projects" / project_key(real_root(root)) / REPORT_NAME
 

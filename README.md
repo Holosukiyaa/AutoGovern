@@ -21,7 +21,7 @@ ag enroll <repo>
 ag mcp
 ```
 
-Critic config lives in `~/.ag/projects/<key>/critic.json`. Audit: sqlite `ag.sqlite`. Task step chain (not in git): `~/.ag/projects/<key>/tasks/<task_id>.json` — one object with a `steps` array, appended at start / verify-refused / verify-tests / verify-probes / verify-critic / verify-switch / finish / finish-refused. `ag_status.timeline_path` points at the current or latest file. `ag critic-log` / `ag-gui.bat` (pick an enrolled repo) shows that timeline at the top.
+Critic config lives in `~/.ag/projects/<key>/critic.json`. Audit: sqlite `ag.sqlite`. Task step chain (not in git): `~/.ag/projects/<key>/tasks/<task_id>.json` — one object with a `steps` array, appended at start / verify-refused / verify-tests / verify-probes / verify-critic / verify-switch / finish / finish-refused. `ag_status.timeline_path` points at the current or latest file. `ag critic-log` prints that timeline. `ag-config.bat` opens the checkout's `critic.json` and does not render the timeline.
 
 ## Strategy lanes
 
@@ -96,15 +96,18 @@ Configured critic and switch chats stream their incremental reasoning/content in
 
 `see-10` records repeated CSS selectors across files, including selector counts, `!important` counts, consumers, and co-change history. `see-11` turns those symptoms into an ownership table with definers, modifiers, overriders, and consumers. `heal-5` classifies them as noise, incident, risk, suspected, or confirmed. `heal-6` writes a treatment ticket for a confirmed item with `cut=false`; treatment itself must go through `ag start` and the ship lane.
 
-## Skill installation
+## Critic config
 
-Open the read-only governance dashboard without a project or task id:
+Open this checkout's `critic.json` in Notepad. The file holds the seat endpoint, model, timeout, and the environment-variable name for the API key. The key itself stays in that environment variable.
 
 ```powershell
-python -m ag gui --live
+.\ag-config.bat
+.\ag-config.bat C:\path\to\another\checkout
 ```
 
-When one project has an active task, the dashboard opens that project automatically. The local server exposes a read-only `/live` projection. Worker, critic, and switch each render as an independent terminal card with its latest 24 rows, and the browser refreshes only that section every 500ms. The full audit snapshot remains static. It is observation only: it cannot start, confirm, verify, finish, merge, or send prompts. Close the terminal window to stop the server.
+A missing file is created as a template with `enabled` false. An existing file is left unchanged. Pass no argument to open the config for the checkout that contains the bat.
+
+## Skill installation
 
 Install the bundled attention skill for Codex or Grok:
 

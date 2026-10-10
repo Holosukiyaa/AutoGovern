@@ -12,10 +12,14 @@ if not defined PY (
   pause
   exit /b 1
 )
-if "%~1"=="" (
-  %PY% -B -m ag gui
-) else (
-  %PY% -B -m ag gui "%~1"
+set "ROOT=%~dp0"
+if not "%~1"=="" set "ROOT=%~1"
+set "CFG="
+for /f "delims=" %%P in ('%PY% -B -m ag config "%ROOT%"') do set "CFG=%%P"
+if not defined CFG (
+  echo 没有得到配置文件路径。
+  pause
+  exit /b 1
 )
-if errorlevel 1 pause
+start "" notepad "%CFG%"
 endlocal

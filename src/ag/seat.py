@@ -276,14 +276,6 @@ def seat_run(
         held["r"] = reasoning_text
         held["c"] = content_text
         live_log(reasoning_text, content_text)
-        if not spec["live"]:
-            return
-        try:
-            from .gui import write_live
-
-            write_live(root, phase=str(kind), thinking=reasoning_text, content=content_text)
-        except Exception:
-            pass
 
     run_cfg = dict(cfg)
     if spec["live"]:
