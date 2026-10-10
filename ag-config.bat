@@ -1,6 +1,11 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+if errorlevel 1 goto baddir
+if not "%~1"=="" (
+  cd /d "%~1"
+  if errorlevel 1 goto baddir
+)
 set "PYTHONPATH=%~dp0src"
 set "PY="
 where python >nul 2>&1 && set "PY=python"
@@ -8,18 +13,20 @@ if not defined PY (
   where py >nul 2>&1 && set "PY=py -3"
 )
 if not defined PY (
-  echo æ‰¾ä¸åˆ°è¿è¡Œç¯å¢ƒï¼Œè¯·å…ˆå®‰è£…è§£é‡Šå™¨å¹¶åŠ å…¥ç³»ç»Ÿè·¯å¾„ã€‚
+  echo ÕÒ²»µ½ÔËĞĞ»·¾³£¬ÇëÏÈ°²×°½âÊÍÆ÷²¢¼ÓÈëÏµÍ³Â·¾¶¡£
   pause
   exit /b 1
 )
-set "ROOT=%~dp0"
-if not "%~1"=="" set "ROOT=%~1"
 set "CFG="
-for /f "delims=" %%P in ('%PY% -B -m ag config "%ROOT%"') do set "CFG=%%P"
+for /f "delims=" %%P in ('%PY% -B -m ag config') do set "CFG=%%P"
 if not defined CFG (
-  echo æ²¡æœ‰å¾—åˆ°é…ç½®æ–‡ä»¶è·¯å¾„ã€‚
+  echo Ã»ÓĞµÃµ½ÅäÖÃÎÄ¼şÂ·¾¶¡£
   pause
   exit /b 1
 )
 start "" notepad "%CFG%"
-endlocal
+goto :eof
+:baddir
+echo ½ø²»ÁËÕâ¸öÄ¿Â¼¡£
+pause
+exit /b 1
