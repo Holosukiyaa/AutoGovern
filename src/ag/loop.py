@@ -567,6 +567,7 @@ def start(
         if isinstance(head, dict) and str(head.get("repair_portrait") or "").strip():
             chosen = str(head.get("repair_portrait") or "")
     from .anchor_map import write_unicode
+    from .worker import artifacts_dir
 
     task_anchors = parse_anchors(chosen) if anchors is None else [dict(item) for item in (anchors or []) if isinstance(item, dict)]
     if not chosen.strip() or not task_anchors:
@@ -577,7 +578,7 @@ def start(
     anchor_map = write_unicode(
         title=f"ag-{task_id}",
         portrait=chosen,
-        out=worktree / ".ag-artifacts" / "anchor-maps" / f"ag-{task_id}.txt",
+        out=artifacts_dir(worktree) / "anchor-maps" / f"ag-{task_id}.txt",
         anchors=task_anchors,
         current_anchor=str((task_anchors or [{}])[0].get("id") or ""),
         guards=task_guards,
@@ -737,7 +738,9 @@ def verify(root: Path) -> dict[str, Any]:
     from .probe import missing_fragments
 
     record["missing"] = missing_fragments(Path(state["root"]), list(record["probe_red"]))
-    worker_root = worktree / ".ag-artifacts" / "workers"
+    from .worker import artifacts_dir
+
+    worker_root = artifacts_dir(worktree) / "workers"
     worker_dirs = [item for item in worker_root.iterdir() if item.is_dir()] if worker_root.is_dir() else []
     missing_worker_results: list[str] = []
     for worker_path in worker_dirs:
@@ -902,6 +905,10 @@ def _cleanup(root: Path, task: dict[str, Any]) -> None:
     worktree = Path(str(task.get("worktree") or ""))
     task_id = str(task.get("id") or "")
     thaw_worktree(worktree)
+    if worktree.name:
+        side = worktree.parent / f"{worktree.name}.artifacts"
+        if side.is_dir():
+            shutil.rmtree(side, ignore_errors=True)
     if worktree.is_dir():
         git(root, "worktree", "remove", "--force", str(worktree), check=False)
     if task_id:

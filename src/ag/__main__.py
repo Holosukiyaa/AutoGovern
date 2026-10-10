@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("see", help="see snapshot; does not refuse finish").add_argument("root")
     anchor_p = sub.add_parser("anchor-map", help="write a Unicode intent-anchor map from anchor lines")
     anchor_p.add_argument("--portrait", default="")
-    anchor_p.add_argument("--out", default="", help="output text file; default is .ag-artifacts/anchor-maps/")
+    anchor_p.add_argument("--out", default="", help="output text file; default is beside the worktrees for this repo")
     anchor_p.add_argument("--title", default="意图锚点图")
     worker_create_p = sub.add_parser(
         "worker-create",
@@ -359,7 +359,9 @@ def main(argv: list[str] | None = None) -> int:
                 raise ChainBroken("no active AG worktree; ag_start first")
             if not bool(state.get("intent_map_confirmed")):
                 raise ChainBroken("intent map is not confirmed; user approval required")
-            worker_root = worktree / ".ag-artifacts" / "workers"
+            from .worker import artifacts_dir
+
+            worker_root = artifacts_dir(worktree) / "workers"
             if worker_count(worktree) >= MAX_WORKERS:
                 raise ChainBroken(f"worker limit reached: at most {MAX_WORKERS} workers per task")
             anchors = [
@@ -416,7 +418,9 @@ def main(argv: list[str] | None = None) -> int:
             worktree = Path(str((state.get("task") or {}).get("worktree") or ""))
             if not worktree.is_dir():
                 raise ChainBroken("no active AG worktree; ag_start first")
-            path = worktree / ".ag-artifacts" / "workers" / args.worker_id / "live.jsonl"
+            from .worker import worker_dir
+
+            path = worker_dir(worktree, args.worker_id) / "live.jsonl"
             if not path.is_file():
                 raise ChainBroken(f"worker log not found: {path.resolve()}")
             with path.open(encoding="utf-8") as handle:
@@ -427,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
                         print(line, end="", flush=True)
                     else:
                         time.sleep(max(args.interval, 0.05))
-                        if (worktree / ".ag-artifacts" / "workers" / args.worker_id / "result.json").is_file():
+                        if (worker_dir(worktree, args.worker_id) / "result.json").is_file():
                             break
             return 0
         if args.cmd == "checker-log":

@@ -23,10 +23,11 @@ def _kind(item):
 def default_artifact_path(title: str) -> Path:
     from subprocess import DEVNULL, check_output
 
-    root = Path.cwd()
-    output = check_output(["git", "rev-parse", "--show-toplevel"], cwd=root, stderr=DEVNULL, text=True).strip()
+    from .managed import ag_home, project_key, real_root
+
+    root = real_root(Path(check_output(["git", "rev-parse", "--show-toplevel"], cwd=Path.cwd(), stderr=DEVNULL, text=True).strip()))
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in title).strip("-")
-    return Path(output) / ".ag-artifacts" / "anchor-maps" / f"{safe or 'anchor-map'}.txt"
+    return ag_home() / "worktrees" / project_key(root) / "anchor-maps" / f"{safe or 'anchor-map'}.txt"
 
 
 def write_unicode(

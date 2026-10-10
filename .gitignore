@@ -3,11 +3,6 @@ __pycache__/
 *.pyc
 .venv/
 .ag-check/
-.ag-artifacts/*
-!.ag-artifacts/.gitkeep
-!.ag-artifacts/anchor-maps/
-.ag-artifacts/anchor-maps/*
-!.ag-artifacts/anchor-maps/.gitkeep
 tests/
 build/
 dist/

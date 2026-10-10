@@ -31,7 +31,7 @@ Critic config lives in `~/.ag/projects/<key>/critic.json`. Audit: sqlite `ag.sql
 
 ## Intent anchors
 
-Starting a task requires at least one anchor. `ag_start` refuses an empty portrait and writes one Unicode intent map under `.ag-artifacts/anchor-maps/`; the same text is returned as `anchor_preview`, and its path is `anchor_preview_path`. The map marks `current_anchor` as current attention, never as anchor completion. Before any product file is written, the AI must show that Unicode text to the user and wait for explicit approval. AG freezes the worktree until `confirm-map`; `ag_status` reports `intent-map-unconfirmed` as a hazard; `ag_verify` and `ag_finish` refuse while the map is unconfirmed. AG copies the Unicode map into `AG_HOME/projects/<key>/anchor-maps/` and records an `anchor-preview` timeline step, so the evidence survives worktree cleanup.
+Starting a task requires at least one anchor. `ag_start` refuses an empty portrait and writes one Unicode intent map beside the worktree at `~/.ag/worktrees/<key>/<task>.artifacts/anchor-maps/`; the same text is returned as `anchor_preview`, and its path is `anchor_preview_path`. The map marks `current_anchor` as current attention, never as anchor completion. Before any product file is written, the AI must show that Unicode text to the user and wait for explicit approval. AG freezes the worktree until `confirm-map`; `ag_status` reports `intent-map-unconfirmed` as a hazard; `ag_verify` and `ag_finish` refuse while the map is unconfirmed. AG copies the Unicode map into `AG_HOME/projects/<key>/anchor-maps/` and records an `anchor-preview` timeline step, so the evidence survives worktree cleanup.
 
 ```text
 anchor: keep the semantic workbench behavior unchanged
@@ -69,7 +69,7 @@ Create a vendor-neutral worker dossier inside the active AG worktree:
 python -m ag worker-create C:\repo --portrait "Done looks like ..." --anchor "keep auth behavior unchanged" --hard-anchor "do not run ag finish" --write-allow src/auth --write-allow tests/auth
 ```
 
-The dossier contains `task.json` and `TASK.md` under `.ag-artifacts/workers/<worker-id>/`. Any subagent CLI can implement it as an adapter. The worker writes `result.json` with schema `ag.worker.result.v1`, including `status`, `changed_files`, `anchor_receipt`, `evidence`, and `open_questions`. Read and validate it with:
+The dossier contains `task.json` and `TASK.md` under `~/.ag/worktrees/<key>/<task>.artifacts/workers/<worker-id>/`. Any subagent CLI can implement it as an adapter. The worker writes `result.json` with schema `ag.worker.result.v1`, including `status`, `changed_files`, `anchor_receipt`, `evidence`, and `open_questions`. Read and validate it with:
 
 ```powershell
 python -m ag worker-read C:\repo <worker-id>
@@ -84,7 +84,7 @@ AG can launch a Grok dossier as an external worker provider:
 python -m ag worker-run C:\repo <worker-id> --provider grok
 ```
 
-The provider is optional and vendor-neutral. It does not make Grok a Codex-native subagent; AG remains the commander and the delivery gate. `worker-run` streams stdout/stderr to the terminal while appending every line to `.ag-artifacts/workers/<worker-id>/live.jsonl`. Use `python -m ag worker-log C:\repo <worker-id>` to tail that rolling output from another terminal. The command discovers `grok` from `PATH`, `~/.grok/bin`, or `AG_GROK_COMMAND`; `--timeout` is optional. Grok runs without its own subagents and with shell commands routed through `guard.py`; governance commands, `git commit/merge/rebase/push`, and scripts outside `--write-allow` are refused by the worker guard.
+The provider is optional and vendor-neutral. It does not make Grok a Codex-native subagent; AG remains the commander and the delivery gate. `worker-run` streams stdout/stderr to the terminal while appending every line to that worker's `live.jsonl` beside the worktree. Use `python -m ag worker-log C:\repo <worker-id>` to tail that rolling output from another terminal. The command discovers `grok` from `PATH`, `~/.grok/bin`, or `AG_GROK_COMMAND`; `--timeout` is optional. Grok runs without its own subagents and with shell commands routed through `guard.py`; governance commands, `git commit/merge/rebase/push`, and scripts outside `--write-allow` are refused by the worker guard.
 
 Configured critic and switch chats stream their incremental reasoning/content into `~/.ag/projects/<key>/critic-live.jsonl` and `switch-live.jsonl`. Tail either stream with `python -m ag checker-log C:\repo critic` or `... switch`. These files are append-only process evidence, not acceptance reports.
 
@@ -124,7 +124,7 @@ Write a Unicode attention route from portrait anchor lines:
 python -m ag anchor-map --portrait "anchor: 先看见症状`nanchor!: 禁止自动开刀" --title "意图锚点图"
 ```
 
-By default, generated maps go to `.ag-artifacts/anchor-maps/` as a `.txt` file, which is git-ignored. Use `--out` only when the user explicitly requests another location. During an active task `status` rewrites that Unicode file; after `verify`, the current-attention marker moves to the last route anchor.
+By default, a one-off map goes to `~/.ag/worktrees/<key>/anchor-maps/` as a `.txt` file, outside the checkout. Use `--out` only when the user explicitly requests another location. During an active task `status` rewrites that Unicode file; after `verify`, the current-attention marker moves to the last route anchor.
 
 `ag_verify` returns an `evidence` object with test status/tails, probe verdicts/tails, critic and switch outcomes/report ids/stores/models, the Unicode anchor path and preview, current attention anchor, worker result status, verified tree digest, and timings. Report the evidence, not only the report ids.
 

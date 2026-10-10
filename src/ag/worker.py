@@ -18,8 +18,14 @@ MAX_WORKERS = 3
 LOG_SCHEMA = "ag.worker-log.v1"
 
 
+def artifacts_dir(worktree: Path) -> Path:
+    """Temp files sit beside the worktree, not inside the checkout."""
+    worktree = Path(worktree)
+    return worktree.parent / f"{worktree.name}.artifacts"
+
+
 def worker_count(worktree: Path) -> int:
-    worker_root = worktree / ".ag-artifacts" / "workers"
+    worker_root = artifacts_dir(worktree) / "workers"
     if not worker_root.is_dir():
         return 0
     return sum(1 for item in worker_root.iterdir() if item.is_dir())
@@ -185,7 +191,7 @@ def run_task(
     log_path = append_log(worktree, worker_id, phase="start", provider=provider, command=executable)
     environment = os.environ.copy()
     environment["AG_WORKER_WRITE_ROOTS"] = json.dumps(
-        [str((worktree / item).resolve()) for item in write_allow]
+        [str((worktree / item).resolve()) for item in write_allow] + [str(directory.resolve())]
     )
     environment["AG_WORKER_CWD"] = str(worktree)
     argv = grok_argv(executable, worktree=worktree, prompt_path=prompt_path, guard_path=guard_path)
@@ -275,7 +281,7 @@ def run_task(
 
 def worker_dir(worktree: Path, worker_id: str = "") -> Path:
     worker_id = worker_id.strip() or f"w-{uuid.uuid4().hex[:8]}"
-    return worktree / ".ag-artifacts" / "workers" / worker_id
+    return artifacts_dir(worktree) / "workers" / worker_id
 
 
 def create_task(
