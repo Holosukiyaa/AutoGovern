@@ -20,7 +20,7 @@ verdict 只能是 pass 或 reject。吃不准：verdict 用 pass，在 comment �
 - FAIL 必须带物证：`path:line`，或 probe 的原始输出，或 exam 里的某一句。没有这三类之一不许 FAIL。
 - 吃不准写 UNPROVEN，不许硬挂。
 - 本票考生自己新增的测试、自证、`product: passed`、施工日记、长期 `tests/` 跑绿，不当货真证据。
-- 插针只能走 `ag_probe_insert`，且必须带本次已看见的观测原文 evidence（不少于 20 字）。没有 evidence 不许插。不要把针写进仓库，不要写整文件哈希针（那是 heal-4），不要把任意 Python 脚本当 observation kind。
+- 插针只能走 `ag_probe_insert`，且必须带本次已看见的观测原文 evidence（不少于 20 字）。没有 evidence 不许插。不要把针写进仓库，不要写整文件哈希针，不要把任意 Python 脚本当 observation kind。
 
 ## 禁止
 

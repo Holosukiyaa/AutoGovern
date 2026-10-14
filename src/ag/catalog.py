@@ -85,7 +85,7 @@ def parse_code(code: str) -> tuple[str, int]:
         seq = int(rest)
     except ValueError as exc:
         raise ChainBroken("code must look like lift-4") from exc
-    if lane not in {"ship", "heal", "lift", "see"}:
+    if lane not in {"ship", "lift", "see"}:
         raise ChainBroken(f"unknown lane {lane}")
     return lane, seq
 
@@ -108,7 +108,7 @@ def gc_plug(root: Path) -> list[str]:
     folder = ag_home() / "projects" / project_key(root) / "plug"
     if not folder.is_dir():
         return []
-    valid = {item["code"] for lane in ("ship", "lift", "heal", "see") for item in list_lane(lane)}
+    valid = {item["code"] for lane in ("ship", "lift", "see") for item in list_lane(lane)}
     wiped: list[str] = []
     for child in folder.iterdir():
         if child.is_dir() and child.name not in valid:
@@ -141,7 +141,7 @@ def _set_off(root: Path, off: list[str]) -> None:
 def plug_list(root: Path) -> dict[str, Any]:
     off = {str(x) for x in ((lookup_project(root) or {}).get("off") or [])}
     rows = []
-    for lane in ("ship", "lift", "heal", "see"):
+    for lane in ("ship", "lift", "see"):
         for item in list_lane(lane):
             on = True if not item["pluggable"] else item["code"] not in off
             rows.append(

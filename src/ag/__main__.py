@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 from .loop import abandon, confirm_map, enroll, finish, hook_main, start, status, unenroll, verify
-from .heal import run as heal_run
 from .lift import run as lift_run
 from .see import run as see_run
 from .see import usage
@@ -72,11 +71,6 @@ def main(argv: list[str] | None = None) -> int:
     start_p.add_argument("--guard", action="append", default=[], help="guard rule shown beside the route; repeatable")
     start_p.add_argument("--default", action="append", default=[], help="negotiable default shown beside the route; repeatable")
     start_p.add_argument("--hard-anchor", action="append", default=[], help="hard anchor only from explicit user/project rule; repeatable")
-    start_p.add_argument(
-        "--skip-pending",
-        action="store_true",
-        help="do not pop a mess repair ticket; use --portrait as given",
-    )
     sub.add_parser("verify", help="run enrolled tests and pin the tree").add_argument("root")
     sub.add_parser("confirm-map", help="record user approval of the current intent map").add_argument("root")
     sub.add_parser("finish", help="ff-only if digest matches").add_argument("root")
@@ -84,7 +78,6 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("unenroll", help="remove the hook and restore previous hooksPath").add_argument("root")
     sub.add_parser("usage", help="see lane: help/block counts per ship item").add_argument("root")
     sub.add_parser("lift", help="lift advice; does not refuse finish").add_argument("root")
-    sub.add_parser("heal", help="heal findings; does not refuse finish").add_argument("root")
     sub.add_parser("see", help="see snapshot; does not refuse finish").add_argument("root")
     anchor_p = sub.add_parser("anchor-map", help="write a Unicode intent-anchor map from anchor lines")
     anchor_p.add_argument("--portrait", default="")
@@ -200,20 +193,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     log_c.add_argument("root")
     log_c.add_argument("--limit", type=int, default=20, help="newest last; default 20")
-    patrol_p = sub.add_parser(
-        "heal-patrol",
-        help="patrol at a human-chosen gear; does not refuse finish",
-    )
-    patrol_p.add_argument("root")
-    patrol_p.add_argument(
-        "--gear",
-        default="local",
-        choices=["probes", "local", "repo", "mess"],
-        help="default local (needs --path). probes=existing needles; repo=full scan; mess=queue a repair",
-    )
-    patrol_p.add_argument("--path", action="append", dest="paths", help="local gear: repository-relative path; repeatable")
-    patrol_p.add_argument("--tree", default="", help="scan this tree (worktree); store still uses enrolled root")
-    patrol_p.add_argument("--max-lines", type=int, default=0, help="oversized threshold; default 800")
     sub.add_parser("critic-prompt", help="print the read-only critic startup prompt")
     run_s = sub.add_parser(
         "switch-run",
@@ -321,23 +300,6 @@ def main(argv: list[str] | None = None) -> int:
             from .critic import list_log
 
             print(json.dumps(list_log(Path(args.root), limit=args.limit), ensure_ascii=False, indent=2))
-            return 0
-        if args.cmd == "heal-patrol":
-            from .heal_patrol import patrol
-
-            print(
-                json.dumps(
-                    patrol(
-                        Path(args.root),
-                        gear=args.gear,
-                        tree=Path(args.tree) if args.tree else None,
-                        max_lines=args.max_lines or None,
-                        paths=args.paths,
-                    ),
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
             return 0
         if args.cmd == "probe":
             return _probe_main(args)
@@ -499,7 +461,6 @@ def main(argv: list[str] | None = None) -> int:
                         guards=args.guard,
                         defaults=args.default,
                         fixed=args.fixed,
-                        skip_pending=bool(args.skip_pending),
                     ),
                     ensure_ascii=False,
                     indent=2,
@@ -524,9 +485,6 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "lift":
             print(json.dumps(lift_run(root), ensure_ascii=False, indent=2))
-            return 0
-        if args.cmd == "heal":
-            print(json.dumps(heal_run(root), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "see":
             print(json.dumps(see_run(root), ensure_ascii=False, indent=2))

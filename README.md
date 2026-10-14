@@ -1,8 +1,8 @@
 # ag
 
-Four lanes that must not mix: **ship (交货)** · **heal (治病)** · **lift (抬正确率)** · **see (看见)**.
+Three lanes that must not mix: **ship (交货)** · **lift (抬正确率)** · **see (看见)**.
 
-Only ship may set `product` or refuse `finish`. heal / lift / see are advice or observation.
+Only ship may set `product` or refuse `finish`. lift / see are advice or observation.
 
 MCP delivery loop. Canonical checkout is not a work site.
 
@@ -26,12 +26,12 @@ Critic config lives in `~/.ag/projects/<key>/critic.json`. Audit: sqlite `ag.sql
 ## Strategy lanes
 
 - `ship` is the only delivery gate. It may set `product` and refuse `finish`.
-- `lift`, `heal`, and `see` are advice/observation. They never set `product` or refuse `finish`.
-- Strategy points are available through `ag lift`, `ag heal`, and `ag see` for an enrolled repository.
+- `lift` and `see` are advice/observation. They never set `product` or refuse `finish`.
+- Strategy points are available through `ag lift` and `ag see` for an enrolled repository.
 
 ## Intent anchors
 
-Starting a task requires a locked result or at least one anchor. `ag_start` writes one Unicode intent map beside the worktree at `~/.ag/worktrees/<key>/<task>.artifacts/anchor-maps/`. The map's fixed block is the done-state taken from `fixed`, from `固定:` / `做成之后:` lines, or from the portrait itself. Hard rules sit in that block. The route lists only unsettled attention anchors. Later status calls redraw the route and do not replace the fixed lines. The same text is returned as `anchor_preview`, and its path is `anchor_preview_path`. The map marks `current_anchor` as current attention, never as anchor completion. The first successful `ag_start` also returns `anchor_brief`, a short template, and does not include the skill text. Another `ag_start` or `ag_status` on that same ticket before `confirm-map` returns `skill`, the full `skills/ag-anchor/SKILL.md`. After confirmation those fields are omitted. Before any product file is written, the AI must show that Unicode text to the user and wait for explicit approval. AG freezes the worktree until `confirm-map`; `ag_status` reports `intent-map-unconfirmed` as a hazard; `ag_verify` and `ag_finish` refuse while the map is unconfirmed. AG copies the Unicode map into `AG_HOME/projects/<key>/anchor-maps/` and records an `anchor-preview` timeline step, so the evidence survives worktree cleanup.
+Starting a task requires the gitignored file `.data/ticket.md` on the canonical checkout, plus a locked result or at least one anchor. That file is the only intent document. `ag_start` reads it and refuses when it is missing; the error names `.data/ticket.md`. `## 意图` is kept as written. Red lines from `## 红线` and from hard anchors are written back into `## 红线` and sealed into `.data/redlines.copy`. An empty red-line list still writes that copy. `## 现场` is rewritten at start, verify, and finish, and those writes do not replace `## 意图` or the sealed red lines. `anchor_preview` is this document and `anchor_preview_path` is its absolute path. The first successful `ag_start` also returns `anchor_brief`, a short template, and does not include the skill text. Another `ag_start` or `ag_status` on that same ticket before `confirm-map` returns `skill`, the full `skills/ag-anchor/SKILL.md`. After confirmation those fields are omitted. Before any product file is written, the AI must show that document to the user and wait for explicit approval. AG freezes the worktree until `confirm-map`; `ag_status` reports `intent-map-unconfirmed` as a hazard; `ag_verify` and `ag_finish` refuse while the map is unconfirmed.
 
 ```text
 anchor: keep the semantic workbench behavior unchanged
@@ -76,7 +76,7 @@ python -m ag worker-read C:\repo <worker-id>
 ```
 
 `anchor_receipt` records attention, not acceptance. AG still decides delivery through `ag_verify` and `ag_finish`.
-Every worker dossier carries the current Unicode intent map and its absolute path. AG allows at most 3 worker dossiers per task. `ag_verify` fails while any dossier is missing its `result.json`; the missing worker ids are returned as `verify.missing_worker_results` and `evidence.workers.missing_results`.
+Every worker dossier carries the current `.data/ticket.md` text and its absolute path. AG allows at most 3 worker dossiers per task. `ag_verify` fails while any dossier is missing its `result.json`; the missing worker ids are returned as `verify.missing_worker_results` and `evidence.workers.missing_results`.
 
 AG can launch a Grok dossier as an external worker provider:
 
@@ -94,7 +94,7 @@ Configured critic and switch chats stream their incremental reasoning/content in
 
 ## Symptom and ownership observation
 
-`see-10` records repeated CSS selectors across files, including selector counts, `!important` counts, consumers, and co-change history. `see-11` turns those symptoms into an ownership table with definers, modifiers, overriders, and consumers. `heal-5` classifies them as noise, incident, risk, suspected, or confirmed. `heal-6` writes a treatment ticket for a confirmed item with `cut=false`; treatment itself must go through `ag start` and the ship lane.
+`see-10` records repeated CSS selectors across files, including selector counts, `!important` counts, consumers, and co-change history. `see-11` turns those symptoms into an ownership table with definers, modifiers, overriders, and consumers.
 
 ## Critic config
 
@@ -116,16 +116,12 @@ python -m ag install-skill --target codex
 python -m ag install-skill --target grok
 ```
 
-## Anchor map
+## Ticket document
 
-Write a Unicode attention route from portrait anchor lines:
+The task intent is `.data/ticket.md` on the canonical checkout. `.data/` is gitignored. `ag_start` must see that file. Status, verify, and finish rewrite `## 现场` and leave `## 意图` and the sealed `## 红线` in place. The switch, last in `ag_verify`, receives those sealed lines as `redlines`.
 
-```powershell
-python -m ag anchor-map --portrait "anchor: 先看见症状`nanchor!: 禁止自动开刀" --title "意图锚点图"
-```
+`ag anchor-map` still writes a one-off text file outside the checkout when asked. It is not the task document, and status does not keep it updated.
 
-By default, a one-off map goes to `~/.ag/worktrees/<key>/anchor-maps/` as a `.txt` file, outside the checkout. Use `--out` only when the user explicitly requests another location. During an active task `status` rewrites that Unicode file; after `verify`, the current-attention marker moves to the last route anchor.
+`ag_verify` returns an `evidence` object with test status/tails, probe verdicts/tails, critic and switch outcomes/report ids/stores/models/`redlines`, the ticket path and preview, current attention anchor, worker result status, verified tree digest, and timings. Report the evidence, not only the report ids.
 
-`ag_verify` returns an `evidence` object with test status/tails, probe verdicts/tails, critic and switch outcomes/report ids/stores/models, the Unicode anchor path and preview, current attention anchor, worker result status, verified tree digest, and timings. Report the evidence, not only the report ids.
-
-`ag_finish` returns `anchor_progress`: every anchor with id/kind/text, the absolute Unicode map path, and a reminder to compare the final result with the intent map before accepting delivery. Soft anchors are not marked complete automatically.
+`ag_finish` returns `anchor_progress`: every anchor with id/kind/text, the absolute ticket path, and a reminder to compare the final result with the intent document before accepting delivery. Soft anchors are not marked complete automatically.

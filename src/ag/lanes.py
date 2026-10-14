@@ -7,12 +7,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import heal, lift, see, ship
+from . import lift, see, ship
 
-# job: 交货 / 治病 / 抬正确率 / 看见
+# job: 交货 / 抬正确率 / 看见
 LANES = (
     ship,
-    heal,
     lift,
     see,
 )

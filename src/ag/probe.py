@@ -1,7 +1,6 @@
 """Out-of-tree observation probes. See lane. Never set product or refuse finish.
 
 Definitions live under AG_HOME/projects/<key>/probes.json, not the product tree.
-Heal-4 file-hash pins stay in plug/heal/4/probes.json and are not this store.
 """
 from __future__ import annotations
 

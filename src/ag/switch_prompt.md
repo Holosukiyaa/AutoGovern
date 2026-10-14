@@ -13,6 +13,15 @@ verdict 只能是 pass 或 reject。pass = 放行 finish。reject = 拒绝 finis
 - this_ticket_checks（工地 `.ag-check/`，可能 truncated）
 - probes
 - critic：只有 outcome / report_id / reason，是前一层批判，不是标准答案，更不是放行令
+- redlines：开工时封存的红线副本。空名单表示这张票没有红线
+
+## 红线
+
+对照 diff 和画像，看本轮有没有违反 redlines 里的任何一条。
+
+- 某一条被本轮改动违反：verdict 用 reject。对应 item 的 status 用 fail。evidence 写 path:line，或 portrait:加上那条红线原文。
+- redlines 为空：这一面没有红线。不要因为空名单拒绝。
+- 吃不准某条有没有被违反：verdict 用 reject。evidence 写 portrait:加上那条红线原文。
 
 ## 判定
 

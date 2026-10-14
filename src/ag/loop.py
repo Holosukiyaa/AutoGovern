@@ -447,7 +447,7 @@ def status(root: Path) -> dict[str, Any]:
         "product": product,
         "reminder": "process complete is not product passed",
         "worker_note": "After ag_verify cite critic.report_id and switch.report_id. No report bodies. Switch is the finish gate; critic is not.",
-        "intent_gate": "STOP: show anchor_preview to the user; the unicode file is anchor_preview_path. Wait for explicit user approval, then run confirm-map.",
+        "intent_gate": "STOP: show anchor_preview to the user; the file is .data/ticket.md at anchor_preview_path. Wait for explicit user approval, then run confirm-map.",
         "task": task,
         "portrait": (task or {}).get("portrait") if task else "",
         "anchors": (task or {}).get("anchors") if task else [],
@@ -467,48 +467,23 @@ def status(root: Path) -> dict[str, Any]:
     }
     if task:
         try:
-            from .anchor_map import attention_anchors, hard_rules, resolve_fixed, write_unicode
+            from .ticket_doc import ticket_path, write_scene
 
-            anchors = [dict(item) for item in (task.get("anchors") or []) if isinstance(item, dict)]
-            route = attention_anchors(anchors)
-            current_anchor = str(task.get("current_anchor") or (route[0].get("id") if route else ""))
-            if "fixed" not in task:
-                task["fixed"] = resolve_fixed(str(task.get("portrait") or ""), None)
-            if "fixed_rules" not in task:
-                task["fixed_rules"] = hard_rules(anchors)
-            stored = str(task.get("anchor_preview_path") or task.get("anchor_map_path") or "").strip()
-            if not stored:
-                raise ChainBroken("active task has no anchor map path")
-            preview_path = write_unicode(
-                title=f"ag-{task.get('id') or 'task'}",
-                portrait=str(task.get("portrait") or ""),
-                out=Path(stored),
-                anchors=anchors,
-                current_anchor=current_anchor,
-                guards=[str(item) for item in (task.get("guards") or [])],
-                defaults=[str(item) for item in (task.get("defaults") or [])],
-                fixed=list(task.get("fixed") or []),
-                fixed_rules=list(task.get("fixed_rules") or []),
-            )
-            anchor_preview = preview_path.read_text(encoding="utf-8")
-            task["anchor_map_path"] = str(preview_path.resolve())
-            task["anchor_preview_path"] = str(preview_path.resolve())
-            task["anchor_preview"] = anchor_preview
-            task["current_anchor"] = current_anchor
-            audit_preview = ag_home() / "projects" / key / "anchor-maps" / f"ag-{task.get('id') or 'task'}.txt"
-            audit_preview.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(preview_path, audit_preview)
-            task["audit_anchor_map_path"] = str(audit_preview)
-            task["audit_anchor_preview_path"] = str(audit_preview)
-            save_task(key, task)
-            out["anchor_map_path"] = task["anchor_map_path"]
-            out["anchor_preview_path"] = task["anchor_preview_path"]
-            out["anchor_preview"] = anchor_preview
-            out["current_anchor"] = current_anchor
-            out["fixed"] = list(task.get("fixed") or [])
-            out["fixed_rules"] = list(task.get("fixed_rules") or [])
-            out["intent_map_confirmed"] = bool(task.get("intent_map_confirmed"))
-            out["subagent"]["ready"] = bool(task.get("intent_map_confirmed"))
+            preview = write_scene(root, task, process=str(process), product=str(product))
+            if preview is not None:
+                preview_path = ticket_path(root).resolve()
+                task["anchor_map_path"] = str(preview_path)
+                task["anchor_preview_path"] = str(preview_path)
+                task["anchor_preview"] = preview
+                save_task(key, task)
+                out["anchor_map_path"] = task["anchor_map_path"]
+                out["anchor_preview_path"] = task["anchor_preview_path"]
+                out["anchor_preview"] = preview
+                out["current_anchor"] = task.get("current_anchor") or ""
+                out["fixed"] = list(task.get("fixed") or [])
+                out["fixed_rules"] = list(task.get("fixed_rules") or [])
+                out["intent_map_confirmed"] = bool(task.get("intent_map_confirmed"))
+                out["subagent"]["ready"] = bool(task.get("intent_map_confirmed"))
         except Exception:
             pass
         if not bool(task.get("intent_map_confirmed")):
@@ -519,12 +494,6 @@ def status(root: Path) -> dict[str, Any]:
             if not issued:
                 task["anchor_template_issued"] = True
                 save_task(key, task)
-    try:
-        from .store import pending_summary
-
-        out["pending_repairs"] = pending_summary(root)
-    except Exception:
-        out["pending_repairs"] = {"count": 0}
     try:
         from .see import run as see_run
 
@@ -539,7 +508,6 @@ def start(
     *,
     portrait: str = "",
     anchors: list[dict[str, Any]] | None = None,
-    skip_pending: bool = False,
     guards: list[str] | None = None,
     defaults: list[str] | None = None,
     fixed: list[str] | None = None,
@@ -573,41 +541,46 @@ def start(
     branch = git(root, "rev-parse", "--abbrev-ref", "HEAD")
     if branch in {"HEAD", ""}:
         raise ChainBroken("canonical HEAD is detached")
-    task_id = uuid.uuid4().hex[:8]
-    worktree = ag_home() / "worktrees" / key / task_id
-    worktree.parent.mkdir(parents=True, exist_ok=True)
-    git(root, "worktree", "add", "-b", f"ag/{task_id}", str(worktree), "HEAD")
+    from .anchor_map import attention_anchors, hard_rules, resolve_fixed
+    from .ticket_doc import collect_redlines, merge_anchors, require_ticket, seal, split_document, ticket_path
+
     chosen = str(portrait or "")
-    if not skip_pending:
-        from .store import pop_pending
-
-        head = pop_pending(root)
-        if isinstance(head, dict) and str(head.get("repair_portrait") or "").strip():
-            chosen = str(head.get("repair_portrait") or "")
-    from .anchor_map import attention_anchors, hard_rules, resolve_fixed, write_unicode
-    from .worker import artifacts_dir
-
-    task_anchors = parse_anchors(chosen) if anchors is None else [dict(item) for item in (anchors or []) if isinstance(item, dict)]
+    document = require_ticket(root)
+    intent_body, redline_body = split_document(document)
+    caller_anchors = None if anchors is None else [dict(item) for item in anchors if isinstance(item, dict)]
+    task_anchors = merge_anchors(parse_anchors(intent_body), caller_anchors)
     task_fixed = resolve_fixed(chosen, fixed)
     task_rules = hard_rules(task_anchors)
     if not task_fixed and not task_anchors:
         usage_note(root, "ship", 8, "block", "start without intent anchors")
         raise ChainBroken("intent sync required: provide a locked result or at least one attention anchor")
+    redlines = collect_redlines(redline_body, task_anchors)
     task_guards = [str(item).strip() for item in (guards or []) if str(item).strip()]
     task_defaults = [str(item).strip() for item in (defaults or []) if str(item).strip()]
     route = attention_anchors(task_anchors)
     current_id = str(route[0].get("id") or "") if route else ""
-    anchor_map = write_unicode(
-        title=f"ag-{task_id}",
-        portrait=chosen,
-        out=artifacts_dir(worktree) / "anchor-maps" / f"ag-{task_id}.txt",
-        anchors=task_anchors,
-        current_anchor=current_id,
-        guards=task_guards,
-        defaults=task_defaults,
-        fixed=task_fixed,
-        fixed_rules=task_rules,
-    )
+    task_id = uuid.uuid4().hex[:8]
+    worktree = ag_home() / "worktrees" / key / task_id
+    worktree.parent.mkdir(parents=True, exist_ok=True)
+    git(root, "worktree", "add", "-b", f"ag/{task_id}", str(worktree), "HEAD")
+    draft = {
+        "id": task_id,
+        "branch": branch,
+        "worktree": str(worktree),
+    }
+    try:
+        preview = seal(
+            root,
+            intent_body=intent_body,
+            redlines=redlines,
+            task=draft,
+            process="active",
+            product="pending",
+        )
+    except Exception:
+        git(root, "worktree", "remove", "--force", str(worktree), check=False)
+        raise
+    doc_path = str(ticket_path(root).resolve())
     save_task(
         key,
         {
@@ -617,14 +590,16 @@ def start(
             "worktree": str(worktree),
             "portrait": chosen,
             "anchors": task_anchors,
-            "anchor_map_path": str(anchor_map.resolve()),
-            "anchor_preview_path": str(anchor_map.resolve()),
+            "anchor_map_path": doc_path,
+            "anchor_preview_path": doc_path,
+            "anchor_preview": preview,
             "intent_map_confirmed": False,
             "current_anchor": current_id,
             "fixed": task_fixed,
             "fixed_rules": task_rules,
             "guards": task_guards,
             "defaults": task_defaults,
+            "redlines": redlines,
             "verified_tree": "",
             "verify": None,
         },
@@ -816,6 +791,7 @@ def verify(root: Path) -> dict[str, Any]:
     append_task_step(enrolled, task_id, "verify-critic", report_id=str(critic.get("report_id") or ""), outcome=str(critic.get("outcome") or ""), seconds=timings["critic_s"])
     from .switch import attach_verify as attach_switch
 
+    sealed_redlines = [str(item) for item in (task.get("redlines") or [])]
     switch = attach_switch(
         enrolled,
         worktree=worktree,
@@ -824,6 +800,7 @@ def verify(root: Path) -> dict[str, Any]:
         probe_red=probe_red,
         critic=critic,
         tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
+        redlines=sealed_redlines,
     )
     record["switch"] = switch
     record["evidence"]["switch"] = {
@@ -831,6 +808,7 @@ def verify(root: Path) -> dict[str, Any]:
         "report_id": switch.get("report_id"),
         "store": switch.get("store"),
         "model": switch.get("model"),
+        "redlines": list(switch.get("redlines") or sealed_redlines),
     }
     timings["switch_s"] = round(time.perf_counter() - t0 - timings.get("tests_s", 0) - timings.get("probes_s", 0) - timings.get("critic_s", 0), 3)
     append_task_step(enrolled, task_id, "verify-switch", report_id=str(switch.get("report_id") or ""), outcome=str(switch.get("outcome") or ""), seconds=timings["switch_s"])
@@ -894,6 +872,7 @@ def verify(root: Path) -> dict[str, Any]:
             "report_id": switch.get("report_id"),
             "store": switch.get("store"),
             "model": switch.get("model"),
+            "redlines": list(switch.get("redlines") or sealed_redlines),
         },
         "anchor_map_path": str((task or {}).get("anchor_map_path") or ""),
         "anchor_preview_path": str((task or {}).get("anchor_preview_path") or ""),
@@ -1023,6 +1002,9 @@ def _finish_after_thaw(
     usage_note(root, "ship", 7, "help", "matched")
     portrait = str(task.get("portrait") or "")
     product = _product([str(x) for x in (state.get("test_argv") or [])], task.get("verify") if isinstance(task.get("verify"), dict) else None)
+    from .ticket_doc import write_scene
+
+    write_scene(root, task, process="completed", product=product)
     head = git(root, "rev-parse", "HEAD")
     vblob = task.get("verify") if isinstance(task.get("verify"), dict) else None
     anchors = [dict(item) for item in (task.get("anchors") or []) if isinstance(item, dict)]

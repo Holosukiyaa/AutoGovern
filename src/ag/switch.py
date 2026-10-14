@@ -68,6 +68,20 @@ def _user_pack(packed: dict[str, Any], critic: dict[str, Any] | None) -> dict[st
     return seat_user_pack(packed, critic)
 
 
+def _sealed_redlines(root: Path) -> list[str]:
+    from .loop import load_task
+    from .managed import lookup_project, project_key
+
+    item = lookup_project(root)
+    if item is None:
+        return []
+    task = load_task(str(item.get("key") or project_key(root))) or {}
+    raw = task.get("redlines") if isinstance(task, dict) else None
+    if not isinstance(raw, list):
+        return []
+    return [str(line).strip() for line in raw if str(line).strip()]
+
+
 def switch_run(
     root: Path,
     *,
@@ -79,6 +93,7 @@ def switch_run(
     task_id: str = "",
     probe_red: list[str] | None = None,
     critic: dict[str, Any] | None = None,
+    redlines: list[str] | None = None,
 ) -> dict[str, Any]:
     from .seat import seat_run
 
@@ -93,6 +108,7 @@ def switch_run(
         task_id=task_id,
         probe_red=probe_red,
         critic=critic,
+        redlines=_sealed_redlines(root) if redlines is None else redlines,
     )
 
 
@@ -135,6 +151,7 @@ def attach_verify(
     probe_red: list[str],
     critic: dict[str, Any] | None = None,
     tests_failed: bool = False,
+    redlines: list[str] | None = None,
 ) -> dict[str, Any]:
     from .seat import attach_verify as seat_attach
 
@@ -147,6 +164,7 @@ def attach_verify(
         probe_red=probe_red,
         critic=critic,
         tests_failed=tests_failed,
+        redlines=redlines,
     )
     return raw if isinstance(raw, dict) else raw[0]
 

@@ -1,4 +1,4 @@
-"""Run lift/heal/see strategies. Advice only. Probes bind to lane-seq.
+"""Run lift/see strategies. Advice only. Probes bind to lane-seq.
 
 Handlers may persist only under catalog.plug_dir(root, lane, seq).
 Never write the product tree; unplug deletes that folder.
@@ -18,9 +18,6 @@ from .catalog import enabled, list_lane, plug_dir
 from .managed import load_managed, lookup_project, project_key, real_root
 from .see import note
 
-TTL = 7 * 86400
-_CSS_IMPORT = re.compile(r"""@import\s+(?:url\(\s*)?['"]([^'"]+)['"]""", re.I)
-_JS_BARREL = re.compile(r"""export\s+\*\s+from\s+['"]([^'"]+)['"]""")
 _CSS_CLASS = re.compile(r"""(?<![0-9A-Za-z_-])\.([A-Za-z_][\w-]{2,})""")
 _SKIP_DIR = {"node_modules", "dist", "__pycache__", ".git"}
 _DOOR_SUFFIX = {".css", ".py", ".js", ".mjs", ".ts", ".tsx"}
@@ -64,14 +61,6 @@ def _touched(root: Path) -> list[str]:
         if len(out) >= 24:
             break
     return out
-
-
-def _sha(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(65536), b""):
-            digest.update(chunk)
-    return digest.hexdigest()[:16]
 
 
 def _read_json(path: Path, default: Any) -> Any:
@@ -255,32 +244,6 @@ def _skip_rel(rel: str) -> bool:
     return bool(parts & _SKIP_DIR)
 
 
-def _resolve_spec(rel_file: str, spec: str) -> str | None:
-    spec = spec.split("?", 1)[0].split("#", 1)[0].strip()
-    if not spec or spec.startswith(("http://", "https://", "data:")):
-        return None
-    parts: list[str] = []
-    for piece in (_rel_posix(str(Path(rel_file).parent / spec))).split("/"):
-        if piece in ("", "."):
-            continue
-        if piece == "..":
-            if parts:
-                parts.pop()
-            continue
-        parts.append(piece)
-    return "/".join(parts) if parts else None
-
-
-def _py_reexport(text: str) -> bool:
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
-    if not lines:
-        return False
-    return all(
-        ln.startswith(("import ", "from ", "__all__")) or " import " in ln
-        for ln in lines
-    )
-
-
 def _scan_files(cwd: Path) -> list[str]:
     names = _git(cwd, "ls-files").splitlines() + _git(cwd, "ls-files", "-o", "--exclude-standard").splitlines()
     out: list[str] = []
@@ -296,110 +259,6 @@ def _scan_files(cwd: Path) -> list[str]:
         if len(out) >= 400:
             break
     return out
-
-
-def _doors(root: Path) -> dict[str, Any]:
-    cwd = _tree(root)
-    doors: list[dict[str, Any]] = []
-    guest_files: dict[str, list[str]] = {}
-    for rel in _scan_files(cwd):
-        path = cwd / rel
-        try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
-        except OSError:
-            continue
-        suffix = Path(rel).suffix.lower()
-        if suffix == ".css":
-            imported = []
-            for spec in _CSS_IMPORT.findall(text):
-                target = _resolve_spec(rel, spec)
-                if target:
-                    imported.append(target)
-            if imported:
-                doors.append({"kind": "css-import", "file": rel, "imports": imported[:24]})
-            for name in dict.fromkeys(_CSS_CLASS.findall(text)):
-                guest_files.setdefault(name, [])
-                if rel not in guest_files[name] and len(guest_files[name]) < 12:
-                    guest_files[name].append(rel)
-        elif suffix in {".js", ".mjs", ".ts", ".tsx"}:
-            barrels = []
-            for spec in _JS_BARREL.findall(text):
-                target = _resolve_spec(rel, spec)
-                if target:
-                    barrels.append(target)
-            if barrels:
-                doors.append({"kind": "js-barrel", "file": rel, "imports": barrels[:24]})
-        elif suffix == ".py" and Path(rel).name != "__init__.py" and _py_reexport(text):
-            doors.append({"kind": "py-reexport", "file": rel})
-    stack = []
-    for guest, files in guest_files.items():
-        if len(files) < 2:
-            continue
-        stack.append({"guest": guest, "kind": "css-selector", "doors": files})
-        if len(stack) >= 12:
-            break
-    for row in doors:
-        if row.get("kind") == "py-reexport":
-            rel = str(row["file"])
-            stem = Path(rel).stem
-            callers = [
-                o
-                for o in _git(cwd, "grep", "-l", "-I", stem).splitlines()
-                if _rel_posix(o) != rel
-            ][:8]
-            if callers:
-                stack.append({"guest": stem, "kind": "py-reexport", "doors": [rel], "callers": callers})
-            if len(stack) >= 12:
-                break
-    return {"schema": "ag.heal.doors.v1", "doors": doors[:40], "stack": stack}
-
-
-def heal_1(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    blob = _doors(root)
-    _write_json(plug_dir(root, "heal", 1) / "findings.json", {"t": time.time(), **blob})
-    return {"doors": len(blob["doors"]), "stack": len(blob["stack"]), "cases": blob["stack"][:8]}
-
-
-def heal_2(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    blob = _read_json(plug_dir(root, "heal", 1) / "findings.json", {})
-    stack = blob.get("stack") if isinstance(blob, dict) else None
-    if not isinstance(stack, list) or not stack:
-        stack = _doors(root).get("stack") or []
-    case = stack[0] if stack else None
-    return {"case": case, "next": "ag_start", "cut": False}
-
-
-def heal_3(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    blob = _read_json(plug_dir(root, "heal", 1) / "findings.json", {})
-    age = time.time() - float(blob.get("t") or 0) if isinstance(blob, dict) else TTL + 1
-    return {"stale": age > TTL, "age_s": int(age), "ttl_s": TTL}
-
-
-def heal_4(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    cwd = _tree(root)
-    path = plug_dir(root, "heal", 4) / "probes.json"
-    store = _read_json(path, {})
-    if not isinstance(store, dict):
-        store = {}
-    if not store:
-        blob = _read_json(plug_dir(root, "heal", 1) / "findings.json", {})
-        stack = blob.get("stack") if isinstance(blob, dict) else []
-        for case in (stack or [])[:4]:
-            if not isinstance(case, dict):
-                continue
-            for rel in (case.get("doors") or [])[:6]:
-                file_path = cwd / str(rel)
-                if str(rel) and file_path.is_file():
-                    store[str(rel)] = _sha(file_path)
-        _write_json(path, store)
-    red = []
-    for rel, pin in list(store.items())[:20]:
-        file_path = cwd / str(rel)
-        if not file_path.is_file():
-            red.append({"file": rel, "state": "missing"})
-        elif _sha(file_path) != pin:
-            red.append({"file": rel, "state": "changed"})
-    return {"pinned": len(store), "red": red}
 
 
 def see_1(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
@@ -624,86 +483,6 @@ def see_11(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     return {"ownership": rows}
 
 
-def _symptom_class(symptom: dict[str, Any]) -> dict[str, Any]:
-    files = len(symptom.get("files") or [])
-    important = int(symptom.get("important") or 0)
-    co_change = int(symptom.get("co_change") or 0)
-    consumers = len(symptom.get("consumers") or [])
-    if files < 2:
-        classification = "noise"
-    elif important == 0:
-        classification = "incident"
-    elif co_change == 0:
-        classification = "risk"
-    elif files >= 3 and important >= 5 and co_change >= 3:
-        classification = "confirmed"
-    else:
-        classification = "suspected"
-    return {
-        "locator": symptom.get("locator"),
-        "classification": classification,
-        "reason": {
-            "files": files,
-            "important": important,
-            "co_change": co_change,
-            "consumers": consumers,
-        },
-    }
-
-
-def heal_5(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    blob = _read_json(plug_dir(root, "see", 10) / "symptoms.json", {})
-    symptoms = blob.get("symptoms") if isinstance(blob, dict) else []
-    if not isinstance(symptoms, list) or not symptoms:
-        symptoms = _css_symptoms(root)
-    classifications = [_symptom_class(item) for item in symptoms[:8] if isinstance(item, dict)]
-    _write_json(
-        plug_dir(root, "heal", 5) / "triage.json",
-        {"t": time.time(), "items": classifications},
-    )
-    return {"items": classifications}
-
-
-def heal_6(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    blob = _read_json(plug_dir(root, "see", 10) / "symptoms.json", {})
-    symptoms = blob.get("symptoms") if isinstance(blob, dict) else []
-    if not isinstance(symptoms, list) or not symptoms:
-        symptoms = _css_symptoms(root)
-    ticket = None
-    for symptom in symptoms:
-        if not isinstance(symptom, dict):
-            continue
-        if _symptom_class(symptom).get("classification") != "confirmed":
-            continue
-        details = symptom.get("file_details") or []
-        if not details:
-            continue
-        keep = max(
-            details,
-            key=lambda item: (int(item.get("important") or 0), int(item.get("selectors") or 0)),
-        )
-        remove = [
-            str(item.get("file") or "")
-            for item in details
-            if str(item.get("file") or "") != str(keep.get("file") or "")
-        ]
-        ticket = {
-            "case": symptom.get("locator"),
-            "keep": str(keep.get("file") or ""),
-            "remove": remove,
-            "observe": [
-                "build passes",
-                "visual regression snapshot unchanged",
-                "duplicate selector count decreases",
-                "!important count does not increase",
-            ],
-            "cut": False,
-        }
-        break
-    if ticket is not None:
-        _write_json(plug_dir(root, "heal", 6) / "ticket.json", {"t": time.time(), **ticket})
-    return {"ticket": ticket}
-
 HANDLERS = {
     ("lift", 1): lift_1,
     ("lift", 2): lift_2,
@@ -719,12 +498,6 @@ HANDLERS = {
     ("lift", 12): lift_12,
     ("lift", 13): lift_13,
     ("lift", 14): lift_14,
-    ("heal", 1): heal_1,
-    ("heal", 2): heal_2,
-    ("heal", 3): heal_3,
-    ("heal", 4): heal_4,
-    ("heal", 5): heal_5,
-    ("heal", 6): heal_6,
     ("see", 1): see_1,
     ("see", 2): see_2,
     ("see", 3): see_3,

@@ -56,7 +56,6 @@ TOOLS = [
                 "fixed": {"type": "array", "items": {"type": "string"}},
                 "guards": {"type": "array", "items": {"type": "string"}},
                 "defaults": {"type": "array", "items": {"type": "string"}},
-                "skip_pending": {"type": "boolean"},
             },
             "required": ["root"],
         },
@@ -108,7 +107,6 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
             guards=guards,
             defaults=defaults,
             fixed=fixed,
-            skip_pending=bool(args.get("skip_pending")),
         )
     if name == "ag_verify":
         return verify(root)

@@ -332,7 +332,7 @@ def create_task(
         portrait.strip(),
         "",
         "## Intent map",
-        f"- Unicode map: `{intent_map_path}`",
+        f"- Ticket document: `{intent_map_path}`",
         "",
         "```text",
         anchor_preview.strip(),

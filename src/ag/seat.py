@@ -219,11 +219,13 @@ def seat_run(
     task_id: str = "",
     probe_red: list[str] | None = None,
     critic: dict[str, Any] | None = None,
+    redlines: list[str] | None = None,
 ) -> dict[str, Any]:
     spec = _spec(kind)
     packed = pack(root, exam=exam, exam_file=exam_file, base=base, head=head, tree=tree)
     if kind == "switch":
         packed = _user_pack(packed, critic)
+        packed["redlines"] = [str(item).strip() for item in (redlines or []) if str(item).strip()]
     cfg = load_config(root)
     configured = bool(cfg.get("error") or _configured(cfg))
     extra: dict[str, Any] = {
@@ -332,7 +334,9 @@ def attach_verify(
     probe_red: list[str],
     tests_failed: bool = False,
     critic: dict[str, Any] | None = None,
+    redlines: list[str] | None = None,
 ) -> dict[str, Any] | tuple[dict[str, Any], list[Any]]:
+    sealed = [str(item).strip() for item in (redlines or []) if str(item).strip()]
     cfg = load_config(enrolled)
     configured = bool(cfg.get("error") or _configured(cfg))
     blob: dict[str, Any] = {
@@ -358,6 +362,7 @@ def attach_verify(
                 task_id=task_id,
                 probe_red=probe_red,
                 critic=critic,
+                redlines=sealed,
             )
             logged = True
             blob = {
@@ -393,6 +398,8 @@ def attach_verify(
             task_id=task_id,
             probe_red=probe_red,
         )
+    if kind == "switch":
+        blob["redlines"] = sealed
     if kind == "critic":
         return blob, planted
     return blob
