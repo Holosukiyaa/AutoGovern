@@ -57,20 +57,26 @@ def _row(raw: sqlite3.Row) -> dict[str, Any]:
 
 
 def list_lane(lane: str) -> list[dict[str, Any]]:
-    with connect() as conn:
+    conn = connect()
+    try:
         rows = conn.execute(
             "SELECT * FROM strategy WHERE lane = ? ORDER BY seq",
             (lane,),
         ).fetchall()
-    return [_row(item) for item in rows]
+        return [_row(item) for item in rows]
+    finally:
+        conn.close()
 
 
 def get(lane: str, seq: int) -> dict[str, Any]:
-    with connect() as conn:
+    conn = connect()
+    try:
         raw = conn.execute(
             "SELECT * FROM strategy WHERE lane = ? AND seq = ?",
             (lane, seq),
         ).fetchone()
+    finally:
+        conn.close()
     if raw is None:
         raise KeyError(f"no strategy {lane}-{seq}")
     return _row(raw)
