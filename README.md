@@ -90,11 +90,11 @@ Configured critic and switch chats stream their incremental reasoning/content in
 
 ## Change-aware advice
 
-`lift-13` summarizes the task signal from the portrait, touched files, HEAD, and verify exit. It reports `changed=true` only when that signal changes. `lift-14` stores a raw task snapshot under `AG_HOME`; it is not product evidence and does not enter the repository. `lift-15` compares sealed red lines against the previous ticket and surfaces `dropped_redlines` without blocking start or finish. `lift-16` scans added diff lines on non-test files for silent exception swallowing, production mock/fixture references, and placeholder stubs. `lift-17` detects newly added package directories and suggests converging multi-touchpoint imports into a single composition-root mount point.
+`lift-13` summarizes the task signal from the portrait, touched files, HEAD, and verify exit. It reports `changed=true` only when that signal changes. `lift-14` stores a raw task snapshot under `AG_HOME`; it is not product evidence and does not enter the repository. `lift-15` compares sealed red lines against the previous ticket and surfaces `dropped_redlines` without blocking start or finish. `lift-16` scans added diff lines on non-test files for silent exception swallowing, production mock/fixture references, and placeholder stubs. `lift-17` detects newly added package directories and suggests converging multi-touchpoint imports into a single composition-root mount point. `lift-18` tracks consecutive ticket sequence (`ticket_seq`), enables strict anti-lazy review mode on round 3+ (`ticket_seq >= 3`), and records `last_thread_id`, `retried_lazy`, `scores`, and `redline_overlap_ratio` under `plug/lift-18/anti_lazy.json`.
 
 ## Symptom and ownership observation
 
-`see-10` records repeated CSS selectors across files, including selector counts, `!important` counts, consumers, and co-change history. `see-11` turns those symptoms into an ownership table with definers, modifiers, overriders, and consumers. `see-12` tracks suppression directive deltas (`suppression_delta`) and upward/reverse imports across languages. `see-13` reports seat/pack health (`critic-live.jsonl` and `switch-live.jsonl` sizes, sealed redlines, and binary/oversize `.ag-check` exclusions). `see-14` aggregates ticket history and recurring red lines from `.data/tickets/` and `plug_dir`.
+`see-10` records repeated CSS selectors across files, including selector counts, `!important` counts, consumers, and co-change history. `see-11` turns those symptoms into an ownership table with definers, modifiers, overriders, and consumers. `see-12` tracks suppression directive deltas (`suppression_delta`) and upward/reverse imports across languages. `see-13` reports seat/pack health (`critic-live.jsonl` and `switch-live.jsonl` sizes, sealed redlines, and binary/oversize `.ag-check` exclusions). `see-14` aggregates ticket history and recurring red lines from `.data/tickets/` and `plug_dir`. `see-15` records the one-front-one-back (`ticket` + single `switch`) review token ledger (`ticket_pack_chars`, `raw_file_chars`, `slimmed_file_chars`, `saved_chars`, `script_short_circuit`, and `script_digest` summary) under `plug/see-15/token_ledger.json`.
 
 ## Critic config
 
@@ -116,9 +116,13 @@ python -m ag install-skill --target codex
 python -m ag install-skill --target grok
 ```
 
-## Ticket document
+## Ticket document and one-front-one-back review (`ship-12`, `ship-13`, `lift-18`, `see-15`)
 
-The task intent is `.data/ticket.md` on the canonical checkout (`ship-12`). `.data/` is gitignored. `ag_start` must see that file, seals `## 红线` into `.data/redlines.copy`, and archives each ticket snapshot to `.data/tickets/<task_id>.md`. Status, verify, and finish rewrite `## 现场`, leave `## 意图` and the sealed `## 红线` in place, and update `.data/tickets/<task_id>.md`. Both critic and switch in `ag_verify` receive those sealed lines as `redlines`.
+The task intent is `.data/ticket.md` on the canonical checkout (`ship-12`). `.data/` is gitignored. `ag_start` must see that file, seals `## 红线` into `.data/redlines.copy`, and archives each ticket snapshot to `.data/tickets/<task_id>.md`. Status, verify, and finish rewrite `## 现场`, leave `## 意图` and the sealed `## 红线` in place, and update `.data/tickets/<task_id>.md`.
+
+AG uses a **0-Token deterministic script pre-screen + one-front-one-back (`ticket` at start, `switch` at verify) stateless DS review** architecture:
+- **Front gate (`ship-13`, `ticket` seat)**: `ag_start` runs `ticket_prescreen` locally (checking structure, positive/negative anchor chains, boilerplate redlines, `ticket_seq`, and cross-ticket overlap into `script_digest`) and launches a fresh stateless `ticket` thread (`thread_id`) scoring `goal_clarity`, `anchor_chain`, and `redline_focus` (`0-10`, pass `>= 7`) with an independent `understood_goal`. If configured and not `passed`, `confirm-map` soft-blocks worktree thawing; editing `.data/ticket.md` and re-running `ag_start` while unconfirmed re-seals and re-reviews in place. On round 3+ (`lift-18`, `ticket_seq >= 3`), deterministic anti-lazy checks trigger one automatic retry on rubber-stamp/copied reviews (`lazy-review`).
+- **Back gate (`see-15`, single `switch` seat)**: `ag_verify` runs `pack_prescreen` (syntax check, redline path/token collision scan, shortcut scan, `.ag-check/` assertion check) and pre-annotates `git diff` and windowed files (`> 12,000` chars slimmed to header + changed hunks) with exact `path:line` numbers. `ag_verify` calls `switch` once (mirroring `verify.critic` for compatibility and planting probes on reject), cutting token usage while preserving `path:line` evidence.
 
 `ag anchor-map` still writes a one-off text file outside the checkout when asked. It is not the task document, and status does not keep it updated.
 

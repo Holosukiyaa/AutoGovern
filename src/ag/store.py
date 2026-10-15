@@ -12,8 +12,8 @@ from .managed import ag_home, project_key, real_root
 
 DB_NAME = "ag.sqlite"
 PENDING_NAME = "pending_repairs.json"
-LLM_PREFIX = {"critic_event": "cr", "switch_event": "sw"}
-LLM_JSONL = {"critic_event": "critic.jsonl", "switch_event": "switch.jsonl"}
+LLM_PREFIX = {"critic_event": "cr", "switch_event": "sw", "ticket_event": "tr"}
+LLM_JSONL = {"critic_event": "critic.jsonl", "switch_event": "switch.jsonl", "ticket_event": "ticket.jsonl"}
 LLM_INSERT = """
 INSERT INTO {table} (
     ts, outcome, reason, configured, prompt_version, store,
@@ -97,6 +97,28 @@ def connect(root: Path) -> sqlite3.Connection:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ticket_event (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            configured INTEGER NOT NULL DEFAULT 0,
+            prompt_version TEXT NOT NULL DEFAULT '',
+            store TEXT NOT NULL DEFAULT '',
+            exam_sha256 TEXT NOT NULL DEFAULT '',
+            pack_sha256 TEXT NOT NULL DEFAULT '',
+            items_json TEXT NOT NULL DEFAULT '[]',
+            task_id TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            probe_red_json TEXT NOT NULL DEFAULT '[]',
+            allow_same_family INTEGER NOT NULL DEFAULT 0,
+            thinking TEXT NOT NULL DEFAULT '',
+            timings_json TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
     cols = {str(item[1]) for item in conn.execute("PRAGMA table_info(critic_event)").fetchall()}
     if "thinking" not in cols:
         conn.execute("ALTER TABLE critic_event ADD COLUMN thinking TEXT NOT NULL DEFAULT ''")
@@ -109,6 +131,10 @@ def connect(root: Path) -> sqlite3.Connection:
 def insert_llm_event(root: Path, table: str, row: dict[str, Any]) -> int:
     if table not in LLM_PREFIX:
         raise ValueError(table)
+    timings = dict(row.get("timings") or {}) if isinstance(row.get("timings"), dict) else {}
+    for extra_key in ("thread_id", "understood_goal", "summary", "scores", "doubts", "ticket_seq", "retried_lazy"):
+        if extra_key in row and extra_key not in timings and row[extra_key] not in (None, "", [], {}):
+            timings[extra_key] = row[extra_key]
     conn = connect(root)
     try:
         cur = conn.execute(
@@ -128,7 +154,7 @@ def insert_llm_event(root: Path, table: str, row: dict[str, Any]) -> int:
                 json.dumps(row.get("probe_red") or [], ensure_ascii=False),
                 1 if row.get("allow_same_family") else 0,
                 str(row.get("thinking") or "")[:20000],
-                json.dumps(row.get("timings") or {}, ensure_ascii=False),
+                json.dumps(timings, ensure_ascii=False),
             ),
         )
         conn.commit()
@@ -175,11 +201,18 @@ def _row_to_event(row: sqlite3.Row, prefix: str = "cr") -> dict[str, Any]:
             timings = {}
         if isinstance(timings, dict) and timings:
             out["timings"] = timings
+            for extra_key in ("thread_id", "understood_goal", "summary", "scores", "doubts", "ticket_seq", "retried_lazy"):
+                if extra_key in timings and extra_key not in out:
+                    out[extra_key] = timings[extra_key]
     return out
 
 
 def insert_switch_event(root: Path, row: dict[str, Any]) -> int:
     return insert_llm_event(root, "switch_event", row)
+
+
+def insert_ticket_event(root: Path, row: dict[str, Any]) -> int:
+    return insert_llm_event(root, "ticket_event", row)
 
 
 def list_llm_events(root: Path, table: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -206,6 +239,10 @@ def list_switch_events(root: Path, limit: int = 20) -> list[dict[str, Any]]:
 
 def list_critic_events(root: Path, limit: int = 20) -> list[dict[str, Any]]:
     return list_llm_events(root, "critic_event", limit=limit)
+
+
+def list_ticket_events(root: Path, limit: int = 20) -> list[dict[str, Any]]:
+    return list_llm_events(root, "ticket_event", limit=limit)
 
 
 def project_dir(root: Path) -> Path:

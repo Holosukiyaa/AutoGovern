@@ -452,6 +452,7 @@ def status(root: Path) -> dict[str, Any]:
         "worker_note": "After ag_verify cite critic.report_id and switch.report_id. No report bodies. Switch is the finish gate; critic is not.",
         "intent_gate": "STOP: show anchor_preview to the user; the file is .data/ticket.md at anchor_preview_path. Wait for explicit user approval, then run confirm-map.",
         "task": task,
+        "ticket_review": (task or {}).get("ticket_review") if task else None,
         "portrait": (task or {}).get("portrait") if task else "",
         "anchors": (task or {}).get("anchors") if task else [],
         "anchor_map_path": (task or {}).get("anchor_map_path") if task else "",
@@ -507,6 +508,35 @@ def status(root: Path) -> dict[str, Any]:
     return out
 
 
+def _run_ticket_review(
+    root: Path,
+    *,
+    intent_body: str,
+    portrait: str,
+    anchors: list[dict[str, Any]],
+    redlines: list[str],
+    task_id: str,
+) -> dict[str, Any]:
+    try:
+        from .seat import attach_ticket_review
+    except ImportError:
+        return {
+            "outcome": "unavailable",
+            "reason": "not-configured",
+            "configured": False,
+            "report_id": "",
+            "thread_id": "",
+        }
+    return attach_ticket_review(
+        root,
+        intent_body=intent_body,
+        portrait=portrait,
+        anchors=anchors,
+        redlines=redlines,
+        task_id=task_id,
+    )
+
+
 def start(
     root: Path,
     *,
@@ -530,21 +560,6 @@ def start(
     if not state["hook_ok"]:
         usage_note(root, "ship", 8, "block", "start hook missing")
         raise ChainBroken("hook is not installed; re-enroll")
-    existing = load_task(key)
-    if existing and Path(str(existing.get("worktree") or "")).is_dir():
-        try:
-            freeze_canonical(root)
-        except Exception:
-            thaw_canonical(root)
-            raise
-        return status(root)
-    if existing:
-        save_task(key, None)
-    if not _is_canonical(root):
-        raise ChainBroken("start from the canonical checkout")
-    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD")
-    if branch in {"HEAD", ""}:
-        raise ChainBroken("canonical HEAD is detached")
     from .anchor_map import attention_anchors, hard_rules, resolve_fixed
     from .ticket_doc import (
         collect_redlines,
@@ -555,8 +570,97 @@ def start(
         seal,
         split_document,
         ticket_path,
+        write_scene,
     )
 
+    existing = load_task(key)
+    if existing and Path(str(existing.get("worktree") or "")).is_dir():
+        existing_wt = Path(str(existing.get("worktree") or ""))
+        if not bool(existing.get("intent_map_confirmed")) and ticket_path(root).is_file():
+            document = require_ticket(root)
+            intent_body, redline_body = split_document(document)
+            chosen = str(portrait or existing.get("portrait") or "")
+            caller_anchors = None if anchors is None else [dict(item) for item in anchors if isinstance(item, dict)]
+            doc_anchors = parse_anchors(intent_body)
+            base_anchors = (
+                doc_anchors
+                if doc_anchors
+                else [dict(item) for item in (existing.get("anchors") or []) if isinstance(item, dict)]
+            )
+            task_anchors = merge_anchors(base_anchors, caller_anchors)
+            task_fixed = resolve_fixed(chosen, fixed if fixed is not None else existing.get("fixed"))
+            task_rules = hard_rules(task_anchors)
+            if not task_fixed and not task_anchors:
+                usage_note(root, "ship", 8, "block", "start without intent anchors")
+                raise ChainBroken("intent sync required: provide a locked result or at least one attention anchor")
+            redlines = collect_redlines(redline_body, task_anchors)
+            baseline_prev = list(
+                dict.fromkeys(
+                    list(existing.get("redlines") or [])
+                    + list(existing.get("dropped_redlines") or [])
+                    + previous_redlines(root)
+                )
+            )
+            dropped = dropped_redlines(baseline_prev, redlines)
+            route = attention_anchors(task_anchors)
+            current_id = str(route[0].get("id") or "") if route else ""
+            task_id = str(existing.get("id") or "")
+            existing["portrait"] = chosen
+            existing["anchors"] = task_anchors
+            existing["current_anchor"] = current_id
+            existing["fixed"] = task_fixed
+            existing["fixed_rules"] = task_rules
+            if guards is not None:
+                existing["guards"] = [str(item).strip() for item in guards if str(item).strip()]
+            if defaults is not None:
+                existing["defaults"] = [str(item).strip() for item in defaults if str(item).strip()]
+            existing["redlines"] = redlines
+            existing["dropped_redlines"] = dropped
+            preview = seal(
+                root,
+                intent_body=intent_body,
+                redlines=redlines,
+                task=existing,
+                process="active",
+                product="pending",
+            )
+            ticket_review = _run_ticket_review(
+                root,
+                intent_body=intent_body,
+                portrait=chosen,
+                anchors=task_anchors,
+                redlines=redlines,
+                task_id=task_id,
+            )
+            existing["ticket_review"] = ticket_review
+            preview = write_scene(root, existing, process="active", product="pending") or preview
+            doc_path = str(ticket_path(root).resolve())
+            existing["anchor_map_path"] = doc_path
+            existing["anchor_preview_path"] = doc_path
+            existing["anchor_preview"] = preview
+            save_task(key, existing)
+            append_task_step(
+                root,
+                task_id,
+                "re-seal",
+                ticket_review_outcome=str(ticket_review.get("outcome") or ""),
+                report_id=str(ticket_review.get("report_id") or ""),
+            )
+        try:
+            freeze_canonical(root)
+            freeze_worktree(existing_wt)
+        except Exception:
+            thaw_worktree(existing_wt)
+            thaw_canonical(root)
+            raise
+        return status(root)
+    if existing:
+        save_task(key, None)
+    if not _is_canonical(root):
+        raise ChainBroken("start from the canonical checkout")
+    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD")
+    if branch in {"HEAD", ""}:
+        raise ChainBroken("canonical HEAD is detached")
     chosen = str(portrait or "")
     document = require_ticket(root)
     intent_body, redline_body = split_document(document)
@@ -595,31 +699,40 @@ def start(
     except Exception:
         git(root, "worktree", "remove", "--force", str(worktree), check=False)
         raise
-    doc_path = str(ticket_path(root).resolve())
-    save_task(
-        key,
-        {
-            "id": task_id,
-            "branch": branch,
-            "source_head": git(root, "rev-parse", "HEAD"),
-            "worktree": str(worktree),
-            "portrait": chosen,
-            "anchors": task_anchors,
-            "anchor_map_path": doc_path,
-            "anchor_preview_path": doc_path,
-            "anchor_preview": preview,
-            "intent_map_confirmed": False,
-            "current_anchor": current_id,
-            "fixed": task_fixed,
-            "fixed_rules": task_rules,
-            "guards": task_guards,
-            "defaults": task_defaults,
-            "redlines": redlines,
-            "dropped_redlines": dropped,
-            "verified_tree": "",
-            "verify": None,
-        },
+    ticket_review = _run_ticket_review(
+        root,
+        intent_body=intent_body,
+        portrait=chosen,
+        anchors=task_anchors,
+        redlines=redlines,
+        task_id=task_id,
     )
+    doc_path = str(ticket_path(root).resolve())
+    task_blob: dict[str, Any] = {
+        "id": task_id,
+        "branch": branch,
+        "source_head": git(root, "rev-parse", "HEAD"),
+        "worktree": str(worktree),
+        "portrait": chosen,
+        "anchors": task_anchors,
+        "anchor_map_path": doc_path,
+        "anchor_preview_path": doc_path,
+        "anchor_preview": preview,
+        "intent_map_confirmed": False,
+        "current_anchor": current_id,
+        "fixed": task_fixed,
+        "fixed_rules": task_rules,
+        "guards": task_guards,
+        "defaults": task_defaults,
+        "redlines": redlines,
+        "dropped_redlines": dropped,
+        "ticket_review": ticket_review,
+        "verified_tree": "",
+        "verify": None,
+    }
+    preview = write_scene(root, task_blob, process="active", product="pending") or preview
+    task_blob["anchor_preview"] = preview
+    save_task(key, task_blob)
     try:
         freeze_canonical(root)
         freeze_worktree(worktree)
@@ -779,34 +892,39 @@ def verify(root: Path) -> dict[str, Any]:
     }
     timings["probes_s"] = round(time.perf_counter() - t_tests - timings["tests_s"], 3)
     append_task_step(enrolled, task_id, "verify-probes", probe_red=list(record["probe_red"]), seconds=timings["probes_s"])
-    from .critic import attach_verify
-
     portrait = str(task.get("portrait") or "").strip()
     anchor_exam = _anchor_exam(task)
     if anchor_exam:
         portrait = f"{portrait}\n\n{anchor_exam}" if portrait else anchor_exam
     probe_red = list(record["probe_red"])
     sealed_redlines = [str(item) for item in (task.get("redlines") or [])]
-    critic_params = inspect.signature(attach_verify).parameters
-    if "redlines" in critic_params or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in critic_params.values()):
-        critic, planted = attach_verify(
-            enrolled,
-            worktree=worktree,
-            portrait=portrait,
-            task_id=task_id,
-            probe_red=probe_red,
-            tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
-            redlines=sealed_redlines,
-        )
-    else:
-        critic, planted = attach_verify(
-            enrolled,
-            worktree=worktree,
-            portrait=portrait,
-            task_id=task_id,
-            probe_red=probe_red,
-            tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
-        )
+    from .switch import attach_verify as attach_switch
+
+    t_switch = time.perf_counter()
+    switch = attach_switch(
+        enrolled,
+        worktree=worktree,
+        portrait=portrait,
+        task_id=task_id,
+        probe_red=probe_red,
+        critic=None,
+        tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
+        redlines=sealed_redlines,
+    )
+    timings["switch_s"] = round(time.perf_counter() - t_switch, 3)
+    timings["critic_s"] = 0.0
+    planted = list(switch.get("probes_planted") or [])
+    if not planted and str(switch.get("outcome") or "") == "rejected":
+        from .probe import plant_from_reject
+        from .seat import report_path as seat_report_path
+
+        try:
+            sw_blob = json.loads(seat_report_path("switch", enrolled).read_text(encoding="utf-8"))
+            planted = list(plant_from_reject(enrolled, items=sw_blob.get("items"), tree=worktree) or [])
+        except Exception:
+            planted = []
+    critic = dict(switch)
+    critic["merged_into"] = "switch"
     if planted:
         record["probes_planted"] = planted
     record["critic"] = critic
@@ -815,21 +933,8 @@ def verify(root: Path) -> dict[str, Any]:
         "report_id": critic.get("report_id"),
         "store": critic.get("store"),
         "model": critic.get("model"),
+        "merged_into": "switch",
     }
-    timings["critic_s"] = round(time.perf_counter() - t0 - timings.get("tests_s", 0) - timings.get("probes_s", 0), 3)
-    append_task_step(enrolled, task_id, "verify-critic", report_id=str(critic.get("report_id") or ""), outcome=str(critic.get("outcome") or ""), seconds=timings["critic_s"])
-    from .switch import attach_verify as attach_switch
-
-    switch = attach_switch(
-        enrolled,
-        worktree=worktree,
-        portrait=portrait,
-        task_id=task_id,
-        probe_red=probe_red,
-        critic=critic,
-        tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
-        redlines=sealed_redlines,
-    )
     record["switch"] = switch
     record["evidence"]["switch"] = {
         "outcome": switch.get("outcome"),
@@ -838,7 +943,6 @@ def verify(root: Path) -> dict[str, Any]:
         "model": switch.get("model"),
         "redlines": list(switch.get("redlines") or sealed_redlines),
     }
-    timings["switch_s"] = round(time.perf_counter() - t0 - timings.get("tests_s", 0) - timings.get("probes_s", 0) - timings.get("critic_s", 0), 3)
     append_task_step(enrolled, task_id, "verify-switch", report_id=str(switch.get("report_id") or ""), outcome=str(switch.get("outcome") or ""), seconds=timings["switch_s"])
     timings["total_s"] = round(time.perf_counter() - t0, 3)
     record["timings"] = timings
@@ -894,6 +998,7 @@ def verify(root: Path) -> dict[str, Any]:
             "report_id": critic.get("report_id"),
             "store": critic.get("store"),
             "model": critic.get("model"),
+            "merged_into": "switch",
         },
         "switch": {
             "outcome": switch.get("outcome"),
@@ -926,6 +1031,22 @@ def confirm_map(root: Path) -> dict[str, Any]:
     if not task:
         raise ChainBroken("no open task; ag_start first")
     if not bool(task.get("intent_map_confirmed")):
+        tr = task.get("ticket_review") if isinstance(task.get("ticket_review"), dict) else {}
+        if bool(tr.get("configured")) and str(tr.get("outcome") or "").strip().casefold() not in {"passed", "pass", "allow"}:
+            usage_note(root, "ship", 13, "block", "confirm-map ticket review rejected")
+            append_task_step(
+                root,
+                str(task.get("id") or ""),
+                "confirm-map-refused",
+                reason=str(tr.get("reason") or "ticket-review-rejected"),
+                report_id=str(tr.get("report_id") or ""),
+            )
+            raise ChainBroken(
+                f"ticket-review-rejected: startup ticket failed review ({tr.get('reason') or tr.get('report_id') or tr.get('outcome')}); "
+                "revise .data/ticket.md and run ag_start to re-seal before confirm-map"
+            )
+        if bool(tr.get("configured")):
+            usage_note(root, "ship", 13, "help", "ticket review passed")
         task["intent_map_confirmed"] = True
         save_task(key, task)
         append_task_step(root, str(task.get("id") or ""), "intent-map-confirmed")

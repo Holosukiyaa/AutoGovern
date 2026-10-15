@@ -21,7 +21,21 @@ from .store import event_count, insert_critic_event, list_critic_events
 PACK_SCHEMA = "ag.critic-pack.v1"
 RUN_SCHEMA = "ag.critic-run.v1"
 MAX_FILE_CHARS = 100_000
+MAX_INLINE_FILE_CHARS = 12_000
+DIFF_WINDOW_RADIUS = 30
 MAX_CHECK_FILE_BYTES = 64_000
+_HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
+_BACKTICK_TOKEN_RE = re.compile(r"`([^`\n]+)`")
+_FILE_TOKEN_RE = re.compile(r"[\w./\\-]+\.(?:py|ts|tsx|js|css|json|md|sqlite|rs|go)")
+_SHORTCUT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("silent-except-pass", re.compile(r"\bexcept\b.*:\s*pass\b")),
+    ("mock-or-fixture", re.compile(r"\b(?:unittest\.mock|MagicMock|monkeypatch|pytest\.fixture)\b")),
+    ("todo-or-unimplemented", re.compile(r"\b(?:TODO|FIXME|NotImplementedError)\b")),
+    ("suppression-directive", re.compile(r"(?:#\s*type:\s*ignore|#\s*noqa|@ts-ignore|eslint-disable|!important)")),
+)
+_EXCEPT_HEADER_RE = re.compile(r"^\s*except\b.*:\s*(?:#.*)?$")
+_PASS_LINE_RE = re.compile(r"^\s*pass\b(?:\s*#.*)?$")
+_ASSERT_SIGNAL_RE = re.compile(r"\b(?:assert|AssertionError|unittest)\b")
 _BINARY_CHECK_SUFFIXES = {
     ".pyc",
     ".png",
@@ -222,6 +236,296 @@ def _file_entry(repo: Path, rel: str) -> dict[str, Any]:
     return {"path": rel, "content": text}
 
 
+def annotate_diff_with_lines(
+    diff_text: str,
+    max_chars: int = 48_000,
+) -> tuple[str, dict[str, list[int]]]:
+    touched_lines: dict[str, list[int]] = {}
+    out_lines: list[str] = []
+    rel = ""
+    old_lineno = 0
+    new_lineno = 0
+    in_hunk = False
+
+    def _record_line(path_rel: str, lineno: int) -> None:
+        if not path_rel or lineno <= 0:
+            return
+        bucket = touched_lines.setdefault(path_rel, [])
+        if lineno not in bucket:
+            bucket.append(lineno)
+
+    for line in str(diff_text or "").splitlines():
+        if line.startswith("diff --git "):
+            in_hunk = False
+            out_lines.append(line)
+            continue
+        if line.startswith("--- "):
+            in_hunk = False
+            out_lines.append(line)
+            continue
+        if line.startswith("+++ "):
+            in_hunk = False
+            raw_target = line[4:].strip()
+            if raw_target == "/dev/null":
+                rel = ""
+            elif raw_target.startswith("b/"):
+                rel = _posix(raw_target[2:])
+            else:
+                rel = _posix(raw_target)
+            out_lines.append(line)
+            continue
+        match = _HUNK_HEADER_RE.match(line)
+        if match:
+            old_lineno = int(match.group(1))
+            new_lineno = int(match.group(2))
+            in_hunk = True
+            out_lines.append(line)
+            continue
+        if in_hunk and rel:
+            if line.startswith("+"):
+                out_lines.append(f"{rel}:{new_lineno} | {line}")
+                _record_line(rel, new_lineno)
+                new_lineno += 1
+                continue
+            if line.startswith("-"):
+                out_lines.append(f"{rel}:{old_lineno} | {line}")
+                _record_line(rel, max(1, new_lineno))
+                old_lineno += 1
+                continue
+            if line.startswith(" ") or line == "":
+                out_lines.append(f"{rel}:{new_lineno} | {line}")
+                _record_line(rel, new_lineno)
+                old_lineno += 1
+                new_lineno += 1
+                continue
+        out_lines.append(line)
+
+    annotated_text = "\n".join(out_lines)
+    if diff_text.endswith("\n") and annotated_text:
+        annotated_text += "\n"
+    if max_chars > 0 and len(annotated_text) > max_chars:
+        annotated_text = annotated_text[:max_chars]
+    return annotated_text, touched_lines
+
+
+def _slim_file_entry(
+    repo: Path,
+    rel: str,
+    touched_lines: list[int] | None = None,
+) -> dict[str, Any]:
+    path = repo / rel
+    if not path.is_file():
+        return {"path": rel, "content": ""}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {"path": rel, "content": ""}
+    lines = text.splitlines()
+    if len(text) <= MAX_INLINE_FILE_CHARS:
+        numbered = "\n".join(f"{i}: {ln}" for i, ln in enumerate(lines, 1))
+        if len(numbered) > MAX_FILE_CHARS:
+            numbered = numbered[:MAX_FILE_CHARS]
+        return {
+            "path": rel,
+            "content": numbered,
+            "slimmed": False,
+            "original_chars": len(text),
+            "slimmed_chars": len(numbered),
+        }
+    total_lines = len(lines)
+    keep: set[int] = set(range(1, min(40, total_lines) + 1))
+    for ln in (touched_lines or [1]):
+        try:
+            center = int(ln)
+        except (TypeError, ValueError):
+            continue
+        start = max(1, center - DIFF_WINDOW_RADIUS)
+        end = min(total_lines, center + DIFF_WINDOW_RADIUS)
+        keep.update(range(start, end + 1))
+    sorted_keep = sorted(keep)
+    rendered: list[str] = []
+    prev: int | None = None
+    for lineno in sorted_keep:
+        if prev is not None and lineno > prev + 1:
+            rendered.append("  ... [unchanged lines omitted by script] ...")
+        rendered.append(f"{lineno}: {lines[lineno - 1]}")
+        prev = lineno
+    if sorted_keep and sorted_keep[-1] < total_lines:
+        rendered.append("  ... [unchanged lines omitted by script] ...")
+    windowed = "\n".join(rendered)
+    cap = MAX_INLINE_FILE_CHARS * 2
+    if len(windowed) > cap:
+        windowed = windowed[:cap]
+    return {
+        "path": rel,
+        "content": windowed,
+        "slimmed": True,
+        "truncated": True,
+        "original_chars": len(text),
+        "slimmed_chars": len(windowed),
+    }
+
+
+def _added_diff_lines(diff_text: str) -> list[tuple[str, int, str]]:
+    added: list[tuple[str, int, str]] = []
+    rel = ""
+    new_lineno = 0
+    in_hunk = False
+    for line in str(diff_text or "").splitlines():
+        if line.startswith(("diff --git ", "--- ")):
+            in_hunk = False
+            continue
+        if line.startswith("+++ "):
+            in_hunk = False
+            raw_target = line[4:].strip()
+            if raw_target == "/dev/null":
+                rel = ""
+            elif raw_target.startswith("b/"):
+                rel = _posix(raw_target[2:])
+            else:
+                rel = _posix(raw_target)
+            continue
+        match = _HUNK_HEADER_RE.match(line)
+        if match:
+            new_lineno = int(match.group(2))
+            in_hunk = True
+            continue
+        if in_hunk and rel:
+            if line.startswith("+"):
+                added.append((rel, new_lineno, line[1:]))
+                new_lineno += 1
+            elif line.startswith(" ") or line == "":
+                new_lineno += 1
+    return added
+
+
+def pack_prescreen(
+    repo: Path,
+    names: list[str],
+    diff_text: str,
+    redlines: list[str] | None = None,
+    ticket_checks: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    syntax_errors: list[str] = []
+    for rel in names:
+        path = repo / rel
+        if not path.is_file():
+            continue
+        if rel.endswith(".py"):
+            try:
+                source_text = path.read_text(encoding="utf-8-sig", errors="replace")
+                ast.parse(source_text, filename=rel)
+            except SyntaxError as exc:
+                syntax_errors.append(f"{rel}:{exc.lineno or 1}: SyntaxError: {exc.msg}")
+            except OSError:
+                continue
+        elif rel.endswith(".json"):
+            try:
+                source_text = path.read_text(encoding="utf-8-sig", errors="replace")
+                json.loads(source_text)
+            except json.JSONDecodeError as exc:
+                syntax_errors.append(f"{rel}:{exc.lineno or 1}: JSONDecodeError: {exc.msg}")
+            except OSError:
+                continue
+
+    _, touched_map = annotate_diff_with_lines(diff_text)
+    added_lines = _added_diff_lines(diff_text)
+
+    redline_collisions: list[dict[str, str]] = []
+    seen_collisions: set[tuple[str, str]] = set()
+    for rl in (redlines or []):
+        rl_text = str(rl or "").strip()
+        if not rl_text:
+            continue
+        tokens: list[str] = []
+        for tok in _BACKTICK_TOKEN_RE.findall(rl_text) + _FILE_TOKEN_RE.findall(rl_text):
+            cleaned = tok.strip()
+            if len(cleaned) >= 2 and cleaned not in tokens:
+                tokens.append(cleaned)
+        for tok in tokens:
+            if len(redline_collisions) >= 15:
+                break
+            tok_posix = _posix(tok)
+            for rel in names:
+                if tok_posix and (tok_posix == rel or rel.endswith("/" + tok_posix) or tok in rel):
+                    first_ln = (touched_map.get(rel) or [1])[0]
+                    ev = f"{rel}:{first_ln}"
+                    key = (tok, ev)
+                    if key not in seen_collisions:
+                        seen_collisions.add(key)
+                        redline_collisions.append(
+                            {"token": tok, "evidence": ev, "redline": rl_text[:80]}
+                        )
+                    if len(redline_collisions) >= 15:
+                        break
+            if len(redline_collisions) >= 15:
+                break
+            for rel, lineno, content in added_lines:
+                if tok in content:
+                    ev = f"{rel}:{lineno}"
+                    key = (tok, ev)
+                    if key not in seen_collisions:
+                        seen_collisions.add(key)
+                        redline_collisions.append(
+                            {"token": tok, "evidence": ev, "redline": rl_text[:80]}
+                        )
+                    if len(redline_collisions) >= 15:
+                        break
+
+    shortcut_signals: list[dict[str, str]] = []
+    seen_shortcuts: set[tuple[str, str]] = set()
+    prev_except_rel = ""
+    prev_except_line = -10
+    for rel, lineno, content in added_lines:
+        if rel.startswith(".ag-check/") or "/.ag-check/" in f"/{rel}":
+            continue
+        if rel.startswith("tests/") or "/test_" in f"/{rel}":
+            continue
+        if _EXCEPT_HEADER_RE.match(content):
+            prev_except_rel = rel
+            prev_except_line = lineno
+        elif (
+            prev_except_rel == rel
+            and lineno == prev_except_line + 1
+            and _PASS_LINE_RE.match(content)
+        ):
+            ev = f"{rel}:{lineno}"
+            key = ("silent-except-pass", ev)
+            if key not in seen_shortcuts and len(shortcut_signals) < 15:
+                seen_shortcuts.add(key)
+                shortcut_signals.append(
+                    {"kind": "silent-except-pass", "evidence": ev, "line": content.strip()[:120]}
+                )
+        for kind, pattern in _SHORTCUT_PATTERNS:
+            if pattern.search(content):
+                ev = f"{rel}:{lineno}"
+                key = (kind, ev)
+                if key not in seen_shortcuts and len(shortcut_signals) < 15:
+                    seen_shortcuts.add(key)
+                    shortcut_signals.append(
+                        {"kind": kind, "evidence": ev, "line": content.strip()[:120]}
+                    )
+        if len(shortcut_signals) >= 15:
+            break
+
+    checks_list = list(ticket_checks or [])
+    check_file_count = len(checks_list)
+    has_assertions = any(
+        bool(_ASSERT_SIGNAL_RE.search(str(item.get("content") or "")))
+        for item in checks_list
+        if isinstance(item, dict)
+    )
+    return {
+        "syntax_errors": syntax_errors,
+        "redline_collisions": redline_collisions,
+        "shortcut_signals": shortcut_signals,
+        "check_quality": {
+            "file_count": check_file_count,
+            "has_assertions": has_assertions,
+        },
+    }
+
+
 def _candidate_files(base: Path) -> list[Path]:
     return [base.with_suffix(".py"), base / "__init__.py"]
 
@@ -269,11 +573,17 @@ def _resolve_module(repo: Path, source: Path, module: str, level: int) -> str | 
 def _neighbors_from_file(repo: Path, rel: str, content: str) -> list[str]:
     if not rel.endswith(".py"):
         return []
+    source = repo / rel
+    raw_source = content
+    if source.is_file():
+        try:
+            raw_source = source.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            raw_source = content
     try:
-        tree = ast.parse(content)
+        tree = ast.parse(raw_source)
     except (SyntaxError, ValueError):
         return []
-    source = repo / rel
     found: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -341,12 +651,14 @@ def pack(
     base: str = "",
     head: str = "",
     tree: Path | None = None,
+    redlines: list[str] | None = None,
 ) -> dict[str, Any]:
     store = real_root(root)
     repo = real_root(Path(tree)) if tree is not None else store
     exam_text = _read_exam(exam, exam_file)
     diff_text, names = _changed_names(repo, str(base or "").strip(), str(head or "").strip())
-    changed = [_file_entry(repo, rel) for rel in names]
+    annotated_diff, touched_map = annotate_diff_with_lines(diff_text)
+    changed = [_slim_file_entry(repo, rel, touched_map.get(rel, [])) for rel in names]
     hops = neighbors(repo, changed)
     probe_run = (
         evaluate_probes(store, paths=names or None, awaken=False, tree=repo) if names else {"results": []}
@@ -354,14 +666,38 @@ def pack(
     results = probe_run.get("results") if isinstance(probe_run, dict) else []
     if not isinstance(results, list):
         results = []
+    checks = _ticket_checks(repo)
+    effective_redlines = _sealed_redlines(store) if redlines is None else redlines
+    script_digest = pack_prescreen(
+        repo,
+        names,
+        diff_text,
+        redlines=effective_redlines,
+        ticket_checks=checks,
+    )
+    raw_chars = sum(
+        int(item.get("original_chars") or len(str(item.get("content") or "")))
+        for item in changed
+    )
+    slimmed_chars = sum(
+        int(item.get("slimmed_chars") or len(str(item.get("content") or "")))
+        for item in changed
+    )
     return {
         "schema": PACK_SCHEMA,
         "exam": exam_text,
-        "diff": diff_text,
+        "diff": annotated_diff,
+        "annotated_diff": annotated_diff,
         "changed_files": changed,
         "neighbors": hops,
         "probes": results,
-        "this_ticket_checks": _ticket_checks(repo),
+        "this_ticket_checks": checks,
+        "script_digest": script_digest,
+        "token_stats": {
+            "raw_file_chars": raw_chars,
+            "slimmed_file_chars": slimmed_chars,
+            "saved_chars": max(0, raw_chars - slimmed_chars),
+        },
     }
 
 

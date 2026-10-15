@@ -148,8 +148,19 @@ def scene_text(task: dict[str, Any], *, process: str, product: str) -> str:
         f"product: {product}",
         f"worktree: {task.get('worktree') or ''}",
         f"branch: {task.get('branch') or ''}",
-        f"updated: {stamp}",
     ]
+    if isinstance(task.get("ticket_review"), dict):
+        tr = task["ticket_review"]
+        outcome = str(tr.get("outcome") or "").strip()
+        rid = str(tr.get("report_id") or "").strip()
+        tid = str(tr.get("thread_id") or "").strip()
+        if outcome:
+            rows.append(
+                f"ticket_review: {outcome}"
+                + (f" ({rid})" if rid else "")
+                + (f" [{tid}]" if tid else "")
+            )
+    rows.append(f"updated: {stamp}")
     return "\n".join(rows) + "\n"
 
 

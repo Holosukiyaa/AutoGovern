@@ -759,6 +759,117 @@ def lift_17(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     return {"new_modules": report}
 
 
+def lift_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
+    from .store import project_dir
+    from .ticket_doc import section_lines, split_document, tickets_dir
+
+    repo = _repo(root)
+    pdir = project_dir(repo)
+    tdir = tickets_dir(repo)
+    archived_files = (
+        sorted(
+            (p for p in tdir.glob("*.md") if p.is_file()),
+            key=lambda p: (p.stat().st_mtime, p.name),
+        )
+        if tdir.is_dir()
+        else []
+    )
+    archived_ids = {p.stem for p in archived_files}
+    tasks_dir = pdir / "tasks"
+    timeline_files = [p for p in tasks_dir.glob("*.json") if p.is_file()] if tasks_dir.is_dir() else []
+    timeline_ids = {p.stem for p in timeline_files}
+
+    task = _task(root) or {}
+    active_id = str(task.get("id") or "").strip()
+    union_ids = set(archived_ids) | set(timeline_ids)
+    if active_id:
+        union_ids.add(active_id)
+
+    ticket_last = _read_json(pdir / "ticket-last.json", {})
+    if not isinstance(ticket_last, dict):
+        ticket_last = {}
+    active_review = task.get("ticket_review") if isinstance(task.get("ticket_review"), dict) else {}
+    pack_blob = ticket_last.get("pack") if isinstance(ticket_last.get("pack"), dict) else {}
+    digest = (
+        pack_blob.get("script_digest")
+        if isinstance(pack_blob.get("script_digest"), dict)
+        else (
+            ticket_last.get("script_digest")
+            if isinstance(ticket_last.get("script_digest"), dict)
+            else (
+                active_review.get("script_digest")
+                if isinstance(active_review.get("script_digest"), dict)
+                else {}
+            )
+        )
+    )
+
+    digest_seq = int(
+        digest.get("ticket_seq")
+        or active_review.get("ticket_seq")
+        or ticket_last.get("ticket_seq")
+        or 0
+    )
+    base_seq = max(len(archived_files), len(timeline_files), len(union_ids), digest_seq)
+    if base_seq == 0 and (repo / ".data" / "ticket.md").is_file():
+        base_seq = 1
+    ticket_seq = base_seq
+    strict_round_mode = bool(ticket_seq >= 3)
+
+    last_thread_id = str(
+        active_review.get("thread_id")
+        or ticket_last.get("thread_id")
+        or pack_blob.get("thread_id")
+        or ""
+    )
+    retried_lazy = bool(
+        active_review.get("retried_lazy")
+        or ticket_last.get("retried_lazy")
+        or (ticket_last.get("timings") or {}).get("retried_lazy")
+    )
+    raw_scores = (
+        active_review.get("scores")
+        if isinstance(active_review.get("scores"), dict) and active_review.get("scores")
+        else (ticket_last.get("scores") if isinstance(ticket_last.get("scores"), dict) else {})
+    )
+    scores = dict(raw_scores)
+
+    if "redline_overlap_ratio" in digest and digest.get("redline_overlap_ratio") is not None:
+        redline_overlap_ratio = float(digest.get("redline_overlap_ratio") or 0.0)
+    elif "redline_overlap_ratio" in active_review and active_review.get("redline_overlap_ratio") is not None:
+        redline_overlap_ratio = float(active_review.get("redline_overlap_ratio") or 0.0)
+    elif "redline_overlap_ratio" in ticket_last and ticket_last.get("redline_overlap_ratio") is not None:
+        redline_overlap_ratio = float(ticket_last.get("redline_overlap_ratio") or 0.0)
+    else:
+        cur_red = set(_current_redlines(root, task))
+        prev_red: set[str] = set()
+        for fpath in reversed(archived_files):
+            if active_id and fpath.stem == active_id:
+                continue
+            try:
+                _, rbody = split_document(fpath.read_text(encoding="utf-8", errors="ignore"))
+                prev_red = set(section_lines(rbody))
+                if prev_red:
+                    break
+            except OSError:
+                continue
+        redline_overlap_ratio = (
+            round(len(cur_red & prev_red) / len(cur_red), 4) if cur_red and prev_red else 0.0
+        )
+
+    summary = {
+        "ticket_seq": ticket_seq,
+        "strict_round_mode": strict_round_mode,
+        "last_thread_id": last_thread_id,
+        "thread_id": last_thread_id,
+        "retried_lazy": retried_lazy,
+        "scores": scores,
+        "redline_overlap_ratio": redline_overlap_ratio,
+    }
+    _write_json(plug_dir(root, "lift", 18) / "anti_lazy.json", {"t": time.time(), **summary})
+    return summary
+
+
 _THERM_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".mjs", ".css", ".rs", ".go"}
 _SUPPRESS_RE = re.compile(
     r"(?:#\s*type:\s*"
@@ -1057,6 +1168,109 @@ def see_14(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
+def see_15(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
+    from .store import project_dir
+
+    repo = _repo(root)
+    pdir = project_dir(repo)
+    ticket_last = _read_json(pdir / "ticket-last.json", {})
+    if not isinstance(ticket_last, dict):
+        ticket_last = {}
+    switch_last = _read_json(pdir / "switch-last.json", {})
+    if not isinstance(switch_last, dict):
+        switch_last = {}
+
+    ticket_pack = ticket_last.get("pack") if isinstance(ticket_last.get("pack"), dict) else {}
+    ticket_token_stats = (
+        ticket_pack.get("token_stats") if isinstance(ticket_pack.get("token_stats"), dict) else {}
+    )
+    if ticket_pack.get("ticket_pack_chars") is not None:
+        ticket_pack_chars = int(ticket_pack.get("ticket_pack_chars") or 0)
+    elif ticket_token_stats.get("ticket_pack_chars") is not None:
+        ticket_pack_chars = int(ticket_token_stats.get("ticket_pack_chars") or 0)
+    elif ticket_pack:
+        ticket_pack_chars = len(json.dumps(ticket_pack, ensure_ascii=False))
+    else:
+        ticket_pack_chars = int(ticket_last.get("ticket_pack_chars") or 0)
+
+    switch_pack = switch_last.get("pack") if isinstance(switch_last.get("pack"), dict) else {}
+    token_stats = (
+        switch_pack.get("token_stats")
+        if isinstance(switch_pack.get("token_stats"), dict)
+        else (
+            switch_last.get("token_stats")
+            if isinstance(switch_last.get("token_stats"), dict)
+            else {}
+        )
+    )
+    raw_file_chars = int(token_stats.get("raw_file_chars") or 0)
+    slimmed_file_chars = int(token_stats.get("slimmed_file_chars") or 0)
+    saved_chars = (
+        int(token_stats.get("saved_chars") or 0)
+        if token_stats.get("saved_chars") is not None
+        else max(0, raw_file_chars - slimmed_file_chars)
+    )
+
+    raw_digest = (
+        switch_pack.get("script_digest")
+        if isinstance(switch_pack.get("script_digest"), dict)
+        else (
+            switch_last.get("script_digest")
+            if isinstance(switch_last.get("script_digest"), dict)
+            else {}
+        )
+    )
+    syntax_errors = list(raw_digest.get("syntax_errors") or [])
+    redline_collisions = list(raw_digest.get("redline_collisions") or [])
+    shortcut_signals = list(raw_digest.get("shortcut_signals") or [])
+    check_quality = (
+        dict(raw_digest.get("check_quality"))
+        if isinstance(raw_digest.get("check_quality"), dict)
+        else {}
+    )
+    script_digest_summary = {
+        "syntax_errors": syntax_errors,
+        "redline_collisions": redline_collisions,
+        "redline_collisions_count": len(redline_collisions),
+        "shortcut_signals": shortcut_signals,
+        "shortcut_signals_count": len(shortcut_signals),
+        "check_quality": check_quality,
+    }
+
+    task = _task(root) or {}
+    verify_blob = task.get("verify") if isinstance(task.get("verify"), dict) else {}
+    switch_verify = (
+        verify_blob.get("switch") if isinstance(verify_blob.get("switch"), dict) else {}
+    )
+    switch_reason = str(switch_last.get("reason") or switch_verify.get("reason") or "").strip()
+    ticket_reason = str(ticket_last.get("reason") or "").strip()
+    script_short_circuit = bool(
+        syntax_errors
+        or raw_digest.get("short_circuit")
+        or switch_last.get("script_short_circuit")
+        or verify_blob.get("script_short_circuit")
+        or switch_reason.startswith(("syntax", "tests-failed", "prescreen", "script-prescreen"))
+        or ticket_reason.startswith(("prescreen", "script-prescreen"))
+    )
+
+    summary = {
+        "single_verify_seat": True,
+        "ticket_pack_chars": ticket_pack_chars,
+        "raw_file_chars": raw_file_chars,
+        "slimmed_file_chars": slimmed_file_chars,
+        "saved_chars": saved_chars,
+        "script_short_circuit": script_short_circuit,
+        "token_stats": {
+            "raw_file_chars": raw_file_chars,
+            "slimmed_file_chars": slimmed_file_chars,
+            "saved_chars": saved_chars,
+        },
+        "script_digest": script_digest_summary,
+    }
+    _write_json(plug_dir(root, "see", 15) / "token_ledger.json", {"t": time.time(), **summary})
+    return summary
+
+
 HANDLERS = {
     ("lift", 1): lift_1,
     ("lift", 2): lift_2,
@@ -1075,6 +1289,7 @@ HANDLERS = {
     ("lift", 15): lift_15,
     ("lift", 16): lift_16,
     ("lift", 17): lift_17,
+    ("lift", 18): lift_18,
     ("see", 1): see_1,
     ("see", 2): see_2,
     ("see", 3): see_3,
@@ -1089,6 +1304,7 @@ HANDLERS = {
     ("see", 12): see_12,
     ("see", 13): see_13,
     ("see", 14): see_14,
+    ("see", 15): see_15,
 }
 
 
