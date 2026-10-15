@@ -1,125 +1,116 @@
 ---
 name: ag-anchor
 description: >
-  Use for any ag-governed delivery task, especially when onboarding a user,
-  configuring critic.json, or before ag_start when the user's one-sentence
-  request hides a route. Extract user-facing intent anchors with positive and
-  negative/boundary chains, keep them as attention rather than a step plan,
-  persist them through ag, and disclose deviations. Also use when the user says
-  锚点, 意图锚点, route, 配置 ag, or when a later suggestion conflicts with an
-  existing anchor. This skill does not replace ag; delivery still goes through
-  ag_start → confirm-map → work in <WORKTREE> → ag_verify → ag_finish.
+  Use before ag_start or during any ag-governed delivery task when the user's
+  request needs to be distilled into an observable done-state, positive and
+  negative/boundary behavior-chain anchors (anchor:), and narrow focused red
+  lines (## 红线) in <PROJECT_ROOT>/.data/ticket.md. Also use when the user says
+  锚点, 意图锚点, route, ticket.md, or when a later suggestion drifts from an
+  existing anchor.
 ---
 
-# ag intent anchors & AI delivery guide
+# `ag-anchor`：意图锚点提取与 `.data/ticket.md` 编写规范
 
-Intent anchors make the user's hidden route explicit without turning it into a
-step plan. `ag` remembers them in task state; the AI must read them at the
-start, while working, and before verification.
+意图锚点（Intent Anchors）用于把用户一句话需求背后隐含的完整业务路线显式化，而不是把它变成死板的步骤清单。`ag` 将意图锚点与红线持久化在任务状态中，AI 必须在开票前、施工中和交卷验货前始终对齐锚点。
 
-## Documentation & Variable Path Conventions
+## 关联技能包与路径占位符约定
 
-When assisting the user or diagnosing issues, consult the repository documentation:
-- **Top-level AI & User Entry**: [`AGENTS.md`](../../AGENTS.md)
-- **Usage & 6-Step Workflow Guide**: [`docs/guide.md`](../../docs/guide.md)
-- **Configuration Guide (`critic.json` & MCP)**: [`docs/configuration.md`](../../docs/configuration.md)
-- **Troubleshooting Manual**: [`docs/troubleshooting.md`](../../docs/troubleshooting.md)
+按职责查阅对应的独立 Skill：
+- **项目总入口**：[`AGENTS.md`](../../AGENTS.md)
+- **核心概念与 6 步工作流**：[`skills/ag-guide/SKILL.md`](../ag-guide/SKILL.md)
+- **独立审核配置与 MCP 挂载**：[`skills/ag-config/SKILL.md`](../ag-config/SKILL.md)
+- **常见报错与一键排障手册**：[`skills/ag-troubleshooting/SKILL.md`](../ag-troubleshooting/SKILL.md)
 
-Always use portable variable placeholders instead of hardcoded personal directory paths:
-- `<PROJECT_ROOT>`: Target repository root (canonical checkout, frozen read-only during active tasks)
-- `<AG_REPO_ROOT>`: `ag` repository root (when running from source)
-- `<WORKTREE>`: Active isolated task worktree (`<AG_HOME>/worktrees/<PROJECT_KEY>/<TASK_ID>`)
-- `<AG_HOME>`: `ag` state and configuration directory (default `~/.ag`)
-- `<PYTHON_EXECUTABLE>`: Python interpreter path (e.g., `python`)
+所有说明与命令统一使用动态路径占位符，严禁硬编码个人电脑目录：
+- `<PROJECT_ROOT>`：被治理的目标项目仓库根目录（任务进行中处于只读冻结状态）
+- `<AG_REPO_ROOT>`：`ag` 仓库根目录（源码运行或安装时使用）
+- `<WORKTREE>`：`ag_start` 创建的隔离工作树目录（`<AG_HOME>/worktrees/<PROJECT_KEY>/<TASK_ID>`）
+- `<AG_HOME>`：`ag` 状态与配置主目录（默认 `~/.ag`）
+- `<PYTHON_EXECUTABLE>`：Python 解释器路径（如 `python`）
 
-## AI Onboarding & Configuration Guide
+---
 
-When a user first sets up `ag` or asks how to start/configure/troubleshoot:
+## 一、开票逆向提炼法（Opening）
 
-1. **Inspect status and configuration guide**:
-   Run `ag_status(root="<PROJECT_ROOT>")` or `python -m ag config <PROJECT_ROOT>`.
-   Read `onboarding` (`step`, `next_action`, `enrolled`, `reviewer_ready`) and `config_guide` (`global_config_path`, `project_config_path`, `template`, `fields`, `api_key_env`, `api_key_present`).
-2. **Zero-pollution enrollment**:
-   If `enrolled` is `false`, run `ag_enroll(root="<PROJECT_ROOT>")` (`python -m ag enroll <PROJECT_ROOT>`). This automatically adds `.data/` and `.ag-check/` to `<PROJECT_ROOT>/.git/info/exclude` (never polluting `.gitignore`) and generates an initial `<PROJECT_ROOT>/.data/ticket.md` template if missing.
-3. **Guide standard JSON configuration (`critic.json`)**:
-   If the user wants independent DS review (`ticket` at start + `switch` at verify) and `reviewer_ready` is `false`, show them the standard JSON format from `config_guide.template` for `<AG_HOME>/critic.json` (or `<AG_HOME>/projects/<PROJECT_KEY>/critic.json`) and instruct them to set the environment variable named in `api_key_env` (e.g., `AG_CRITIC_API_KEY`). **Never ask for, read, or print raw API keys.**
-4. **Write high-quality `<PROJECT_ROOT>/.data/ticket.md`**:
-   - Under `## 意图`, write a plain-language `做成之后：` statement explaining the observable outcome.
-   - Write each `anchor:` with a complete **positive + negative/boundary behavior chain**: state where/what mechanism is built, what happens under normal conditions (`当……时……`), and how edge cases or violations are intercepted/handled (`若……则……`).
-   - Under `## 红线`, write 3–5 narrow, task-specific constraints (no generic boilerplate like "write clean code", and do not copy-paste unchanged red lines across consecutive tickets).
-5. **Handle `ticket-review-rejected` or `script-prescreen-rejected` in place**:
-   If `ag_start` reports `ticket_review.outcome == "rejected"`, inspect `reasons`, `suggestions`, `doubts`, and `script_digest`. Edit `<PROJECT_ROOT>/.data/ticket.md` to resolve the gaps and **re-run `ag_start` directly** (while unconfirmed, `ag_start` re-seals `.data/redlines.copy` and re-reviews in place without requiring `ag_abandon`).
+1. 仔细阅读用户的真实原话与项目既有规范。
+2. 先锁定业务终点，再逆向推演四个要素：
+   - **对象（object）**：具体改动哪几个模块、文件或交互表面？
+   - **机制（method）**：使用什么真实机制实现？
+   - **边界（scope）**：明确包含什么、明确排除什么？
+   - **验据（finish）**：什么机器可验证的证据能证明本轮完成？
+3. 不要反复向用户讨要“是否可以开始”的许可；合理的默认决策直接放入 `我替你定的`。
+4. 将提炼出的意图写入 `<PROJECT_ROOT>/.data/ticket.md` 及 `ag_start` 的 `portrait`：
+   - `anchor: <带正反向完整行为链路的软锚点>`
+   - `anchor!: <仅当源自用户或项目明确硬规则时使用的硬锚点>`
+5. 硬锚点（`anchor!:`）绝不能由 AI 凭空猜测生成；AI 可以建议升级，但必须标明来源。
+6. 若上述四个要素存在无法靠代码上下文确定的阻塞性未知项，停下来只问一个精炼的问题，严禁盲目脑补施工。
 
-## Opening
+---
 
-1. Read the user's actual words and the project instructions.
-2. Identify the endpoint, then work backwards:
-   - object: what concrete surface or code path is in play?
-   - method: which real mechanism will be used?
-   - scope: what is included and what is explicitly excluded?
-   - finish: what evidence makes this round complete?
-3. Do not ask for permission to proceed. Put reasonable defaults under
-   `我替你定的`.
-4. Write short anchor lines into `<PROJECT_ROOT>/.data/ticket.md` and the `ag_start` portrait:
-   - `anchor: <soft attention with positive + negative/boundary behavior chain>`
-   - `anchor!: <hard rule only when it follows from an explicit user/project rule>`
-5. A hard anchor is never invented from an AI guess. The AI may propose an
-   upgrade, but must label the source.
-6. If a blocking unknown remains (endpoint, method, scope, or finish cannot be
-   determined), stop and ask one concise question instead of inventing work.
+## 二、高质量 `<PROJECT_ROOT>/.data/ticket.md` 编写规范
 
-## Mandatory intent-map confirmation
+`<PROJECT_ROOT>/.data/ticket.md` 是唯一权威意图文档，缺失或未填写有效内容时 `ag_start` 会直接拒绝。
 
-After `ag_start` (once `ticket_review` passes or is unconfigured), stop immediately. Paste the returned `anchor_preview` to the user, give the
-absolute `<PROJECT_ROOT>/.data/ticket.md` path (`anchor_preview_path`), and wait. Do not create any worker/subagent or start
-implementation until the user explicitly confirms the intent map and
-`python -m ag confirm-map <PROJECT_ROOT>` has been run. The AI must never self-invoke `confirm-map`; it
-represents the user's approval.
+### 标准模板
 
-## While working
+```markdown
+# 票
 
-- Work strictly inside `<WORKTREE>`, never in `<PROJECT_ROOT>`.
-- Write one-off verification scripts for this ticket inside `<WORKTREE>/.ag-check/` (discarded upon `ag_finish`; never create standing `tests/`).
-- Re-read anchors before file edits and before changing direction.
-- Anchors are attention, not a checklist. They may be approached approximately.
-- If a suggestion drifts from a soft anchor, continue but disclose the drift.
-- If it conflicts with a hard anchor, state the conflict first and ask whether
-  the anchor should be revised.
-- Never silently rewrite or delete an anchor.
-- Do not turn soft anchors into a finish gate.
+## 意图
+做成之后：用大白话写清楚这轮改动完成后，用户或系统能观察到的真实结果（明确改什么对象、用什么机制、包含与排除什么边界，不少于 30 字）。
 
-## Layered intent map
+anchor: 在哪几个具体模块或文件中建立什么机制：当满足什么正常条件时产生什么预期结果，若遇到什么异常或违规边界则如何拦截或拒绝
+anchor: 在哪个交互或数据链路上收敛什么行为：当输入或状态变化时如何流转，若出现越界或缺失则如何兜底保护
 
-The intent document is canonical `<PROJECT_ROOT>/.data/ticket.md`. `ag_start` refuses without it.
+## 红线
+- 针对本票目标的具体禁令 1：明确指出不能破坏的接口契约、不能触碰的目录或严禁引入的做法。
+- 针对本票目标的具体禁令 2：聚焦本次改动的真实高风险边界（3~5 条即可，严禁写“代码要规范”“不能有 bug”等空泛套话）。
+```
 
-- Put the observable done-state in `fixed` or in portrait lines `固定:` / `做成之后:`.
-  `## 意图` is kept as written. Later status, verify, and finish rewrite only `## 现场`.
-  To change the locked intent after confirmation, abandon the ticket (`ag_abandon`) and start again.
-- Hard anchors are locked rules. They are sealed into `## 红线` and `.data/redlines.copy`
-  at start. A hard anchor still comes only from an explicit user or project rule.
-- Route anchors are only unsettled attention: soft, discoverable, defaulted,
-  or obsolete. They are middle stations, not restated acceptance rules.
-- Use verb-bearing declarative sentences of at least 20–25 characters. Name the
-  object, the direction, the positive path (`当……时……`), and the negative/boundary guard (`若……则……`).
-- Do not collapse an anchor into a bare slogan such as "make it trustworthy";
-  a good anchor can be followed without becoming a command list.
-- Guards are mandatory rules, passed as `--guard` / MCP `guards`. They render
-  in the GUARDS section and never join the START→END path.
-- Defaults are negotiable choices, passed as `--default` / MCP `defaults`.
-  They render in the DEFAULTS section and are not completion proof.
-- Avoid is a separate boundary, not a middle station.
+### 三大审票高分铁律（决定 `ticket` 席位能否一次通过）
 
-The document the user confirms is `<PROJECT_ROOT>/.data/ticket.md`. Do not keep a second intent map.
-Nine or more route anchors should prompt consolidation.
+1. **`## 意图` 大白话讲清可观测完成态**：
+   - 必须包含以 `做成之后：`（或 `固定:`）开头的完整描述，直白说明交付后用户或机器能看到什么变化，不要堆砌空洞口号。
+   - `## 意图` 一旦确认即保持原样锁定；后续 `ag_status`、`ag_verify`、`ag_finish` 只会更新 `## 现场`。
+2. **`anchor:` 必须具备正反完整行为链路**：
+   - 每条 `anchor:` 必须是不少于 20~25 字的带动词陈述句。
+   - 必须同时写清：**具体作用对象 + 正向路径（`当……时……`）+ 反向/异常/边界拦截（`若……则……`）**。
+   - 严禁把锚点缩写成“提升稳定性”“确保安全”之类的空泛口号。
+   - 软锚点数量控制在精炼范围内（若达到 9 条或以上应主动合并收敛）。
+3. **`## 红线` 窄化聚焦、拒绝套话与照抄**：
+   - 只写与本票改动强相关的 3~5 条具体硬边界（如禁止触碰某模块、禁止引入非标准库、禁止出现硬编码个人路径等）。
+   - 严禁写“代码要整洁”“保证没有 bug”等放之四海皆准的废话，也严禁原封不动照抄上一张票的红线。
+   - 开工时，`## 红线` 与硬锚点（`anchor!:`）会被自动封存写入 `<PROJECT_ROOT>/.data/redlines.copy`。
 
-## Canonical freeze
+### 审票打回（`rejected`）原地重审机制
 
-While a task is open, AG freezes tracked files on `<PROJECT_ROOT>`. Windows uses a recoverable ACL deny-write entry for the current user. Other systems use the read-only bit. The read-only bit and the ACL are strong friction against accidental edits. They are not an absolute security boundary. If that checkout is dirty during an open task, `ag_verify` refuses immediately and records `canonical-dirty`.
+若 `ag_start` 返回 `ticket_review.outcome == "rejected"`（无论是 `script-prescreen-rejected` 还是 `ticket-review-rejected`）：
+- 查看 `ticket_review.reasons`、`suggestions`、`doubts` 以及 `script_digest.hard_failures`。
+- **无需执行 `ag_abandon`**：在尚未 `confirm-map` 前，直接编辑 `<PROJECT_ROOT>/.data/ticket.md` 补齐正反向链路、聚焦红线并回答 `doubts`，然后**直接重新运行 `ag_start`** 即可原地更新 `.data/redlines.copy` 并开启新一轮无状态审票。
 
-## Delivery
+---
 
-- Use `ag_start` with the portrait and explicit anchors when available.
-- Create workers only with `python -m ag worker-create <PROJECT_ROOT> ...`; use at most 3 workers.
-- Pass the anchor preview, the `<PROJECT_ROOT>/.data/ticket.md` path, and anchors to any worker prompt.
-- Before completion, run `ag_verify`; do not self-certify.
-- Report absolute paths for generated files.
+## 三、强制意图图确认门禁（Mandatory `confirm-map` Gate）
+
+`ag_start` 执行成功（且 `ticket_review` 通过或未启用）后，**AI 必须立即停手**：
+1. 将返回的 `anchor_preview` 完整展示给用户，并附上 `<PROJECT_ROOT>/.data/ticket.md` 的路径（`anchor_preview_path`）。
+2. 等待用户审阅并在终端执行：
+   ```powershell
+   python -m ag confirm-map <PROJECT_ROOT>
+   ```
+3. **铁律**：`confirm-map` 代表人类的显式授权，**AI 严禁自行调用 `confirm-map`**。在用户未执行 `confirm-map` 解冻 `<WORKTREE>` 之前，严禁创建 Worker 或修改任何代码。
+
+---
+
+## 四、施工期间的锚点纪律与交付守则
+
+- **隔离施工**：所有代码修改严格在 `<WORKTREE>` 中完成，绝不触碰只读冻结的 `<PROJECT_ROOT>`。
+- **一次性自检**：在 `<WORKTREE>/.ag-check/` 下编写验证本票锚点与红线边界的自检脚本（合入时随 `<WORKTREE>` 自动销毁，严禁建立常驻 `tests/`）。
+- **锚点对齐与偏移披露**：
+  - 在编辑文件前、切换实现方向前重新阅读锚点。
+  - 若实现方式偏离了软锚点（`anchor:`），可以继续推进，但必须向用户明确披露偏离原因。
+  - 若实现方式与硬锚点（`anchor!:`）或 `## 红线` 冲突，必须先停下说明冲突，询问用户是否放弃当前票重开（`ag_abandon`）。
+  - 严禁静默篡改或删除已锁定的锚点。
+- **Worker 协同与验货**：
+  - 如需拆分任务，仅使用 `python -m ag worker-create <PROJECT_ROOT> ...` 创建（最多 3 个 Worker），并将 `anchor_preview`、`<PROJECT_ROOT>/.data/ticket.md` 与对应锚点传入 Worker 提示词。
+  - 完工后必须运行 `ag_verify` 接受机器与 `switch` 终审，严禁口头自证通过。

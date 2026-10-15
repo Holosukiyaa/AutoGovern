@@ -1,19 +1,31 @@
-# `ag` 配置指南：标准配置文件格式、环境变量与 MCP 挂载
+---
+name: ag-config
+description: >
+  Use when onboarding a new user or repository, configuring critic.json,
+  setting up the independent DS reviewer (ticket and switch seats),
+  checking AG_CRITIC_API_KEY environment variables, or mounting ag as an
+  MCP server. Guides the user via ag config and onboarding.config_guide
+  without ever exposing API key plaintext.
+---
 
-本文档详细介绍如何通过标准 JSON 配置文件与环境变量配置 `ag` 的独立审核模型（`ticket` 开票审 + `switch` 交卷守门）、如何让 AI 自动诊断配置状态，以及如何在各类 AI 客户端中挂载 `ag` MCP 服务与自带 Skill。
+# `ag-config`：标准配置文件格式、环境变量与 MCP 挂载
 
-- 返回总入口：[`AGENTS.md`](../AGENTS.md)
-- 查看 6 步使用流程：[`docs/guide.md`](guide.md)
-- 遇到报错查手册：[`docs/troubleshooting.md`](troubleshooting.md)
+本技能包详细介绍如何通过标准 JSON 配置文件与环境变量配置 `ag` 的独立审核模型（`ticket` 开票审 + `switch` 交卷守门）、如何让 AI 自动诊断配置状态，以及如何在各类 AI 客户端中挂载 `ag` MCP 服务与安装全套自带 Skill。
+
+- **返回项目总入口**：[`AGENTS.md`](../../AGENTS.md)
+- **查看 6 步使用流程**：[`skills/ag-guide/SKILL.md`](../ag-guide/SKILL.md)
+- **意图锚点与写票规范**：[`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)
+- **遇到报错查排障手册**：[`skills/ag-troubleshooting/SKILL.md`](../ag-troubleshooting/SKILL.md)
 
 ---
 
 ## 一、路径变量约定
 
-本文档中所有路径均使用动态变量占位符，请根据你的实际运行环境替换：
+本文档中所有路径均使用动态变量占位符，请根据实际运行环境替换：
 
 - `<PROJECT_ROOT>`：被治理的目标项目仓库根目录
 - `<AG_REPO_ROOT>`：`ag` 仓库根目录（若通过源码方式运行）
+- `<WORKTREE>`：`ag_start` 创建的隔离工作树目录（`<AG_HOME>/worktrees/<PROJECT_KEY>/<TASK_ID>`）
 - `<AG_HOME>`：`ag` 状态与配置主目录（默认 `~/.ag`）
 - `<PROJECT_KEY>`：项目登记后生成的唯一标识目录名（如 `<REPO_NAME>-<HASH>`）
 - `<PYTHON_EXECUTABLE>`：Python 解释器路径（如 `python`）
@@ -154,14 +166,20 @@ export AG_CRITIC_API_KEY="<YOUR_API_KEY>"
 
 ---
 
-## 七、安装自带 `ag-anchor` Skill
+## 七、一键安装自带的 4 套独立 Skill
 
-`ag` 内置了指导 AI 提炼意图锚点、遵守主仓冻结与执行 6 步工作流的专属技能包（位于 [`skills/ag-anchor/SKILL.md`](../skills/ag-anchor/SKILL.md)）。可通过以下命令一键安装到对应 AI 工具的全局技能目录：
+`ag` 在 `skills/` 目录下内置了 4 套职责分明的独立技能包：
+- [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)：意图锚点提炼、`.data/ticket.md` 编写与 `confirm-map` 确认纪律
+- [`skills/ag-guide/SKILL.md`](../ag-guide/SKILL.md)：项目核心原理、三条正交轨道与 6 步完整工作流
+- [`skills/ag-config/SKILL.md`](../ag-config/SKILL.md)：`critic.json` 配置、环境变量与 MCP 挂载指南
+- [`skills/ag-troubleshooting/SKILL.md`](../ag-troubleshooting/SKILL.md)：常见报错码与问题排障手册
+
+可通过以下命令将全部 4 个 Skill 一键安装到对应 AI 工具的全局技能目录：
 
 ```powershell
-# 安装到 Codex 技能目录 (~/.codex/skills/ag-anchor)
+# 安装全部 4 个 Skill 到 Codex 技能目录 (~/.codex/skills/{ag-anchor,ag-guide,ag-config,ag-troubleshooting})
 python -m ag install-skill --target codex
 
-# 安装到 Grok 技能目录 (~/.grok/skills/ag-anchor)
+# 安装全部 4 个 Skill 到 Grok 技能目录 (~/.grok/skills/{ag-anchor,ag-guide,ag-config,ag-troubleshooting})
 python -m ag install-skill --target grok
 ```

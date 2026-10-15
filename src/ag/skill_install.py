@@ -1,30 +1,71 @@
-﻿"""Install the bundled ag-anchor skill."""
+"""Install the bundled ag skills (ag-anchor, ag-guide, ag-config, ag-troubleshooting)."""
 from __future__ import annotations
 
 import shutil
 import sys
 from pathlib import Path
 
-_SOURCE = Path(__file__).resolve().parents[2] / "skills" / "ag-anchor"
-_WHEEL_SOURCE = Path(sys.prefix) / "share" / "ag" / "skills" / "ag-anchor"
+SKILL_NAMES: tuple[str, ...] = (
+    "ag-anchor",
+    "ag-guide",
+    "ag-config",
+    "ag-troubleshooting",
+)
+
+_SKILLS_ROOT = Path(__file__).resolve().parents[2] / "skills"
+_WHEEL_SKILLS_ROOT = Path(sys.prefix) / "share" / "ag" / "skills"
+
+
+def _resolve_skills_root() -> Path:
+    if (_SKILLS_ROOT / "ag-anchor").is_dir():
+        return _SKILLS_ROOT
+    return _WHEEL_SKILLS_ROOT
+
+
+def bundled_skills() -> list[dict[str, str]]:
+    root = _resolve_skills_root()
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for name in SKILL_NAMES:
+        skill_md = root / name / "SKILL.md"
+        out.append({"name": name, "path": str(skill_md)})
+        seen.add(name)
+    if root.is_dir():
+        for child in sorted(root.iterdir()):
+            if child.is_dir() and child.name not in seen and (child / "SKILL.md").is_file():
+                out.append({"name": child.name, "path": str(child / "SKILL.md")})
+                seen.add(child.name)
+    return out
 
 
 def install_skill(target: str) -> str:
-    source = _SOURCE if _SOURCE.is_dir() else _WHEEL_SOURCE
-    if not source.is_dir():
-        raise FileNotFoundError(f"bundled skill missing: {_SOURCE} or {_WHEEL_SOURCE}")
+    skills_root = _resolve_skills_root()
+    if not skills_root.is_dir():
+        raise FileNotFoundError(f"bundled skills missing: {_SKILLS_ROOT} or {_WHEEL_SKILLS_ROOT}")
     home = Path.home()
     if target == "codex":
-        dest = home / ".codex" / "skills" / "ag-anchor"
+        base_dest = home / ".codex" / "skills"
     elif target == "grok":
-        dest = home / ".grok" / "skills" / "ag-anchor"
+        base_dest = home / ".grok" / "skills"
     else:
         raise ValueError(f"unknown skill target: {target}")
-    if dest.exists():
-        backup = dest.with_name(dest.name + ".bak")
-        if backup.exists():
-            shutil.rmtree(backup)
-        shutil.copytree(dest, backup)
-        shutil.rmtree(dest)
-    shutil.copytree(source, dest)
-    return str(dest.resolve())
+    base_dest.mkdir(parents=True, exist_ok=True)
+    names: list[str] = list(SKILL_NAMES)
+    for child in sorted(skills_root.iterdir()):
+        if child.is_dir() and child.name not in names and (child / "SKILL.md").is_file():
+            names.append(child.name)
+    installed: list[str] = []
+    for name in names:
+        source = skills_root / name
+        if not source.is_dir() or not (source / "SKILL.md").is_file():
+            raise FileNotFoundError(f"bundled skill missing: {source / 'SKILL.md'}")
+        dest = base_dest / name
+        if dest.exists():
+            backup = dest.with_name(dest.name + ".bak")
+            if backup.exists():
+                shutil.rmtree(backup)
+            shutil.copytree(dest, backup)
+            shutil.rmtree(dest)
+        shutil.copytree(source, dest)
+        installed.append(str(dest.resolve()))
+    return "\n".join(installed)

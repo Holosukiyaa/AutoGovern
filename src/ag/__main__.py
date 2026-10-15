@@ -117,7 +117,10 @@ def main(argv: list[str] | None = None) -> int:
     worker_read_p = sub.add_parser("worker-read", help="read and validate a worker result.json")
     worker_read_p.add_argument("root")
     worker_read_p.add_argument("worker_id")
-    install_p = sub.add_parser("install-skill", help="install bundled ag-anchor skill to the user skills directory")
+    install_p = sub.add_parser(
+        "install-skill",
+        help="install bundled ag skills (ag-anchor, ag-guide, ag-config, ag-troubleshooting) to the user skills directory",
+    )
     install_p.add_argument("--target", choices=("codex", "grok"), required=True)
     config_p = sub.add_parser("config", help="output structured critic.json configuration guide and ensure template file exists")
     config_p.add_argument("root", nargs="?", default="", help="target repository path; default is current directory")

@@ -522,6 +522,14 @@ def _onboarding_status(
         next_step = "4. 工作树已解冻：请仅在 worktree 目录内修改代码，并在 worktree/.ag-check/ 下编写本票一次性自检脚本，完成后调用 ag_verify。"
     else:
         next_step = "5. ag_verify 已通过：请核对 anchor_progress 后调用 ag_finish 快进合入主仓。"
+    skill_map = {
+        "agents": "AGENTS.md",
+        "anchor": "skills/ag-anchor/SKILL.md",
+        "guide": "skills/ag-guide/SKILL.md",
+        "configuration": "skills/ag-config/SKILL.md",
+        "troubleshooting": "skills/ag-troubleshooting/SKILL.md",
+        "skill": "skills/ag-anchor/SKILL.md",
+    }
     return {
         "enrolled": True,
         "exclude_ready": bool(exclude_info.get("exclude_ready")),
@@ -531,13 +539,8 @@ def _onboarding_status(
         "reviewer_ready": reviewer_ready,
         "config_guide": guide,
         "next_step": next_step,
-        "docs": {
-            "agents": "AGENTS.md",
-            "guide": "docs/guide.md",
-            "configuration": "docs/configuration.md",
-            "troubleshooting": "docs/troubleshooting.md",
-            "skill": "skills/ag-anchor/SKILL.md",
-        },
+        "docs": dict(skill_map),
+        "skills": dict(skill_map),
     }
 
 

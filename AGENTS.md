@@ -16,14 +16,14 @@
 
 ---
 
-## 2. 文档与自带 Skill 导航
+## 2. 自带 Skill 套件导航（职责分离，按需加载）
 
-需要了解具体用法、配置方式或排查报错时，请直接查阅以下专题文档：
+`ag` 将使用说明、配置引导、问题排障与意图写票拆分为 `skills/` 下的 **4 套独立自带 Skill**（执行 `python -m ag install-skill --target codex|grok` 可一键全量安装）：
 
-- 📘 **使用指南（项目干什么 & 完整 6 步工作流）**：[`docs/guide.md`](docs/guide.md)
-- ⚙️ **配置指南（标准 `critic.json` 配置文件格式 & AI 引导配置）**：[`docs/configuration.md`](docs/configuration.md)
-- 🛠️ **排障手册（常见报错码、原因分析与一步修复方案）**：[`docs/troubleshooting.md`](docs/troubleshooting.md)
-- 🤖 **自带 AI 技能（指导 AI 提炼意图锚点与执行全流程）**：[`skills/ag-anchor/SKILL.md`](skills/ag-anchor/SKILL.md)
+- 📘 **使用指南 Skill（项目是干什么的 & 6 步完整工作流）**：[`skills/ag-guide/SKILL.md`](skills/ag-guide/SKILL.md)
+- ⚙️ **配置引导 Skill（标准 `critic.json` 配置文件格式、环境变量与 AI 引导配置）**：[`skills/ag-config/SKILL.md`](skills/ag-config/SKILL.md)
+- 🛠️ **问题排障 Skill（常见报错码、原因分析与一步修复方案）**：[`skills/ag-troubleshooting/SKILL.md`](skills/ag-troubleshooting/SKILL.md)
+- 🎯 **意图锚点 Skill（写票规范、正反完整行为链路 `anchor:` 与窄化红线）**：[`skills/ag-anchor/SKILL.md`](skills/ag-anchor/SKILL.md)
 - 📄 **架构与命令速查**：[`README.md`](README.md)
 
 ---
@@ -63,7 +63,7 @@ python -m ag enroll <PROJECT_ROOT>
 ### 第三步：引导配置独立 DS 审核席位（按需）
 若用户希望启用独立大模型审核（`ticket` 开票审 + `switch` 交卷守门）但 `reviewer_ready: false`：
 1. 读取 `config_guide.global_config_path`（默认 `<AG_HOME>/critic.json`）或 `config_guide.project_config_path`，以及 `config_guide.template` 和 `config_guide.fields`。
-2. 指导用户按标准 JSON 格式填写 `endpoint`、`model`、`api_key_env` 等字段（详见 [`docs/configuration.md`](docs/configuration.md)）。
+2. 指导用户按标准 JSON 格式填写 `endpoint`、`model`、`api_key_env` 等字段（详见 [`skills/ag-config/SKILL.md`](skills/ag-config/SKILL.md)）。
 3. 检查 `api_key_present` 布尔值，指导用户在终端或 MCP 配置中设置对应的环境变量（**安全铁律：AI 绝不向用户索要、读取或在任何日志中打印 API Key 明文**）。
 
 ### 第四步：严格执行 6 步受控交付闭环

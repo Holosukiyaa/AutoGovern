@@ -1,10 +1,20 @@
-# `ag` 使用指南：这个项目是干什么的？怎么用？
+---
+name: ag-guide
+description: >
+  Use when a user or AI asks what ag is, how the ag delivery loop works,
+  or how to use ag step by step from enrollment to finish. Covers core
+  concepts (ship / lift / see lanes, canonical freeze, worktree isolation,
+  one-front-one-back review) and the complete 6-step workflow.
+---
 
-本文档用大白话讲清楚 `ag` 解决什么问题、核心设计原理是什么，以及从零开始走完一张交付票的完整 6 步流程。
+# `ag-guide`：这个项目是干什么的？怎么一步步使用？
 
-- 返回总入口：[`AGENTS.md`](../AGENTS.md)
-- 配置独立审核与 MCP：[`docs/configuration.md`](configuration.md)
-- 遇到报错查手册：[`docs/troubleshooting.md`](troubleshooting.md)
+本技能包用大白话讲清楚 `ag` 解决什么问题、核心设计原理是什么，以及从零开始走完一张交付票的完整 6 步工作流。
+
+- **返回项目总入口**：[`AGENTS.md`](../../AGENTS.md)
+- **意图锚点与写票规范**：[`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)
+- **配置独立审核与 MCP 挂载**：[`skills/ag-config/SKILL.md`](../ag-config/SKILL.md)
+- **遇到报错查排障手册**：[`skills/ag-troubleshooting/SKILL.md`](../ag-troubleshooting/SKILL.md)
 
 ---
 
@@ -33,10 +43,12 @@
 
 ## 三、完整 6 步工作流详解
 
-在所有命令与说明中，我们使用以下统一占位符：
+在所有命令与说明中，统一使用以下动态路径占位符：
 - `<PROJECT_ROOT>`：被治理的目标项目仓库根目录
+- `<AG_REPO_ROOT>`：`ag` 仓库根目录
 - `<WORKTREE>`：`ag_start` 创建的隔离工作树目录（位于 `<AG_HOME>/worktrees/<PROJECT_KEY>/<TASK_ID>`）
 - `<AG_HOME>`：`ag` 状态主目录（默认 `~/.ag`）
+- `<PYTHON_EXECUTABLE>`：Python 解释器路径（如 `python`）
 
 ### 第 1 步：登记仓库（Enroll）
 
@@ -58,7 +70,7 @@
 
 ### 第 2 步：编写启动票（`<PROJECT_ROOT>/.data/ticket.md`）
 
-每次开工前，必须先编辑 `<PROJECT_ROOT>/.data/ticket.md`。这是本轮任务的唯一权威意图文档。
+每次开工前，必须先编辑 `<PROJECT_ROOT>/.data/ticket.md`。这是本轮任务的唯一权威意图文档（详细提炼方法参见 [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)）。
 
 #### 标准写法模板：
 

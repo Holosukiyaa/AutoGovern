@@ -1,12 +1,25 @@
-# `ag` 排障手册：遇到问题怎么解决？
+---
+name: ag-troubleshooting
+description: >
+  Use when any ag command or MCP tool raises ChainBroken, refuses an
+  action, or reports hazards such as canonical-dirty, missing
+  .data/ticket.md, script-prescreen-rejected, ticket-review-rejected,
+  intent-map-unconfirmed, canonical freeze/read-only files, switch reject
+  or void, missing worker results, or probe red.
+---
 
-当你在执行 `ag_enroll`、`ag_start`、`confirm-map`、`ag_verify` 或 `ag_finish` 遇到报错或拦截时，可按本手册对照 **`[现象/报错]` → `[原因]` → `[解决办法]`** 快速排障。
+# `ag-troubleshooting`：常见报错码与排障手册
 
-> 💡 **快速自检提示**：绝大多数状态下，直接运行 `python -m ag status <PROJECT_ROOT>` 并查看返回 JSON 中的 `onboarding`、`hazards` 与 `last_error`，就能直接看到针对当前卡点的中文修复路牌。
+当你在执行 `ag_enroll`、`ag_start`、`confirm-map`、`ag_verify` 或 `ag_finish` 遇到报错或拦截时，可按本技能包对照 **`[现象/报错]` → `[原因]` → `[解决办法]`** 快速排障。
 
-- 返回总入口：[`AGENTS.md`](../AGENTS.md)
-- 查看 6 步使用流程：[`docs/guide.md`](guide.md)
-- 查看配置文件格式：[`docs/configuration.md`](configuration.md)
+> 💡 **快速自检提示**：绝大多数状态下，直接运行 `<PYTHON_EXECUTABLE> -m ag status <PROJECT_ROOT>`（或 `python -m ag status <PROJECT_ROOT>`）并查看返回 JSON 中的 `onboarding`、`hazards` 与 `last_error`，就能直接看到针对当前卡点的中文修复路牌。
+
+- **返回项目总入口**：[`AGENTS.md`](../../AGENTS.md)
+- **查看 6 步使用流程**：[`skills/ag-guide/SKILL.md`](../ag-guide/SKILL.md)
+- **意图锚点与写票规范**：[`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)
+- **查看配置文件格式**：[`skills/ag-config/SKILL.md`](../ag-config/SKILL.md)
+
+统一路径占位符约定：`<PROJECT_ROOT>`（主仓根目录）、`<AG_REPO_ROOT>`（`ag` 源码根目录）、`<WORKTREE>`（隔离工作树目录）、`<AG_HOME>`（默认 `~/.ag`）、`<PYTHON_EXECUTABLE>`（如 `python`）。
 
 ---
 
@@ -33,7 +46,7 @@
   - `<PROJECT_ROOT>/.data/ticket.md` 不存在，或者里面只有空模板，没有填写有效的 `做成之后：`（或 `固定:`）完成态意图与至少一条 `anchor:` 锚点。
 - **[解决办法]**：
   1. 若尚未登记仓库，先运行 `python -m ag enroll <PROJECT_ROOT>`（会自动生成 `.data/ticket.md` 初始模板）。
-  2. 打开 `<PROJECT_ROOT>/.data/ticket.md`，在 `## 意图` 下填写 `做成之后：...` 及至少一条完整的 `anchor: ...`，在 `## 红线` 下填写聚焦禁令（写法详见 [`docs/guide.md`](guide.md) 第 2 步），保存后重新运行 `ag_start`。
+  2. 打开 `<PROJECT_ROOT>/.data/ticket.md`，在 `## 意图` 下填写 `做成之后：...` 及至少一条完整的 `anchor: ...`，在 `## 红线` 下填写聚焦禁令（写法详见 [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md) 与 [`skills/ag-guide/SKILL.md`](../ag-guide/SKILL.md) 第 2 步），保存后重新运行 `ag_start`。
 
 ---
 
@@ -99,7 +112,7 @@
   - **子情况 6.3：`outcome: "unavailable"`（审核服务不可用）**
     - 查看 `verify.switch.reason`：
       - `not-configured`：尚未配置独立审核席位（未配置时默认不拦截 `finish`；若需启用，运行 `python -m ag config <PROJECT_ROOT>` 查看配置指南并填写 `critic.json`）。
-      - `missing_api_key:<ENV_NAME>`：已启用 `critic.json`，但当前环境中未找到 `<ENV_NAME>` 环境变量。请设置对应环境变量后重跑 `ag_verify`（详见 [`docs/configuration.md`](configuration.md)）。
+      - `missing_api_key:<ENV_NAME>`：已启用 `critic.json`，但当前环境中未找到 `<ENV_NAME>` 环境变量。请设置对应环境变量后重跑 `ag_verify`（详见 [`skills/ag-config/SKILL.md`](../ag-config/SKILL.md)）。
       - `same_family:<FAMILY>`：`critic.json` 中的审核 `model` 与施工 `worker_model` 属于同一模型家族。请更换异构审核模型，或在 `critic.json` 中显式设置 `"allow_same_family": true`。
       - `void:...`（如网络超时、HTTP 报错或返回非 JSON）：远程大模型接口调用异常。因已启用审核席位，为遵循 fail-closed 原则，`void` 状态的 `switch` 会拒绝 `finish`。请检查网络、`endpoint` 地址或适当调大 `critic.json` 中的 `"timeout"`（如 `120`），然后重跑 `ag_verify`。
 

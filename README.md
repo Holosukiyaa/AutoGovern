@@ -4,13 +4,13 @@ Three lanes that must not mix: **ship (交货)** · **lift (抬正确率)** · *
 
 Only ship may set `product` or refuse `finish`. lift / see are advice or observation.
 
-## Documentation & AI Entry Navigation
+## Bundled AI Skills & Entry Navigation
 
 - 🧭 **AI & User Entry Anchor (`AGENTS.md`)**: [`AGENTS.md`](AGENTS.md)
-- 📘 **Usage & 6-Step Workflow Guide**: [`docs/guide.md`](docs/guide.md)
-- ⚙️ **Configuration Guide (`critic.json`, Env Vars & MCP)**: [`docs/configuration.md`](docs/configuration.md)
-- 🛠️ **Troubleshooting Manual**: [`docs/troubleshooting.md`](docs/troubleshooting.md)
-- 🤖 **Bundled AI Skill**: [`skills/ag-anchor/SKILL.md`](skills/ag-anchor/SKILL.md)
+- 📘 **Usage & 6-Step Workflow Skill (`ag-guide`)**: [`skills/ag-guide/SKILL.md`](skills/ag-guide/SKILL.md)
+- ⚙️ **Configuration Guide Skill (`ag-config`)**: [`skills/ag-config/SKILL.md`](skills/ag-config/SKILL.md)
+- 🛠️ **Troubleshooting Manual Skill (`ag-troubleshooting`)**: [`skills/ag-troubleshooting/SKILL.md`](skills/ag-troubleshooting/SKILL.md)
+- 🎯 **Intent Anchor & Ticket Skill (`ag-anchor`)**: [`skills/ag-anchor/SKILL.md`](skills/ag-anchor/SKILL.md)
 
 MCP delivery loop. Canonical checkout (`<PROJECT_ROOT>`) is not a work site.
 
@@ -127,11 +127,11 @@ Configuration lives in `<AG_HOME>/critic.json` (global default, `~/.ag/critic.js
 }
 ```
 
-See [`docs/configuration.md`](docs/configuration.md) for full details.
+See [`skills/ag-config/SKILL.md`](skills/ag-config/SKILL.md) for full details.
 
 ## Skill installation
 
-Install the bundled attention skill for Codex or Grok:
+Install all 4 bundled AG skills (`ag-anchor`, `ag-guide`, `ag-config`, `ag-troubleshooting`) for Codex or Grok:
 
 ```powershell
 python -m ag install-skill --target codex
