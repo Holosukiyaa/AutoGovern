@@ -168,6 +168,7 @@ def seat_result(
     allow_same_family: bool = False,
     thinking: str = "",
     timings: dict[str, Any] | None = None,
+    retried_void: bool = False,
 ) -> dict[str, Any]:
     spec = _spec(kind)
     blob: dict[str, Any] = {
@@ -183,6 +184,8 @@ def seat_result(
     }
     if model:
         blob["model"] = model
+    if retried_void:
+        blob["retried_void"] = True
     try:
         blob["store"] = _write_report(kind, root, blob)
     except OSError:
@@ -222,10 +225,19 @@ def seat_run(
     redlines: list[str] | None = None,
 ) -> dict[str, Any]:
     spec = _spec(kind)
+    if spec["live"]:
+        try:
+            from .store import project_dir
+
+            path = project_dir(root) / f"{kind}-live.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+        except OSError:
+            pass
     packed = pack(root, exam=exam, exam_file=exam_file, base=base, head=head, tree=tree)
     if kind == "switch":
         packed = _user_pack(packed, critic)
-        packed["redlines"] = [str(item).strip() for item in (redlines or []) if str(item).strip()]
+    packed["redlines"] = [str(item).strip() for item in (redlines or []) if str(item).strip()]
     cfg = load_config(root)
     configured = bool(cfg.get("error") or _configured(cfg))
     extra: dict[str, Any] = {
@@ -304,6 +316,41 @@ def seat_run(
             model=str(cfg.get("model") or ""),
         )
     problems = verdict_problems(verdict)
+    if problems and all("fail without path:line" in p for p in problems):
+        retry_messages = [
+            *messages,
+            {"role": "assistant", "content": json.dumps(verdict, ensure_ascii=False)},
+            {
+                "role": "user",
+                "content": (
+                    "VOID FORMAT: Every item with status='fail' MUST include a concrete evidence locator "
+                    "matching path:line (e.g. src/foo.py:42), portrait:..., or probe:<id>. "
+                    "Fix the evidence fields and return the JSON object only."
+                ),
+            },
+        ]
+        try:
+            retry_content, retry_reasoning = complete_chat(run_cfg, retry_messages)
+            if spec["live"]:
+                extra["thinking"] = held["r"] or retry_reasoning or extra.get("thinking", "")
+            else:
+                extra["thinking"] = retry_reasoning or extra.get("thinking", "")
+            retry_verdict: dict[str, Any] | None = None
+            for blob in (retry_content, retry_reasoning):
+                if not str(blob or "").strip():
+                    continue
+                try:
+                    retry_verdict = parse_verdict(blob)
+                    break
+                except ValueError:
+                    continue
+            if retry_verdict is not None:
+                verdict = retry_verdict
+                problems = verdict_problems(verdict)
+                extra["retried_void"] = True
+                extra["timings"] = {"retried_void": True}
+        except RuntimeError:
+            pass
     items = verdict.get("items") if isinstance(verdict.get("items"), list) else []
     summary = str(verdict.get("summary") or "")
     model = str(cfg.get("model") or "")
@@ -398,7 +445,7 @@ def attach_verify(
             task_id=task_id,
             probe_red=probe_red,
         )
-    if kind == "switch":
+    if kind in {"critic", "switch"}:
         blob["redlines"] = sealed
     if kind == "critic":
         return blob, planted

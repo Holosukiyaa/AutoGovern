@@ -90,11 +90,11 @@ Configured critic and switch chats stream their incremental reasoning/content in
 
 ## Change-aware advice
 
-`lift-13` summarizes the task signal from the portrait, touched files, HEAD, and verify exit. It reports `changed=true` only when that signal changes. `lift-14` stores a raw task snapshot under `AG_HOME`; it is not product evidence and does not enter the repository.
+`lift-13` summarizes the task signal from the portrait, touched files, HEAD, and verify exit. It reports `changed=true` only when that signal changes. `lift-14` stores a raw task snapshot under `AG_HOME`; it is not product evidence and does not enter the repository. `lift-15` compares sealed red lines against the previous ticket and surfaces `dropped_redlines` without blocking start or finish. `lift-16` scans added diff lines on non-test files for silent exception swallowing, production mock/fixture references, and placeholder stubs. `lift-17` detects newly added package directories and suggests converging multi-touchpoint imports into a single composition-root mount point.
 
 ## Symptom and ownership observation
 
-`see-10` records repeated CSS selectors across files, including selector counts, `!important` counts, consumers, and co-change history. `see-11` turns those symptoms into an ownership table with definers, modifiers, overriders, and consumers.
+`see-10` records repeated CSS selectors across files, including selector counts, `!important` counts, consumers, and co-change history. `see-11` turns those symptoms into an ownership table with definers, modifiers, overriders, and consumers. `see-12` tracks suppression directive deltas (`suppression_delta`) and upward/reverse imports across languages. `see-13` reports seat/pack health (`critic-live.jsonl` and `switch-live.jsonl` sizes, sealed redlines, and binary/oversize `.ag-check` exclusions). `see-14` aggregates ticket history and recurring red lines from `.data/tickets/` and `plug_dir`.
 
 ## Critic config
 
@@ -118,7 +118,7 @@ python -m ag install-skill --target grok
 
 ## Ticket document
 
-The task intent is `.data/ticket.md` on the canonical checkout. `.data/` is gitignored. `ag_start` must see that file. Status, verify, and finish rewrite `## 现场` and leave `## 意图` and the sealed `## 红线` in place. The switch, last in `ag_verify`, receives those sealed lines as `redlines`.
+The task intent is `.data/ticket.md` on the canonical checkout (`ship-12`). `.data/` is gitignored. `ag_start` must see that file, seals `## 红线` into `.data/redlines.copy`, and archives each ticket snapshot to `.data/tickets/<task_id>.md`. Status, verify, and finish rewrite `## 现场`, leave `## 意图` and the sealed `## 红线` in place, and update `.data/tickets/<task_id>.md`. Both critic and switch in `ag_verify` receive those sealed lines as `redlines`.
 
 `ag anchor-map` still writes a one-off text file outside the checkout when asked. It is not the task document, and status does not keep it updated.
 

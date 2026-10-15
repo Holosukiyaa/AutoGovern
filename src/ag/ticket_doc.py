@@ -14,6 +14,7 @@ from .managed import ChainBroken
 
 TICKET_NAME = "ticket.md"
 COPY_NAME = "redlines.copy"
+TICKETS_DIR_NAME = "tickets"
 _HEADING = re.compile(r"^##\s*(意图|红线|现场)\s*$")
 _BULLET = re.compile(r"^(?:[-*•]+|\d+[.)])\s+")
 
@@ -24,6 +25,42 @@ def ticket_path(root: Path) -> Path:
 
 def copy_path(root: Path) -> Path:
     return Path(root) / ".data" / COPY_NAME
+
+
+def tickets_dir(root: Path) -> Path:
+    return Path(root) / ".data" / TICKETS_DIR_NAME
+
+
+def previous_redlines(root: Path) -> list[str]:
+    path = copy_path(root)
+    if not path.is_file():
+        return []
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    lines: list[str] = []
+    for item in raw.splitlines():
+        line = item.strip()
+        if line and line not in lines:
+            lines.append(line)
+    return lines
+
+
+def dropped_redlines(previous: list[str], current: list[str]) -> list[str]:
+    keep = set(current)
+    return [line for line in previous if line not in keep]
+
+
+def archive_ticket(root: Path, task_id: str, text: str) -> str:
+    tid = str(task_id or "").strip()
+    if not tid:
+        return ""
+    folder = tickets_dir(root)
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"{tid}.md"
+    target.write_text(text, encoding="utf-8")
+    return str(target.resolve())
 
 
 def require_ticket(root: Path) -> str:
@@ -135,6 +172,7 @@ def seal(
     text = f"# 票\n\n## 意图\n{intent}\n## 红线\n{red}\n## 现场\n{scene}"
     path.write_text(text, encoding="utf-8")
     copy_path(root).write_text(("\n".join(redlines) + "\n") if redlines else "", encoding="utf-8")
+    archive_ticket(root, str(task.get("id") or ""), text)
     return text
 
 
@@ -160,4 +198,6 @@ def write_scene(root: Path, task: dict[str, Any], *, process: str, product: str)
     else:
         updated = "".join(lines[:cut]) + block
     path.write_text(updated, encoding="utf-8")
+    if str(task.get("id") or "").strip():
+        archive_ticket(root, str(task.get("id") or ""), updated)
     return updated

@@ -12,8 +12,13 @@ verdict 只能是 pass 或 reject。吃不准：verdict 用 pass，在 comment �
 
 - 换干净上下文。上一轮的自述、日记、proof、tool_trace 一律扔掉，不当证据。
 - 不许改文件，不许 finish / ag_finish，不许 git commit，没有工地，不要 ag_start。
-- 桌上是阅卷包：exam、diff、changed_files、neighbors、probes，外加 this_ticket_checks（这票工地 `.ag-check/` 临时检查，可能 truncated）。
-- 对照 exam（用户原话 + 画像）严批工人这轮 diff 和这些临时检查：是否自欺、是否覆盖画像的面。这不是给工人的修复工票，不要生成开工上下文。
+- 桌上是阅卷包：exam、diff、changed_files、neighbors、probes、redlines（开工时封存的红线副本，空名单表示本票无红线），外加 this_ticket_checks（这票工地 `.ag-check/` 临时检查，可能 truncated）。
+- 对照 exam（用户原话 + 画像）与 redlines 严批工人这轮 diff 和这些临时检查：是否自欺、是否覆盖画像的面、是否违反封存红线。这不是给工人的修复工票，不要生成开工上下文。
+
+## 红线
+
+- 若 `redlines` 非空，对照 `diff`、`changed_files` 与 `this_ticket_checks` 检查是否违反任一封存红线；任何违反必须作为 `status="fail"` 的 item 报告，`evidence` 写明 `path:line`、`portrait:...` 或 `probe:<id>`。
+- 若 `redlines` 为空名单，不要因为空名单判 fail。
 
 ## 判定
 

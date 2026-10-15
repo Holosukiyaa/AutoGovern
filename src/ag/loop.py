@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+import inspect
 import json
 import os
 import time
@@ -30,6 +31,8 @@ def git_run(cwd: Path, *args: str, env: dict[str, str] | None = None) -> subproc
         ["git", "-C", str(cwd), *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
         env=env,
     )
@@ -466,6 +469,7 @@ def status(root: Path) -> dict[str, Any]:
         },
     }
     if task:
+        out["dropped_redlines"] = list(task.get("dropped_redlines") or [])
         try:
             from .ticket_doc import ticket_path, write_scene
 
@@ -542,7 +546,16 @@ def start(
     if branch in {"HEAD", ""}:
         raise ChainBroken("canonical HEAD is detached")
     from .anchor_map import attention_anchors, hard_rules, resolve_fixed
-    from .ticket_doc import collect_redlines, merge_anchors, require_ticket, seal, split_document, ticket_path
+    from .ticket_doc import (
+        collect_redlines,
+        dropped_redlines,
+        merge_anchors,
+        previous_redlines,
+        require_ticket,
+        seal,
+        split_document,
+        ticket_path,
+    )
 
     chosen = str(portrait or "")
     document = require_ticket(root)
@@ -555,6 +568,8 @@ def start(
         usage_note(root, "ship", 8, "block", "start without intent anchors")
         raise ChainBroken("intent sync required: provide a locked result or at least one attention anchor")
     redlines = collect_redlines(redline_body, task_anchors)
+    prev_redlines = previous_redlines(root)
+    dropped = dropped_redlines(prev_redlines, redlines)
     task_guards = [str(item).strip() for item in (guards or []) if str(item).strip()]
     task_defaults = [str(item).strip() for item in (defaults or []) if str(item).strip()]
     route = attention_anchors(task_anchors)
@@ -600,6 +615,7 @@ def start(
             "guards": task_guards,
             "defaults": task_defaults,
             "redlines": redlines,
+            "dropped_redlines": dropped,
             "verified_tree": "",
             "verify": None,
         },
@@ -770,14 +786,27 @@ def verify(root: Path) -> dict[str, Any]:
     if anchor_exam:
         portrait = f"{portrait}\n\n{anchor_exam}" if portrait else anchor_exam
     probe_red = list(record["probe_red"])
-    critic, planted = attach_verify(
-        enrolled,
-        worktree=worktree,
-        portrait=portrait,
-        task_id=task_id,
-        probe_red=probe_red,
-        tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
-    )
+    sealed_redlines = [str(item) for item in (task.get("redlines") or [])]
+    critic_params = inspect.signature(attach_verify).parameters
+    if "redlines" in critic_params or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in critic_params.values()):
+        critic, planted = attach_verify(
+            enrolled,
+            worktree=worktree,
+            portrait=portrait,
+            task_id=task_id,
+            probe_red=probe_red,
+            tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
+            redlines=sealed_redlines,
+        )
+    else:
+        critic, planted = attach_verify(
+            enrolled,
+            worktree=worktree,
+            portrait=portrait,
+            task_id=task_id,
+            probe_red=probe_red,
+            tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
+        )
     if planted:
         record["probes_planted"] = planted
     record["critic"] = critic
@@ -791,7 +820,6 @@ def verify(root: Path) -> dict[str, Any]:
     append_task_step(enrolled, task_id, "verify-critic", report_id=str(critic.get("report_id") or ""), outcome=str(critic.get("outcome") or ""), seconds=timings["critic_s"])
     from .switch import attach_verify as attach_switch
 
-    sealed_redlines = [str(item) for item in (task.get("redlines") or [])]
     switch = attach_switch(
         enrolled,
         worktree=worktree,

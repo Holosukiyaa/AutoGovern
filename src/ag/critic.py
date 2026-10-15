@@ -21,6 +21,36 @@ from .store import event_count, insert_critic_event, list_critic_events
 PACK_SCHEMA = "ag.critic-pack.v1"
 RUN_SCHEMA = "ag.critic-run.v1"
 MAX_FILE_CHARS = 100_000
+MAX_CHECK_FILE_BYTES = 64_000
+_BINARY_CHECK_SUFFIXES = {
+    ".pyc",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".ico",
+    ".bmp",
+    ".pdf",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".7z",
+    ".sqlite",
+    ".db",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".mp4",
+    ".webm",
+    ".mp3",
+    ".wav",
+    ".exe",
+    ".dll",
+    ".pyd",
+    ".so",
+}
 PROMPT_NAME = "critic_prompt.md"
 PROMPT_VERSION = "ag.critic.v1"
 CONFIG_NAME = "critic.json"
@@ -285,11 +315,19 @@ def _ticket_checks(repo: Path) -> list[dict[str, Any]]:
     for path in sorted(base.rglob("*")):
         if not path.is_file():
             continue
-        if path.suffix == ".pyc" or "__pycache__" in path.parts:
+        if path.suffix.lower() in _BINARY_CHECK_SUFFIXES or "__pycache__" in path.parts:
             continue
         try:
             rel = path.resolve().relative_to(repo.resolve()).as_posix()
+            size = path.stat().st_size
         except (OSError, ValueError):
+            continue
+        if size > MAX_CHECK_FILE_BYTES:
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")[:4000]
+            except OSError:
+                content = ""
+            out.append({"path": rel, "truncated": True, "bytes": size, "content": content})
             continue
         out.append(_file_entry(repo, rel))
     return out
@@ -675,6 +713,20 @@ def _result(root: Path, **kwargs: Any) -> dict[str, Any]:
     return seat_result("critic", root, **kwargs)
 
 
+def _sealed_redlines(root: Path) -> list[str]:
+    from .loop import load_task
+    from .managed import lookup_project, project_key
+
+    item = lookup_project(root)
+    if item is None:
+        return []
+    task = load_task(str(item.get("key") or project_key(root))) or {}
+    raw = task.get("redlines") if isinstance(task, dict) else None
+    if not isinstance(raw, list):
+        return []
+    return [str(line).strip() for line in raw if str(line).strip()]
+
+
 def critic_run(
     root: Path,
     *,
@@ -685,6 +737,7 @@ def critic_run(
     tree: Path | None = None,
     task_id: str = "",
     probe_red: list[str] | None = None,
+    redlines: list[str] | None = None,
 ) -> dict[str, Any]:
     from .seat import seat_run
 
@@ -698,6 +751,7 @@ def critic_run(
         tree=tree,
         task_id=task_id,
         probe_red=probe_red,
+        redlines=_sealed_redlines(root) if redlines is None else redlines,
     )
 
 
@@ -709,6 +763,7 @@ def attach_verify(
     task_id: str,
     probe_red: list[str],
     tests_failed: bool = False,
+    redlines: list[str] | None = None,
 ) -> tuple[dict[str, Any], list[Any]]:
     from .seat import attach_verify as seat_attach
 
@@ -720,6 +775,7 @@ def attach_verify(
         task_id=task_id,
         probe_red=probe_red,
         tests_failed=tests_failed,
+        redlines=_sealed_redlines(enrolled) if redlines is None else redlines,
     )
     if isinstance(raw, tuple):
         return raw
