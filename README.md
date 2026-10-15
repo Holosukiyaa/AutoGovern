@@ -4,10 +4,18 @@ Three lanes that must not mix: **ship (交货)** · **lift (抬正确率)** · *
 
 Only ship may set `product` or refuse `finish`. lift / see are advice or observation.
 
-MCP delivery loop. Canonical checkout is not a work site.
+## Documentation & AI Entry Navigation
+
+- 🧭 **AI & User Entry Anchor (`AGENTS.md`)**: [`AGENTS.md`](AGENTS.md)
+- 📘 **Usage & 6-Step Workflow Guide**: [`docs/guide.md`](docs/guide.md)
+- ⚙️ **Configuration Guide (`critic.json`, Env Vars & MCP)**: [`docs/configuration.md`](docs/configuration.md)
+- 🛠️ **Troubleshooting Manual**: [`docs/troubleshooting.md`](docs/troubleshooting.md)
+- 🤖 **Bundled AI Skill**: [`skills/ag-anchor/SKILL.md`](skills/ag-anchor/SKILL.md)
+
+MCP delivery loop. Canonical checkout (`<PROJECT_ROOT>`) is not a work site.
 
 ```
-ag_status → ag_start → write only in worktree → ag_verify → ag_finish
+ag_status → ag_start → confirm-map → write only in <WORKTREE> → ag_verify → ag_finish
 ```
 
 While a task is open, AG freezes tracked files on the canonical checkout. Windows adds a recoverable ACL deny-write entry for the current user. Other systems clear the user-write bit. The read-only bit and the ACL are strong friction against accidental edits. They are not an absolute security boundary. `ag_verify` refuses immediately when that checkout is dirty during an open task, records `canonical-dirty`, and does not run tests, probes, critic, or the switch.
@@ -17,11 +25,12 @@ Do **not** store long-lived tests in this repo. Worker checks belong in worktree
 `ag_verify` runs an enrolled command only if one was set (other products may enroll a tiny smoke). This repo enrolls **no** test command. Then path-hit probes, then one read-only critic, then the **switch**. Critic is a layer before the switch: `rejected` does not refuse this ticket's finish. A **configured** switch that is not passed (`rejected` / void unavailable, `sw-` id) refuses finish. Unconfigured or not-run switch does not. No enrolled tests and switch allow → `product` stays `undeclared`. Probe red still refuses finish.
 
 ```
-ag enroll <repo>
-ag mcp
+python -m ag enroll <PROJECT_ROOT>
+python -m ag config <PROJECT_ROOT>
+python -m ag mcp
 ```
 
-Critic config lives in `~/.ag/projects/<key>/critic.json`. Audit: sqlite `ag.sqlite`. Task step chain (not in git): `~/.ag/projects/<key>/tasks/<task_id>.json` — one object with a `steps` array, appended at start / verify-refused / verify-tests / verify-probes / verify-critic / verify-switch / finish / finish-refused. `ag_status.timeline_path` points at the current or latest file. `ag critic-log` prints that timeline. `ag-config.bat` opens the checkout's `critic.json` and does not render the timeline.
+Critic config lives in `<AG_HOME>/critic.json` (default `~/.ag/critic.json`) or per-project `<AG_HOME>/projects/<PROJECT_KEY>/critic.json`. Audit: sqlite `ag.sqlite`. Task step chain (not in git): `<AG_HOME>/projects/<PROJECT_KEY>/tasks/<TASK_ID>.json` — one object with a `steps` array, appended at start / verify-refused / verify-tests / verify-probes / verify-critic / verify-switch / finish / finish-refused. `ag_status.timeline_path` points at the current or latest file. `ag critic-log` prints that timeline. `python -m ag config <PROJECT_ROOT>` outputs the structured configuration guide (`config_guide`) and readiness diagnostics.
 
 ## Strategy lanes
 
@@ -66,13 +75,13 @@ Anchor kinds remain compatible:
 Create a vendor-neutral worker dossier inside the active AG worktree:
 
 ```powershell
-python -m ag worker-create C:\repo --portrait "Done looks like ..." --anchor "keep auth behavior unchanged" --hard-anchor "do not run ag finish" --write-allow src/auth --write-allow tests/auth
+python -m ag worker-create <PROJECT_ROOT> --portrait "Done looks like ..." --anchor "keep auth behavior unchanged" --hard-anchor "do not run ag finish" --write-allow src/auth --write-allow src/core
 ```
 
-The dossier contains `task.json` and `TASK.md` under `~/.ag/worktrees/<key>/<task>.artifacts/workers/<worker-id>/`. Any subagent CLI can implement it as an adapter. The worker writes `result.json` with schema `ag.worker.result.v1`, including `status`, `changed_files`, `anchor_receipt`, `evidence`, and `open_questions`. Read and validate it with:
+The dossier contains `task.json` and `TASK.md` under `<AG_HOME>/worktrees/<PROJECT_KEY>/<TASK_ID>.artifacts/workers/<WORKER_ID>/`. Any subagent CLI can implement it as an adapter. The worker writes `result.json` with schema `ag.worker.result.v1`, including `status`, `changed_files`, `anchor_receipt`, `evidence`, and `open_questions`. Read and validate it with:
 
 ```powershell
-python -m ag worker-read C:\repo <worker-id>
+python -m ag worker-read <PROJECT_ROOT> <WORKER_ID>
 ```
 
 `anchor_receipt` records attention, not acceptance. AG still decides delivery through `ag_verify` and `ag_finish`.
@@ -81,12 +90,12 @@ Every worker dossier carries the current `.data/ticket.md` text and its absolute
 AG can launch a Grok dossier as an external worker provider:
 
 ```powershell
-python -m ag worker-run C:\repo <worker-id> --provider grok
+python -m ag worker-run <PROJECT_ROOT> <WORKER_ID> --provider grok
 ```
 
-The provider is optional and vendor-neutral. It does not make Grok a Codex-native subagent; AG remains the commander and the delivery gate. `worker-run` streams stdout/stderr to the terminal while appending every line to that worker's `live.jsonl` beside the worktree. Use `python -m ag worker-log C:\repo <worker-id>` to tail that rolling output from another terminal. The command discovers `grok` from `PATH`, `~/.grok/bin`, or `AG_GROK_COMMAND`; `--timeout` is optional. Grok runs without its own subagents and with shell commands routed through `guard.py`; governance commands, `git commit/merge/rebase/push`, and scripts outside `--write-allow` are refused by the worker guard.
+The provider is optional and vendor-neutral. It does not make Grok a Codex-native subagent; AG remains the commander and the delivery gate. `worker-run` streams stdout/stderr to the terminal while appending every line to that worker's `live.jsonl` beside the worktree. Use `python -m ag worker-log <PROJECT_ROOT> <WORKER_ID>` to tail that rolling output from another terminal. The command discovers `grok` from `PATH`, `~/.grok/bin`, or `AG_GROK_COMMAND`; `--timeout` is optional. Grok runs without its own subagents and with shell commands routed through `guard.py`; governance commands, `git commit/merge/rebase/push`, and scripts outside `--write-allow` are refused by the worker guard.
 
-Configured critic and switch chats stream their incremental reasoning/content into `~/.ag/projects/<key>/critic-live.jsonl` and `switch-live.jsonl`. Tail either stream with `python -m ag checker-log C:\repo critic` or `... switch`. These files are append-only process evidence, not acceptance reports.
+Configured critic and switch chats stream their incremental reasoning/content into `<AG_HOME>/projects/<PROJECT_KEY>/critic-live.jsonl` and `switch-live.jsonl`. Tail either stream with `python -m ag checker-log <PROJECT_ROOT> critic` or `... switch`. These files are append-only process evidence, not acceptance reports.
 
 ## Change-aware advice
 
@@ -96,16 +105,29 @@ Configured critic and switch chats stream their incremental reasoning/content in
 
 `see-10` records repeated CSS selectors across files, including selector counts, `!important` counts, consumers, and co-change history. `see-11` turns those symptoms into an ownership table with definers, modifiers, overriders, and consumers. `see-12` tracks suppression directive deltas (`suppression_delta`) and upward/reverse imports across languages. `see-13` reports seat/pack health (`critic-live.jsonl` and `switch-live.jsonl` sizes, sealed redlines, and binary/oversize `.ag-check` exclusions). `see-14` aggregates ticket history and recurring red lines from `.data/tickets/` and `plug_dir`. `see-15` records the one-front-one-back (`ticket` + single `switch`) review token ledger (`ticket_pack_chars`, `raw_file_chars`, `slimmed_file_chars`, `saved_chars`, `script_short_circuit`, and `script_digest` summary) under `plug/see-15/token_ledger.json`.
 
-## Critic config
+## Critic config (`critic.json`)
 
-Open this checkout's `critic.json` in Notepad. The file holds the seat endpoint, model, timeout, and the environment-variable name for the API key. The key itself stays in that environment variable.
+Inspect dynamically resolved config paths, readiness status (`reviewer_ready`, `api_key_present`), and the standard JSON template via CLI or `ag_status.onboarding.config_guide`:
 
 ```powershell
-.\ag-config.bat
-.\ag-config.bat C:\path\to\another\checkout
+python -m ag config <PROJECT_ROOT>
 ```
 
-A missing file is created as a template with `enabled` false. An existing file is left unchanged. Pass no argument to open the config for the checkout that contains the bat.
+Configuration lives in `<AG_HOME>/critic.json` (global default, `~/.ag/critic.json`) or `<AG_HOME>/projects/<PROJECT_KEY>/critic.json` (per-project override). The file holds the seat endpoint, model, timeout, and the environment-variable name for the API key (`api_key_env`). The API key itself stays in that environment variable and is never written to `critic.json`:
+
+```json
+{
+  "enabled": true,
+  "endpoint": "https://api.deepseek.com/v1/chat/completions",
+  "model": "deepseek-reasoner",
+  "api_key_env": "AG_CRITIC_API_KEY",
+  "timeout": 90,
+  "worker_model": "",
+  "allow_same_family": false
+}
+```
+
+See [`docs/configuration.md`](docs/configuration.md) for full details.
 
 ## Skill installation
 

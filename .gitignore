@@ -7,5 +7,7 @@ tests/
 build/
 dist/
 src/ag.egg-info/
-docs/
+docs/strategy-map.svg
+docs/strategy-notes.md
+docs/templates/
 .data/

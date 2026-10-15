@@ -18,9 +18,29 @@ TICKETS_DIR_NAME = "tickets"
 _HEADING = re.compile(r"^##\s*(意图|红线|现场)\s*$")
 _BULLET = re.compile(r"^(?:[-*•]+|\d+[.)])\s+")
 
+STARTER_TICKET_TEMPLATE = """# 票
+
+## 意图
+做成之后：请在此用大白话写明本票要解决的业务目标与可观察的完成态（让未看过上下文的新审核线程也能一眼看懂）。
+
+anchor: 在目标模块中建立核心行为闭环：当输入合法参数或触发正常流程时完成预期处理并返回结果，若输入非法或越界则立即拒绝并给出明确错误提示
+
+## 红线
+- 聚焦边界铁律：请写明本票严禁触碰的文件、接口或行为底线（必须具体可验证，切勿写“保证代码质量/不要出bug”等空泛套话）。
+"""
+
 
 def ticket_path(root: Path) -> Path:
     return Path(root) / ".data" / TICKET_NAME
+
+
+def ensure_starter_ticket(root: Path) -> tuple[Path, bool]:
+    path = ticket_path(root)
+    if path.is_file():
+        return path, False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(STARTER_TICKET_TEMPLATE, encoding="utf-8")
+    return path, True
 
 
 def copy_path(root: Path) -> Path:
@@ -66,7 +86,11 @@ def archive_ticket(root: Path, task_id: str, text: str) -> str:
 def require_ticket(root: Path) -> str:
     path = ticket_path(root)
     if not path.is_file():
-        raise ChainBroken(f"ag_start requires .data/ticket.md; missing {path}")
+        raise ChainBroken(
+            f"ag_start requires .data/ticket.md; missing {path} "
+            "[原因] 缺少本票意图文件 .data/ticket.md "
+            "[下一步] 请先在 <PROJECT_ROOT>/.data/ticket.md 中填写 ## 意图、正反行为链路 anchor: 与聚焦 ## 红线（或运行 ag_enroll 自动生成模板）后再调用 ag_start"
+        )
     return path.read_text(encoding="utf-8")
 
 

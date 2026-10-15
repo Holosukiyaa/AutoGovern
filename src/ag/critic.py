@@ -9,6 +9,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -20,6 +21,7 @@ from .store import event_count, insert_critic_event, list_critic_events
 
 PACK_SCHEMA = "ag.critic-pack.v1"
 RUN_SCHEMA = "ag.critic-run.v1"
+CONFIG_GUIDE_SCHEMA = "ag.config-guide.v1"
 MAX_FILE_CHARS = 100_000
 MAX_INLINE_FILE_CHARS = 12_000
 DIFF_WINDOW_RADIUS = 30
@@ -701,6 +703,10 @@ def pack(
     }
 
 
+def global_config_path() -> Path:
+    return ag_home() / CONFIG_NAME
+
+
 def config_path(root: Path) -> Path:
     return ag_home() / "projects" / project_key(real_root(root)) / CONFIG_NAME
 
@@ -710,20 +716,15 @@ def config_template() -> dict[str, Any]:
     return {
         "enabled": False,
         "endpoint": "https://api.deepseek.com",
-        "model": "deepseek-flash",
+        "model": "deepseek-chat",
         "api_key_env": DEFAULT_API_KEY_ENV,
         "timeout": DEFAULT_TIMEOUT,
-        "worker_model": "grok",
+        "worker_model": "claude",
         "allow_same_family": False,
     }
 
 
-def ensure_config_file(root: Path) -> Path:
-    """Return critic.json. Create the template only when the file is absent."""
-    root = real_root(root)
-    if not root.is_dir():
-        raise ChainBroken(f"config root is not a directory: {root}")
-    path = config_path(root)
+def _write_config_template(path: Path) -> Path:
     if path.is_file():
         return path
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -739,6 +740,19 @@ def ensure_config_file(root: Path) -> Path:
     return path
 
 
+def ensure_global_config_file() -> Path:
+    """Return global critic.json under AG_HOME. Create template only when absent."""
+    return _write_config_template(global_config_path())
+
+
+def ensure_config_file(root: Path) -> Path:
+    """Return critic.json. Create the template only when the file is absent."""
+    root = real_root(root)
+    if not root.is_dir():
+        raise ChainBroken(f"config root is not a directory: {root}")
+    return _write_config_template(config_path(root))
+
+
 def report_path(root: Path) -> Path:
     return ag_home() / "projects" / project_key(real_root(root)) / REPORT_NAME
 
@@ -751,8 +765,45 @@ def _truthy(raw: str) -> bool:
     return raw.strip().casefold() in {"1", "true", "yes", "on"}
 
 
-def load_config(root: Path) -> dict[str, Any]:
-    """Merge critic.json with AG_CRITIC_* env. Missing file is not an error."""
+def _apply_config_blob(cfg: dict[str, Any], path: Path) -> dict[str, Any] | None:
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {"error": f"invalid-config: {exc}", "path": str(path)}
+    if not isinstance(blob, dict):
+        return {"error": "invalid-config: critic.json is not an object", "path": str(path)}
+    if "enabled" in blob:
+        cfg["enabled"] = bool(blob.get("enabled"))
+    if blob.get("endpoint"):
+        cfg["endpoint"] = str(blob["endpoint"]).strip()
+    if blob.get("model"):
+        cfg["model"] = str(blob["model"]).strip()
+    if blob.get("api_key_env"):
+        cfg["api_key_env"] = str(blob["api_key_env"]).strip()
+    try:
+        if blob.get("timeout") is not None:
+            cfg["timeout"] = int(blob["timeout"])
+    except (TypeError, ValueError):
+        return {"error": "invalid-config: timeout must be an int", "path": str(path)}
+    if blob.get("worker_model"):
+        cfg["worker_model"] = str(blob["worker_model"]).strip()
+    if "allow_same_family" in blob:
+        cfg["allow_same_family"] = bool(blob.get("allow_same_family"))
+    cfg["path"] = str(path)
+    return None
+
+
+def load_config(root: Path | None = None) -> dict[str, Any]:
+    """Merge global critic.json, project critic.json, and AG_CRITIC_* env. Missing file is not an error."""
+    g_path = global_config_path()
+    p_path = config_path(root) if root is not None else None
+    default_path = (
+        str(p_path)
+        if (p_path is not None and p_path.is_file())
+        else str(g_path)
+        if g_path.is_file()
+        else str(p_path or g_path)
+    )
     cfg: dict[str, Any] = {
         "enabled": False,
         "endpoint": "",
@@ -761,33 +812,16 @@ def load_config(root: Path) -> dict[str, Any]:
         "timeout": DEFAULT_TIMEOUT,
         "worker_model": "",
         "allow_same_family": False,
-        "path": str(config_path(root)),
+        "path": default_path,
     }
-    path = config_path(root)
-    if path.is_file():
-        try:
-            blob = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            return {"error": f"invalid-config: {exc}", "path": str(path)}
-        if not isinstance(blob, dict):
-            return {"error": "invalid-config: critic.json is not an object", "path": str(path)}
-        if "enabled" in blob:
-            cfg["enabled"] = bool(blob.get("enabled"))
-        if blob.get("endpoint"):
-            cfg["endpoint"] = str(blob["endpoint"]).strip()
-        if blob.get("model"):
-            cfg["model"] = str(blob["model"]).strip()
-        if blob.get("api_key_env"):
-            cfg["api_key_env"] = str(blob["api_key_env"]).strip()
-        try:
-            if blob.get("timeout") is not None:
-                cfg["timeout"] = int(blob["timeout"])
-        except (TypeError, ValueError):
-            return {"error": "invalid-config: timeout must be an int", "path": str(path)}
-        if blob.get("worker_model"):
-            cfg["worker_model"] = str(blob["worker_model"]).strip()
-        if "allow_same_family" in blob:
-            cfg["allow_same_family"] = bool(blob.get("allow_same_family"))
+    if g_path.is_file():
+        err = _apply_config_blob(cfg, g_path)
+        if err is not None:
+            return err
+    if p_path is not None and p_path.is_file():
+        err = _apply_config_blob(cfg, p_path)
+        if err is not None:
+            return err
     enabled_env = os.environ.get("AG_CRITIC_ENABLED")
     if enabled_env is not None:
         cfg["enabled"] = _truthy(enabled_env)
@@ -813,6 +847,98 @@ def load_config(root: Path) -> dict[str, Any]:
 
 def _configured(cfg: dict[str, Any]) -> bool:
     return bool(cfg.get("enabled") and str(cfg.get("endpoint") or "").strip() and str(cfg.get("model") or "").strip())
+
+
+def config_guide(root: Path | None = None, *, ensure_file: bool = False) -> dict[str, Any]:
+    target_root = real_root(root) if root is not None else None
+    has_project_root = target_root is not None and target_root.is_dir()
+    if ensure_file:
+        if has_project_root and target_root is not None:
+            ensure_config_file(target_root)
+        else:
+            ensure_global_config_file()
+    g_path = global_config_path()
+    p_path = config_path(target_root) if (has_project_root and target_root is not None) else None
+    cfg = load_config(target_root if has_project_root else None)
+    api_key_env = str(cfg.get("api_key_env") or DEFAULT_API_KEY_ENV).strip() or DEFAULT_API_KEY_ENV
+    api_key_present = bool(os.environ.get(api_key_env, "").strip())
+    same_fam = bool(
+        not cfg.get("allow_same_family")
+        and same_family(str(cfg.get("model") or ""), str(cfg.get("worker_model") or ""))
+    )
+    reviewer_ready = bool(not cfg.get("error") and _configured(cfg) and api_key_present and not same_fam)
+    missing: list[str] = []
+    if cfg.get("error"):
+        missing.append(str(cfg["error"]))
+    if not cfg.get("enabled"):
+        missing.append("enabled 为 false（请将 critic.json 中的 enabled 设为 true 以启用独立审核）")
+    if not str(cfg.get("endpoint") or "").strip():
+        missing.append("endpoint 为空（请填写兼容 OpenAI /chat/completions 的 API 地址，如 https://api.deepseek.com）")
+    if not str(cfg.get("model") or "").strip():
+        missing.append("model 为空（请填写审核模型名称，如 deepseek-chat）")
+    if not api_key_present:
+        missing.append(
+            f"环境变量 {api_key_env} 未设置（请在终端或系统环境变量中设置该变量，不要将密钥明文写入 JSON）"
+        )
+    if same_fam:
+        missing.append(
+            "审核模型 model 与施工模型 worker_model 属于同一家族（请更换不同家族的审核模型，或将 allow_same_family 设为 true）"
+        )
+    ag_src = str(Path(__file__).resolve().parents[1])
+    return {
+        "schema": CONFIG_GUIDE_SCHEMA,
+        "config_path": str(p_path or g_path),
+        "global_config_path": str(g_path),
+        "project_config_path": str(p_path) if p_path else "",
+        "active_config_path": str(cfg.get("path") or (p_path or g_path)),
+        "reviewer_ready": reviewer_ready,
+        "api_key_env": api_key_env,
+        "api_key_present": api_key_present,
+        "missing": missing,
+        "current": {
+            "enabled": bool(cfg.get("enabled")),
+            "endpoint": str(cfg.get("endpoint") or ""),
+            "model": str(cfg.get("model") or ""),
+            "api_key_env": api_key_env,
+            "timeout": int(cfg.get("timeout") or DEFAULT_TIMEOUT),
+            "worker_model": str(cfg.get("worker_model") or ""),
+            "allow_same_family": bool(cfg.get("allow_same_family")),
+        },
+        "template": config_template(),
+        "fields": {
+            "enabled": "布尔值（true/false）：是否启用独立 DS 审核（ticket 开票审与 switch 交卷闸）",
+            "endpoint": "字符串：兼容 OpenAI /chat/completions 的接口基础地址（如 https://api.deepseek.com）",
+            "model": "字符串：审核模型名称（如 deepseek-chat 或 deepseek-reasoner）",
+            "api_key_env": "字符串：读取 API Key 的系统环境变量名（默认 AG_CRITIC_API_KEY，切勿填入密钥明文）",
+            "timeout": "整数：单次审核请求超时秒数（默认 60）",
+            "worker_model": "字符串：施工方 AI 模型标识（用于同家族回避检查，如 claude / gpt / gemini / grok）",
+            "allow_same_family": "布尔值：是否允许审核模型与施工模型同属一个模型家族（默认 false）",
+        },
+        "mcp_config_example": {
+            "mcpServers": {
+                "ag": {
+                    "command": "<PYTHON_EXECUTABLE>",
+                    "args": ["-m", "ag", "mcp"],
+                    "env": {
+                        "AG_HOME": "<AG_HOME>",
+                        "PYTHONPATH": "<AG_REPO_ROOT>/src",
+                        api_key_env: "<YOUR_API_KEY>",
+                    },
+                }
+            },
+            "detected_runtime": {
+                "python_executable": sys.executable,
+                "ag_home": str(ag_home()),
+                "ag_src": ag_src,
+            },
+        },
+        "ai_guide": [
+            "1. 引导用户选择全局配置（global_config_path，所有项目共用）或当前项目配置（project_config_path）。",
+            "2. 根据用户使用的审核服务商修改 JSON 中的 endpoint、model、worker_model，并将 enabled 设为 true。",
+            f"3. 提醒用户在系统环境变量或 MCP 客户端 env 中设置 {api_key_env}（严禁将密钥明文写入 critic.json）。",
+            "4. 配置完成后运行 `python -m ag config <PROJECT_ROOT>` 或调用 `ag_status` 确认 `reviewer_ready: true`。",
+        ],
+    }
 
 
 def complete_chat(config: dict[str, Any], messages: list[dict[str, str]]) -> tuple[str, str]:

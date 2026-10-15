@@ -119,8 +119,9 @@ def main(argv: list[str] | None = None) -> int:
     worker_read_p.add_argument("worker_id")
     install_p = sub.add_parser("install-skill", help="install bundled ag-anchor skill to the user skills directory")
     install_p.add_argument("--target", choices=("codex", "grok"), required=True)
-    config_p = sub.add_parser("config", help="print critic.json; create a template only when the file is missing")
-    config_p.add_argument("root", nargs="?", default="", help="checkout whose critic.json to open; default is the current directory")
+    config_p = sub.add_parser("config", help="output structured critic.json configuration guide and ensure template file exists")
+    config_p.add_argument("root", nargs="?", default="", help="target repository path; default is current directory")
+    config_p.add_argument("--path-only", action="store_true", help="only print the resolved critic.json path")
     plug_p = sub.add_parser("plug", help="list/on/off a pluggable strategy by lane-seq")
     plug_p.add_argument("action", choices=["list", "on", "off"])
     plug_p.add_argument("root")
@@ -220,11 +221,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "hook":
             return hook_main()
         if args.cmd == "config":
-            from .critic import ensure_config_file
+            from .critic import config_guide, ensure_config_file
 
             raw = str(args.root or "").strip()
             root = Path(raw).expanduser() if raw else Path.cwd()
-            print(ensure_config_file(root))
+            if args.path_only:
+                print(ensure_config_file(root))
+                return 0
+            print(json.dumps(config_guide(root, ensure_file=True), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "plug":
             root = Path(args.root)

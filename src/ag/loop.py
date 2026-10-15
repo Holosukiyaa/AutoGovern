@@ -155,13 +155,63 @@ def _deliver_token_ok(root: Path) -> bool:
     return hmac.compare_digest(got, expected)
 
 
-def _dirty(root: Path) -> bool:
-    for line in git(root, "status", "--porcelain", check=False).splitlines():
-        path = line[3:].replace("\\", "/").strip().strip('"')
-        if path == ".ag" or path.startswith(".ag/"):
+LOCAL_EXCLUDE_ENTRIES: tuple[str, ...] = (".data/", ".ag-check/")
+
+
+def ensure_local_excludes(root: Path) -> dict[str, Any]:
+    common_raw = git(root, "rev-parse", "--git-common-dir", check=False)
+    if not common_raw:
+        return {"exclude_path": "", "entries": [], "exclude_ready": False}
+    git_common = _resolve_git_path(root, common_raw)
+    exclude_path = git_common / "info" / "exclude"
+    try:
+        existing_text = exclude_path.read_text(encoding="utf-8", errors="replace") if exclude_path.is_file() else ""
+    except OSError:
+        existing_text = ""
+    existing_norms = {
+        line.strip().lstrip("/").rstrip("/")
+        for line in existing_text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+    missing = [
+        entry
+        for entry in LOCAL_EXCLUDE_ENTRIES
+        if entry.strip().lstrip("/").rstrip("/") not in existing_norms
+    ]
+    if missing or not exclude_path.is_file():
+        try:
+            exclude_path.parent.mkdir(parents=True, exist_ok=True)
+            prefix = existing_text
+            if prefix and not prefix.endswith("\n"):
+                prefix += "\n"
+            addition = "".join(f"{entry}\n" for entry in missing)
+            exclude_path.write_text(prefix + addition, encoding="utf-8")
+        except OSError:
+            return {"exclude_path": str(exclude_path), "entries": list(LOCAL_EXCLUDE_ENTRIES), "exclude_ready": False}
+    return {
+        "exclude_path": str(exclude_path),
+        "entries": list(LOCAL_EXCLUDE_ENTRIES),
+        "exclude_ready": True,
+    }
+
+
+def _dirty_files(root: Path, limit: int = 8) -> list[str]:
+    files: list[str] = []
+    raw_out = git_run(root, "status", "--porcelain").stdout or ""
+    for line in raw_out.splitlines():
+        body = line[3:] if len(line) > 3 and line[2] == " " else (line.split(None, 1)[1] if len(line.split(None, 1)) > 1 else "")
+        path = body.replace("\\", "/").strip().strip('"')
+        if not path or path == ".ag" or path.startswith(".ag/"):
             continue
-        return True
-    return False
+        if path not in files:
+            files.append(path)
+        if len(files) >= limit:
+            break
+    return files
+
+
+def _dirty(root: Path) -> bool:
+    return bool(_dirty_files(root, limit=1))
 
 
 def _ticket_paths(worktree: Path, source_head: str) -> list[str]:
@@ -316,12 +366,22 @@ def _drop_project(key: str) -> None:
 def enroll(root: Path, *, test_argv: list[str] | None = None, note: str = "") -> dict[str, Any]:
     root = real_root(root)
     if not root.is_dir():
-        raise ChainBroken(f"not a directory: {root}")
+        raise ChainBroken(f"not a directory: {root} [原因] 指定的路径不是有效目录 [下一步] 请传入 Git 主仓根目录 <PROJECT_ROOT>")
     git(root, "rev-parse", "--is-inside-work-tree")
     if not _is_canonical(root):
-        raise ChainBroken("enroll the canonical checkout, not a worktree")
+        raise ChainBroken(
+            "enroll the canonical checkout, not a worktree "
+            "[原因] 当前目录是工作树而非主仓根目录 "
+            "[下一步] 请切换回主仓根目录 <PROJECT_ROOT> 后再执行 ag_enroll"
+        )
+    ensure_local_excludes(root)
     if _dirty(root):
-        raise ChainBroken("cannot enroll while canonical is dirty")
+        dirty_list = ", ".join(_dirty_files(root))
+        raise ChainBroken(
+            f"cannot enroll while canonical is dirty ({dirty_list}) "
+            "[原因] 主仓存在未提交或未忽略的改动 "
+            "[下一步] 请先 git commit / git stash 清理上述文件后再执行 ag_enroll"
+        )
     key = project_key(root)
     item = lookup_project(root)
     first = item is None
@@ -367,6 +427,9 @@ def enroll(root: Path, *, test_argv: list[str] | None = None, note: str = "") ->
             _restore_git_gate(root, previous)
             _drop_project(key)
         raise
+    from .ticket_doc import ensure_starter_ticket
+
+    ensure_starter_ticket(root)
     usage_note(root, "ship", 9, "help", "canonical commit refused")
     return status(root)
 
@@ -409,13 +472,87 @@ def _anchor_exam(task: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _onboarding_status(
+    root: Path,
+    *,
+    task: dict[str, Any] | None,
+    exclude_info: dict[str, Any],
+) -> dict[str, Any]:
+    t_path = root / ".data" / "ticket.md"
+    ticket_ready = t_path.is_file()
+    try:
+        from .critic import config_guide
+
+        guide = config_guide(root, ensure_file=False)
+    except Exception:
+        try:
+            from .critic import DEFAULT_API_KEY_ENV, config_path, config_template, load_config
+
+            cfg = load_config(root)
+            api_key_env = str(cfg.get("api_key_env") or DEFAULT_API_KEY_ENV)
+            api_key_present = bool(os.environ.get(api_key_env, "").strip())
+            enabled = bool(cfg.get("enabled"))
+            endpoint = str(cfg.get("endpoint") or "").strip()
+            model = str(cfg.get("model") or "").strip()
+            reviewer_ready_fb = bool(enabled and endpoint and model and api_key_present and not cfg.get("error"))
+            guide = {
+                "schema": "ag.config-guide.v1",
+                "project_config_path": str(config_path(root)),
+                "global_config_path": str(ag_home() / "critic.json"),
+                "reviewer_ready": reviewer_ready_fb,
+                "enabled": enabled,
+                "api_key_env": api_key_env,
+                "api_key_present": api_key_present,
+                "template": config_template(),
+            }
+        except Exception:
+            guide = {"reviewer_ready": False, "api_key_present": False}
+    reviewer_ready = bool(guide.get("reviewer_ready"))
+    if not ticket_ready:
+        next_step = "1. 请在 .data/ticket.md 中编写 ## 意图、正反完整链路 anchor: 与聚焦 ## 红线，然后调用 ag_start。"
+    elif task is None:
+        next_step = "2. .data/ticket.md 已就绪；请先核对内容，再调用 ag_start 创建隔离工作树并运行开票审票（如需启用 DS 独立审核，请按 onboarding.config_guide 指引配置 critic.json）。"
+    elif not bool(task.get("intent_map_confirmed")):
+        tr = task.get("ticket_review") if isinstance(task.get("ticket_review"), dict) else {}
+        if bool(tr.get("configured")) and str(tr.get("outcome") or "").strip().casefold() not in {"passed", "pass", "allow"}:
+            next_step = "3. 开票审票未通过（ticket-review-rejected）：请根据 ticket_review.doubts 修改 .data/ticket.md，然后再次调用 ag_start 原地重封存并重审。"
+        else:
+            next_step = "3. 工作树已冻结：请将 anchor_preview（.data/ticket.md 全文）展示给用户审阅；待用户明确回复“确认”后，调用 confirm-map 解冻工作树。"
+    elif not task.get("verified_tree"):
+        next_step = "4. 工作树已解冻：请仅在 worktree 目录内修改代码，并在 worktree/.ag-check/ 下编写本票一次性自检脚本，完成后调用 ag_verify。"
+    else:
+        next_step = "5. ag_verify 已通过：请核对 anchor_progress 后调用 ag_finish 快进合入主仓。"
+    return {
+        "enrolled": True,
+        "exclude_ready": bool(exclude_info.get("exclude_ready")),
+        "exclude_path": str(exclude_info.get("exclude_path") or ""),
+        "ticket_ready": ticket_ready,
+        "ticket_path": str(t_path),
+        "reviewer_ready": reviewer_ready,
+        "config_guide": guide,
+        "next_step": next_step,
+        "docs": {
+            "agents": "AGENTS.md",
+            "guide": "docs/guide.md",
+            "configuration": "docs/configuration.md",
+            "troubleshooting": "docs/troubleshooting.md",
+            "skill": "skills/ag-anchor/SKILL.md",
+        },
+    }
+
+
 def status(root: Path) -> dict[str, Any]:
     root = real_root(root)
     item = lookup_project(root)
     if item is None:
-        raise ChainBroken(f"not enrolled: {root}")
+        raise ChainBroken(
+            f"not enrolled: {root} "
+            "[原因] 当前仓库尚未加入 ag 治理 "
+            "[下一步] 请先在主仓根目录执行 ag_enroll"
+        )
     key = str(item.get("key") or project_key(root))
     _ensure_hook_files(key, root)
+    exclude_info = ensure_local_excludes(root)
     test_argv = [str(x) for x in (item.get("test_argv") or [])]
     task = load_task(key)
     verify = task.get("verify") if isinstance(task, dict) else None
@@ -499,6 +636,7 @@ def status(root: Path) -> dict[str, Any]:
             if not issued:
                 task["anchor_template_issued"] = True
                 save_task(key, task)
+    out["onboarding"] = _onboarding_status(root, task=task, exclude_info=exclude_info)
     try:
         from .see import run as see_run
 
@@ -551,15 +689,26 @@ def start(
     Windows freeze is a recoverable ACL deny-write entry. Elsewhere it is the
     user-write bit. Either mechanism is friction, not an absolute security boundary.
     """
+    ensure_local_excludes(root)
     state = status(root)
     root = Path(state["root"])
     key = str(state["key"])
     if state["canonical_dirty"]:
+        dirty_list = ", ".join(_dirty_files(root))
+        dirty_hint = f" ({dirty_list})" if dirty_list else ""
         usage_note(root, "ship", 8, "block", "start canonical dirty")
-        raise ChainBroken("canonical checkout is dirty; not a work site")
+        raise ChainBroken(
+            f"canonical checkout is dirty; not a work site{dirty_hint} "
+            "[原因] 主仓存在未提交或未忽略的改动 "
+            "[下一步] 请先 git commit / git stash 清理主仓改动后再调用 ag_start"
+        )
     if not state["hook_ok"]:
         usage_note(root, "ship", 8, "block", "start hook missing")
-        raise ChainBroken("hook is not installed; re-enroll")
+        raise ChainBroken(
+            "hook is not installed; re-enroll "
+            "[原因] Git 门禁钩子未安装或已失效 "
+            "[下一步] 请重新调用 ag_enroll 修复钩子后再调用 ag_start"
+        )
     from .anchor_map import attention_anchors, hard_rules, resolve_fixed
     from .ticket_doc import (
         collect_redlines,
@@ -592,7 +741,11 @@ def start(
             task_rules = hard_rules(task_anchors)
             if not task_fixed and not task_anchors:
                 usage_note(root, "ship", 8, "block", "start without intent anchors")
-                raise ChainBroken("intent sync required: provide a locked result or at least one attention anchor")
+                raise ChainBroken(
+                    "intent sync required: provide a locked result or at least one attention anchor "
+                    "[原因] .data/ticket.md 中缺少 anchor: 意图锚点 "
+                    "[下一步] 请在 .data/ticket.md 的 ## 意图 下补充至少一条正反行为闭环 anchor: 后重试"
+                )
             redlines = collect_redlines(redline_body, task_anchors)
             baseline_prev = list(
                 dict.fromkeys(
@@ -657,10 +810,18 @@ def start(
     if existing:
         save_task(key, None)
     if not _is_canonical(root):
-        raise ChainBroken("start from the canonical checkout")
+        raise ChainBroken(
+            "start from the canonical checkout "
+            "[原因] 当前路径不是主仓根目录 "
+            "[下一步] 请传入主仓根目录 <PROJECT_ROOT> 调用 ag_start"
+        )
     branch = git(root, "rev-parse", "--abbrev-ref", "HEAD")
     if branch in {"HEAD", ""}:
-        raise ChainBroken("canonical HEAD is detached")
+        raise ChainBroken(
+            "canonical HEAD is detached "
+            "[原因] 主仓处于游离 HEAD 状态 "
+            "[下一步] 请先切换回具名分支（如 git switch main/master）后再调用 ag_start"
+        )
     chosen = str(portrait or "")
     document = require_ticket(root)
     intent_body, redline_body = split_document(document)
@@ -670,7 +831,11 @@ def start(
     task_rules = hard_rules(task_anchors)
     if not task_fixed and not task_anchors:
         usage_note(root, "ship", 8, "block", "start without intent anchors")
-        raise ChainBroken("intent sync required: provide a locked result or at least one attention anchor")
+        raise ChainBroken(
+            "intent sync required: provide a locked result or at least one attention anchor "
+            "[原因] .data/ticket.md 中缺少 anchor: 意图锚点 "
+            "[下一步] 请在 .data/ticket.md 的 ## 意图 下补充至少一条正反行为闭环 anchor: 后重试"
+        )
     redlines = collect_redlines(redline_body, task_anchors)
     prev_redlines = previous_redlines(root)
     dropped = dropped_redlines(prev_redlines, redlines)
@@ -749,7 +914,13 @@ def start(
 
 
 def _refuse_dirty_verify(root: Path, key: str, task: dict[str, Any], state: dict[str, Any]) -> None:
-    reason = "canonical-dirty: canonical is dirty; ag_verify refused before tests, probes, critic, and switch"
+    dirty_list = ", ".join(_dirty_files(root))
+    dirty_hint = f" ({dirty_list})" if dirty_list else ""
+    reason = (
+        "canonical-dirty: canonical is dirty; ag_verify refused before tests, probes, critic, and switch"
+        f"{dirty_hint} [原因] 主仓存在未提交或未忽略的改动 "
+        "[下一步] 请先清理主仓改动（恢复或 git stash），确保仅在 worktree 内施工后再调用 ag_verify"
+    )
     porcelain = git(root, "status", "--porcelain", check=False)[:4000]
     evidence = {
         "refused": "canonical-dirty",
@@ -785,9 +956,17 @@ def verify(root: Path) -> dict[str, Any]:
     key = str(state["key"])
     task = load_task(key)
     if not task:
-        raise ChainBroken("no open task; ag_start first")
+        raise ChainBroken(
+            "no open task; ag_start first "
+            "[原因] 当前没有进行中的票据任务 "
+            "[下一步] 请先编写 .data/ticket.md 并调用 ag_start"
+        )
     if not bool(task.get("intent_map_confirmed")):
-        reason = "intent-map-unconfirmed: ag_verify refused; user must confirm the anchor map first"
+        reason = (
+            "intent-map-unconfirmed: ag_verify refused; user must confirm the anchor map first "
+            "[原因] 尚未由用户确认意图锚点预览（工作树仍处于冻结态） "
+            "[下一步] 请先向用户展示 anchor_preview（.data/ticket.md 全文），待用户明确回复“确认”后调用 confirm-map，再执行 ag_verify"
+        )
         task["verify"] = {"exit": 1, "stderr": reason, "refused": "intent-map-unconfirmed"}
         task["verified_tree"] = ""
         save_task(key, task)
@@ -796,7 +975,11 @@ def verify(root: Path) -> dict[str, Any]:
         raise ChainBroken(reason)
     worktree = Path(str(task.get("worktree") or ""))
     if not worktree.is_dir():
-        raise ChainBroken(f"worktree missing: {worktree}")
+        raise ChainBroken(
+            f"worktree missing: {worktree} "
+            "[原因] 隔离工作树目录不存在 "
+            "[下一步] 请调用 ag_abandon 清理失效任务后重新调用 ag_start"
+        )
     if state.get("canonical_dirty"):
         _refuse_dirty_verify(Path(state["root"]), key, task, state)
     task_id = str(task.get("id") or "")
@@ -1029,7 +1212,11 @@ def confirm_map(root: Path) -> dict[str, Any]:
     key = str(state["key"])
     task = load_task(key)
     if not task:
-        raise ChainBroken("no open task; ag_start first")
+        raise ChainBroken(
+            "no open task; ag_start first "
+            "[原因] 当前没有进行中的票据任务 "
+            "[下一步] 请先编写 .data/ticket.md 并调用 ag_start"
+        )
     if not bool(task.get("intent_map_confirmed")):
         tr = task.get("ticket_review") if isinstance(task.get("ticket_review"), dict) else {}
         if bool(tr.get("configured")) and str(tr.get("outcome") or "").strip().casefold() not in {"passed", "pass", "allow"}:
@@ -1043,7 +1230,9 @@ def confirm_map(root: Path) -> dict[str, Any]:
             )
             raise ChainBroken(
                 f"ticket-review-rejected: startup ticket failed review ({tr.get('reason') or tr.get('report_id') or tr.get('outcome')}); "
-                "revise .data/ticket.md and run ag_start to re-seal before confirm-map"
+                "revise .data/ticket.md and run ag_start to re-seal before confirm-map "
+                "[原因] 开票审票（DS 首轮审票）未通过 "
+                "[下一步] 请根据 ticket_review.doubts 修改 .data/ticket.md，再次调用 ag_start 原地重封存并重审通过后再执行 confirm-map"
             )
         if bool(tr.get("configured")):
             usage_note(root, "ship", 13, "help", "ticket review passed")
@@ -1075,7 +1264,11 @@ def finish(root: Path) -> dict[str, Any]:
     key = str(state["key"])
     task = load_task(key)
     if not task:
-        raise ChainBroken("no open task")
+        raise ChainBroken(
+            "no open task "
+            "[原因] 当前没有进行中的票据任务 "
+            "[下一步] 请先调用 ag_start"
+        )
 
     def _no(reason: str, lane: int = 6, detail: str = "") -> None:
         usage_note(root, "ship", lane, "block", detail or reason)
@@ -1083,26 +1276,68 @@ def finish(root: Path) -> dict[str, Any]:
         raise ChainBroken(reason)
 
     if not bool(task.get("intent_map_confirmed")):
-        _no("intent map is not confirmed; user approval is required", 8, "finish intent map unconfirmed")
+        _no(
+            "intent map is not confirmed; user approval is required "
+            "[原因] 用户尚未确认意图锚点 "
+            "[下一步] 请先向用户展示 anchor_preview，待用户确认后调用 confirm-map -> ag_verify -> ag_finish",
+            8,
+            "finish intent map unconfirmed",
+        )
     if not state["hook_ok"]:
-        _no("hook-removed: will not deliver", 8, "finish hook-removed")
+        _no(
+            "hook-removed: will not deliver "
+            "[原因] Git 门禁钩子缺失 "
+            "[下一步] 请调用 ag_enroll 修复钩子并重新执行 ag_verify 后再调用 ag_finish",
+            8,
+            "finish hook-removed",
+        )
     if state["canonical_dirty"]:
-        _no("canonical is dirty; will not deliver", 8, "finish canonical dirty")
+        _no(
+            "canonical is dirty; will not deliver "
+            "[原因] 主仓存在未提交改动 "
+            "[下一步] 请清理主仓改动并重新执行 ag_verify 后再调用 ag_finish",
+            8,
+            "finish canonical dirty",
+        )
     current = git(root, "rev-parse", "--abbrev-ref", "HEAD")
     if current != str(task.get("branch") or ""):
-        _no(f"canonical is on {current}, task started on {task.get('branch')}")
+        _no(
+            f"canonical is on {current}, task started on {task.get('branch')} "
+            "[原因] 主仓当前分支与开票时的分支不一致 "
+            f"[下一步] 请将主仓切换回 {task.get('branch')} 分支后再调用 ag_finish"
+        )
     worktree = Path(str(task.get("worktree") or ""))
     if not worktree.is_dir():
-        _no("worktree missing")
+        _no(
+            "worktree missing "
+            "[原因] 隔离工作树目录缺失 "
+            "[下一步] 请调用 ag_abandon 清理任务后重新开票"
+        )
     if not task.get("verified_tree"):
-        _no("not verified")
+        _no(
+            "not verified "
+            "[原因] 当前工作树尚未通过 ag_verify 验货 "
+            "[下一步] 请先调用 ag_verify 并确保验证通过后再调用 ag_finish"
+        )
     digest = tree_digest(worktree)
     if digest != task.get("verified_tree"):
-        _no("tree digest mismatch; run ag_verify again", 7, "mismatch")
+        _no(
+            "tree digest mismatch; run ag_verify again "
+            "[原因] ag_verify 之后工作树内容发生了变动 "
+            "[下一步] 请重新调用 ag_verify 锁定最新工作树摘要后再调用 ag_finish",
+            7,
+            "mismatch",
+        )
     verify_blob = task.get("verify") if isinstance(task.get("verify"), dict) else None
     red = _probe_red_ids(verify_blob)
     if red:
-        _no("probe red: " + ", ".join(red) + "; will not deliver", 6, "probe " + ",".join(red))
+        _no(
+            "probe red: " + ", ".join(red) + "; will not deliver "
+            "[原因] 探针检查未通过 "
+            "[下一步] 请修复红灯探针指出的问题并重新调用 ag_verify",
+            6,
+            "probe " + ",".join(red),
+        )
     switch_block = _switch_block_message(verify_blob)
     if switch_block:
         _no(switch_block)
