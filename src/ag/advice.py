@@ -1368,6 +1368,104 @@ def see_17(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
         "full_report": str(folder / "attendance.json"),
     }
 
+def see_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
+    """正本对账：评审历史只有一份正本，对出残留镜像与会被改坏的缓存。只出事实。"""
+    from .store import LLM_JSONL, legacy_db_residue, project_dir, scan_llm_log
+
+    pdir = project_dir(root)
+    seats: list[dict[str, Any]] = []
+    diffs: list[str] = []
+    briefs: list[str] = []
+    rows_total = 0
+    bad_total = 0
+    for seat, table in (("ticket", "ticket_event"), ("critic", "critic_event"), ("switch", "switch_event")):
+        name = LLM_JSONL[table]
+        scan = scan_llm_log(root, table)
+        rows = scan["rows"]
+        bad = int(scan["bad_lines"])
+        rows_total += len(rows)
+        bad_total += bad
+        tail = rows[-1] if rows else {}
+        cache_path = pdir / f"{seat}-last.json"
+        cache = _read_json(cache_path, {})
+        if not isinstance(cache, dict):
+            cache = {}
+        mismatches: list[str] = []
+        if rows:
+            if not cache_path.is_file():
+                mismatches.append(f"{seat}-last.json 不存在")
+            else:
+                for key in ("report_id", "ts", "outcome", "reason"):
+                    want = str(tail.get(key) or "")
+                    got = str(cache.get(key) or "")
+                    if want != got:
+                        mismatches.append(f"{key}: 正本={want or '(空)'} / 缓存={got or '(空)'}")
+        note = ""
+        if not scan["present"]:
+            note = f"该席 0 次（没有 {name}）"
+        elif not rows:
+            note = f"该席 0 次（{name} 是空文件）"
+        seats.append(
+            {
+                "seat": seat,
+                "master": str(scan["path"]),
+                "master_present": bool(scan["present"]),
+                "rows": len(rows),
+                "bad_lines": bad,
+                "last": (
+                    {
+                        "ts": str(tail.get("ts") or ""),
+                        "outcome": str(tail.get("outcome") or ""),
+                        "reason": str(tail.get("reason") or ""),
+                        "report_id": str(tail.get("report_id") or ""),
+                    }
+                    if tail
+                    else None
+                ),
+                "cache": str(cache_path),
+                "cache_present": cache_path.is_file(),
+                "cache_matches": not mismatches,
+                "mismatches": mismatches,
+                "note": note,
+            }
+        )
+        if mismatches:
+            diffs.append(f"{seat}：" + "；".join(mismatches))
+        briefs.append(f"{seat} {len(rows)}" + (f"(差{len(mismatches)})" if mismatches else ""))
+    residue = legacy_db_residue(root)
+    detail = " · ".join(briefs)
+    detail += f" · 坏行 {bad_total}"
+    if residue["present"]:
+        detail += f" · 残留镜像 {residue['rows']} 行/{len(residue['tables'])} 表"
+        if residue["error"]:
+            detail += f"（读不了：{residue['error']}）"
+    else:
+        detail += " · 无残留镜像"
+    detail += f" · 不一致 {len(diffs)} 席"
+    folder = plug_dir(root, "see", 18)
+    _write_json(
+        folder / "reconcile.json",
+        {
+            "t": time.time(),
+            "source": str(pdir),
+            "seats": seats,
+            "legacy_mirror": residue,
+            "rows": rows_total,
+            "bad_lines": bad_total,
+            "mismatches": diffs,
+            "detail": detail,
+        },
+    )
+    return {
+        "seats": seats,
+        "legacy_mirror": residue,
+        "rows": rows_total,
+        "bad_lines": bad_total,
+        "mismatches": diffs,
+        "detail": detail,
+        "source": str(pdir),
+        "full_report": str(folder / "reconcile.json"),
+    }
 
 HANDLERS = {
     ("lift", 1): lift_1,
@@ -1404,6 +1502,7 @@ HANDLERS = {
     ("see", 14): see_14,
     ("see", 15): see_15,
     ("see", 17): see_17,
+    ("see", 18): see_18,
 }
 
 

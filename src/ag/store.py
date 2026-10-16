@@ -1,7 +1,6 @@
-"""Project SQLite under AG_HOME. Not in the product tree."""
+"""AG_HOME side files. Review history has exactly one master: the jsonl log."""
 from __future__ import annotations
 
-import hashlib
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -10,227 +9,83 @@ from typing import Any
 
 from .managed import ag_home, project_key, real_root
 
-DB_NAME = "ag.sqlite"
+LEGACY_DB_NAME = "ag.sqlite"
 PENDING_NAME = "pending_repairs.json"
 LLM_PREFIX = {"critic_event": "cr", "switch_event": "sw", "ticket_event": "tr"}
 LLM_JSONL = {"critic_event": "critic.jsonl", "switch_event": "switch.jsonl", "ticket_event": "ticket.jsonl"}
-LLM_INSERT = """
-INSERT INTO {table} (
-    ts, outcome, reason, configured, prompt_version, store,
-    exam_sha256, pack_sha256, items_json, task_id, model,
-    probe_red_json, allow_same_family, thinking, timings_json
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-"""
 
 
-def db_path(root: Path) -> Path:
-    return ag_home() / "projects" / project_key(real_root(root)) / DB_NAME
+def legacy_db_path(root: Path) -> Path:
+    """The retired mirror. Read-only: nothing writes it again."""
+    return ag_home() / "projects" / project_key(real_root(root)) / LEGACY_DB_NAME
 
 
-def connect(root: Path) -> sqlite3.Connection:
-    path = db_path(root)
+def project_dir(root: Path) -> Path:
+    return ag_home() / "projects" / project_key(real_root(root))
+
+
+def append_project_jsonl(root: Path, name: str, row: dict[str, Any]) -> str:
+    path = project_dir(root) / str(name)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS critic_event (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts TEXT NOT NULL,
-            outcome TEXT NOT NULL,
-            reason TEXT NOT NULL DEFAULT '',
-            configured INTEGER NOT NULL DEFAULT 0,
-            prompt_version TEXT NOT NULL DEFAULT '',
-            store TEXT NOT NULL DEFAULT '',
-            exam_sha256 TEXT NOT NULL DEFAULT '',
-            pack_sha256 TEXT NOT NULL DEFAULT '',
-            items_json TEXT NOT NULL DEFAULT '[]',
-            task_id TEXT NOT NULL DEFAULT '',
-            model TEXT NOT NULL DEFAULT '',
-            probe_red_json TEXT NOT NULL DEFAULT '[]',
-            allow_same_family INTEGER NOT NULL DEFAULT 0
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS probe (
-            id TEXT PRIMARY KEY,
-            state TEXT NOT NULL DEFAULT 'armed',
-            quiet_count INTEGER NOT NULL DEFAULT 0,
-            ttl_quiet_loops INTEGER NOT NULL DEFAULT 10,
-            area_json TEXT NOT NULL DEFAULT '[]',
-            exam_fragment TEXT NOT NULL DEFAULT ''
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS heal_event (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts TEXT NOT NULL,
-            needles_json TEXT NOT NULL DEFAULT '[]',
-            diseases_json TEXT NOT NULL DEFAULT '[]',
-            repair_portrait TEXT NOT NULL DEFAULT ''
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS switch_event (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts TEXT NOT NULL,
-            outcome TEXT NOT NULL,
-            reason TEXT NOT NULL DEFAULT '',
-            configured INTEGER NOT NULL DEFAULT 0,
-            prompt_version TEXT NOT NULL DEFAULT '',
-            store TEXT NOT NULL DEFAULT '',
-            exam_sha256 TEXT NOT NULL DEFAULT '',
-            pack_sha256 TEXT NOT NULL DEFAULT '',
-            items_json TEXT NOT NULL DEFAULT '[]',
-            task_id TEXT NOT NULL DEFAULT '',
-            model TEXT NOT NULL DEFAULT '',
-            probe_red_json TEXT NOT NULL DEFAULT '[]',
-            allow_same_family INTEGER NOT NULL DEFAULT 0,
-            thinking TEXT NOT NULL DEFAULT '',
-            timings_json TEXT NOT NULL DEFAULT '{}'
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS ticket_event (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            ts TEXT NOT NULL,
-            outcome TEXT NOT NULL,
-            reason TEXT NOT NULL DEFAULT '',
-            configured INTEGER NOT NULL DEFAULT 0,
-            prompt_version TEXT NOT NULL DEFAULT '',
-            store TEXT NOT NULL DEFAULT '',
-            exam_sha256 TEXT NOT NULL DEFAULT '',
-            pack_sha256 TEXT NOT NULL DEFAULT '',
-            items_json TEXT NOT NULL DEFAULT '[]',
-            task_id TEXT NOT NULL DEFAULT '',
-            model TEXT NOT NULL DEFAULT '',
-            probe_red_json TEXT NOT NULL DEFAULT '[]',
-            allow_same_family INTEGER NOT NULL DEFAULT 0,
-            thinking TEXT NOT NULL DEFAULT '',
-            timings_json TEXT NOT NULL DEFAULT '{}'
-        )
-        """
-    )
-    cols = {str(item[1]) for item in conn.execute("PRAGMA table_info(critic_event)").fetchall()}
-    if "thinking" not in cols:
-        conn.execute("ALTER TABLE critic_event ADD COLUMN thinking TEXT NOT NULL DEFAULT ''")
-    if "timings_json" not in cols:
-        conn.execute("ALTER TABLE critic_event ADD COLUMN timings_json TEXT NOT NULL DEFAULT '{}'")
-    conn.commit()
-    return conn
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return str(path)
 
 
-def insert_llm_event(root: Path, table: str, row: dict[str, Any]) -> int:
-    if table not in LLM_PREFIX:
+def llm_log_path(root: Path, table: str) -> Path:
+    name = LLM_JSONL.get(table)
+    if not name:
         raise ValueError(table)
-    timings = dict(row.get("timings") or {}) if isinstance(row.get("timings"), dict) else {}
-    for extra_key in ("thread_id", "understood_goal", "summary", "scores", "doubts", "ticket_seq", "retried_lazy"):
-        if extra_key in row and extra_key not in timings and row[extra_key] not in (None, "", [], {}):
-            timings[extra_key] = row[extra_key]
-    conn = connect(root)
-    try:
-        cur = conn.execute(
-            LLM_INSERT.format(table=table),
-            (
-                str(row.get("ts") or ""),
-                str(row.get("outcome") or ""),
-                str(row.get("reason") or ""),
-                1 if row.get("configured") else 0,
-                str(row.get("prompt_version") or ""),
-                str(row.get("store") or ""),
-                str(row.get("exam_sha256") or ""),
-                str(row.get("pack_sha256") or ""),
-                json.dumps(row.get("items") or [], ensure_ascii=False),
-                str(row.get("task_id") or ""),
-                str(row.get("model") or ""),
-                json.dumps(row.get("probe_red") or [], ensure_ascii=False),
-                1 if row.get("allow_same_family") else 0,
-                str(row.get("thinking") or "")[:20000],
-                json.dumps(timings, ensure_ascii=False),
-            ),
-        )
-        conn.commit()
-        return int(cur.lastrowid or 0)
-    finally:
-        conn.close()
+    return project_dir(root) / name
 
 
-def insert_critic_event(root: Path, row: dict[str, Any]) -> int:
-    return insert_llm_event(root, "critic_event", row)
+def _report_seq(report_id: Any, prefix: str) -> int:
+    text = str(report_id or "").strip()
+    head = f"{prefix}-"
+    if not text.startswith(head):
+        return 0
+    tail = text[len(head):].strip()
+    return int(tail) if tail.isdigit() else 0
 
 
-def _row_to_event(row: sqlite3.Row, prefix: str = "cr") -> dict[str, Any]:
-    items = json.loads(row["items_json"] or "[]")
-    probe_red = json.loads(row["probe_red_json"] or "[]")
-    prefix = str(prefix or "cr")
-    out: dict[str, Any] = {
-        "report_id": f"{prefix}-{row['id']}",
-        "ts": row["ts"],
-        "outcome": row["outcome"],
-        "reason": row["reason"],
-        "configured": bool(row["configured"]),
-        "prompt_version": row["prompt_version"],
-        "store": row["store"],
-        "exam_sha256": row["exam_sha256"],
-        "pack_sha256": row["pack_sha256"],
-        "items": items if isinstance(items, list) else [],
-    }
-    if row["task_id"]:
-        out["task_id"] = row["task_id"]
-    if row["model"]:
-        out["model"] = row["model"]
-    if probe_red:
-        out["probe_red"] = probe_red
-    if row["allow_same_family"]:
-        out["allow_same_family"] = True
-    keys = set(row.keys())
-    if "thinking" in keys and row["thinking"]:
-        out["thinking"] = str(row["thinking"])
-    if "timings_json" in keys and row["timings_json"]:
+def scan_llm_log(root: Path, table: str) -> dict[str, Any]:
+    """Read the one master log. Bad lines are skipped and counted, never silent."""
+    prefix = LLM_PREFIX[table]
+    path = llm_log_path(root, table)
+    rows: list[dict[str, Any]] = []
+    bad = 0
+    top = 0
+    text = ""
+    present = path.is_file()
+    if present:
         try:
-            timings = json.loads(row["timings_json"])
-        except json.JSONDecodeError:
-            timings = {}
-        if isinstance(timings, dict) and timings:
-            out["timings"] = timings
-            for extra_key in ("thread_id", "understood_goal", "summary", "scores", "doubts", "ticket_seq", "retried_lazy"):
-                if extra_key in timings and extra_key not in out:
-                    out[extra_key] = timings[extra_key]
-    return out
-
-
-def insert_switch_event(root: Path, row: dict[str, Any]) -> int:
-    return insert_llm_event(root, "switch_event", row)
-
-
-def insert_ticket_event(root: Path, row: dict[str, Any]) -> int:
-    return insert_llm_event(root, "ticket_event", row)
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            bad += 1
+            continue
+        if not isinstance(row, dict):
+            bad += 1
+            continue
+        rows.append(row)
+        seq = _report_seq(row.get("report_id"), prefix)
+        if seq > top:
+            top = seq
+    return {"path": str(path), "present": present, "rows": rows, "bad_lines": bad, "top_seq": top}
 
 
 def list_llm_events(root: Path, table: str, limit: int = 20) -> list[dict[str, Any]]:
-    prefix = LLM_PREFIX.get(table)
-    if not prefix:
-        raise ValueError(table)
-    conn = connect(root)
-    try:
-        cap = int(limit) if limit else 20
-        if cap < 0:
-            cap = 20
-        rows = conn.execute(f"SELECT * FROM {table} ORDER BY id ASC").fetchall()
-    finally:
-        conn.close()
-    events = [_row_to_event(row, prefix) for row in rows]
-    if cap > 0:
-        return events[-cap:]
-    return events
+    cap = int(limit) if limit else 20
+    if cap < 0:
+        cap = 20
+    rows = scan_llm_log(root, table)["rows"]
+    return rows[-cap:] if cap > 0 else rows
 
 
 def list_switch_events(root: Path, limit: int = 20) -> list[dict[str, Any]]:
@@ -245,16 +100,38 @@ def list_ticket_events(root: Path, limit: int = 20) -> list[dict[str, Any]]:
     return list_llm_events(root, "ticket_event", limit=limit)
 
 
-def project_dir(root: Path) -> Path:
-    return ag_home() / "projects" / project_key(real_root(root))
+def last_llm_event(root: Path, table: str) -> dict[str, Any] | None:
+    rows = scan_llm_log(root, table)["rows"]
+    return dict(rows[-1]) if rows else None
 
 
-def append_project_jsonl(root: Path, name: str, row: dict[str, Any]) -> str:
-    path = project_dir(root) / str(name)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    return str(path)
+def legacy_db_residue(root: Path) -> dict[str, Any]:
+    """Rows left in the retired mirror, if an old file is still on disk. Read-only."""
+    path = legacy_db_path(root)
+    out: dict[str, Any] = {"path": str(path), "present": path.is_file(), "tables": {}, "rows": 0, "error": ""}
+    if not out["present"]:
+        return out
+    try:
+        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    except sqlite3.Error as exc:
+        out["error"] = f"{exc.__class__.__name__}: {exc}"
+        return out
+    try:
+        names = [
+            str(row[0])
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        ]
+        for name in names:
+            if name == "sqlite_sequence":
+                continue
+            count = int(conn.execute(f"SELECT COUNT(*) FROM [{name}]").fetchone()[0])
+            out["tables"][name] = count
+            out["rows"] += count
+    except sqlite3.Error as exc:
+        out["error"] = f"{exc.__class__.__name__}: {exc}"
+    finally:
+        conn.close()
+    return out
 
 
 def timeline_path(root: Path, task_id: str) -> Path:
@@ -337,107 +214,20 @@ def append_task_step(root: Path, task_id: str, phase: str, **fields: Any) -> Pat
 
 
 def append_llm_log(root: Path, table: str, row: dict[str, Any]) -> str:
+    """The only writer. Append to the jsonl master and mint the next report id from it."""
     prefix = LLM_PREFIX[table]
-    name = LLM_JSONL[table]
     try:
-        path = project_dir(root) / name
+        scan = scan_llm_log(root, table)
+        seq = max(int(scan["top_seq"]), len(scan["rows"])) + 1
+        report_id = f"{prefix}-{seq}"
+        row["report_id"] = report_id
+        path = Path(str(scan["path"]))
         path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            row_id = insert_llm_event(root, table, row)
-            report_id = f"{prefix}-{row_id}" if row_id else ""
-        except Exception:
-            blob = str(row.get("ts") or "") + str(row.get("outcome") or "") + str(row.get("exam_sha256") or "")
-            report_id = prefix + "-" + hashlib.sha256(blob.encode("utf-8")).hexdigest()[:12]
-        if report_id:
-            row["report_id"] = report_id
-        with path.open("a", encoding="utf-8") as handle:
+        with path.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
         return report_id
     except OSError:
         return ""
-
-
-def upsert_probe(root: Path, row: dict[str, Any]) -> None:
-    conn = connect(root)
-    try:
-        conn.execute(
-            """
-            INSERT INTO probe (id, state, quiet_count, ttl_quiet_loops, area_json, exam_fragment)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                state=excluded.state,
-                quiet_count=excluded.quiet_count,
-                ttl_quiet_loops=excluded.ttl_quiet_loops,
-                area_json=excluded.area_json,
-                exam_fragment=excluded.exam_fragment
-            """,
-            (
-                str(row.get("id") or ""),
-                str(row.get("state") or "armed"),
-                int(row.get("quiet_count") or 0),
-                int(row.get("ttl_quiet_loops") or 10),
-                json.dumps(row.get("area") or [], ensure_ascii=False),
-                str(row.get("exam_fragment") or ""),
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def delete_probe(root: Path, probe_id: str) -> int:
-    conn = connect(root)
-    try:
-        cur = conn.execute("DELETE FROM probe WHERE id = ?", (str(probe_id or ""),))
-        conn.commit()
-        return int(cur.rowcount or 0)
-    finally:
-        conn.close()
-
-
-def list_probe_rows(root: Path) -> list[dict[str, Any]]:
-    conn = connect(root)
-    try:
-        rows = conn.execute(
-            "SELECT id, state, quiet_count, ttl_quiet_loops, area_json, exam_fragment FROM probe ORDER BY id"
-        ).fetchall()
-    finally:
-        conn.close()
-    out: list[dict[str, Any]] = []
-    for row in rows:
-        area = json.loads(row["area_json"] or "[]")
-        out.append(
-            {
-                "id": row["id"],
-                "state": row["state"],
-                "quiet_count": int(row["quiet_count"]),
-                "ttl_quiet_loops": int(row["ttl_quiet_loops"]),
-                "area": area if isinstance(area, list) else [],
-                "exam_fragment": row["exam_fragment"],
-            }
-        )
-    return out
-
-
-def insert_heal_event(root: Path, row: dict[str, Any]) -> str:
-    conn = connect(root)
-    try:
-        cur = conn.execute(
-            """
-            INSERT INTO heal_event (ts, needles_json, diseases_json, repair_portrait)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                str(row.get("ts") or ""),
-                json.dumps(row.get("needles") or [], ensure_ascii=False),
-                json.dumps(row.get("diseases") or [], ensure_ascii=False),
-                str(row.get("repair_portrait") or ""),
-            ),
-        )
-        conn.commit()
-        return f"hp-{int(cur.lastrowid or 0)}"
-    finally:
-        conn.close()
 
 
 def pending_path(root: Path) -> Path:
@@ -491,12 +281,3 @@ def pending_summary(root: Path) -> dict[str, Any]:
         "portrait_line": first,
     }
     return out
-
-
-def event_count(root: Path) -> int:
-    conn = connect(root)
-    try:
-        value = conn.execute("SELECT COUNT(*) FROM critic_event").fetchone()[0]
-    finally:
-        conn.close()
-    return int(value)

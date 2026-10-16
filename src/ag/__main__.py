@@ -216,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
     log_c = sub.add_parser(
         "critic-log",
         help="read-only critic audit log; newest last",
-        description="Read-only. Newest last. Default --limit 20. SQLite AG_HOME/projects/<key>/ag.sqlite plus jsonl backup.",
+        description="Read-only. Newest last. Default --limit 20. Master log: AG_HOME/projects/<key>/critic.jsonl.",
     )
     log_c.add_argument("root")
     log_c.add_argument("--limit", type=int, default=20, help="newest last; default 20")

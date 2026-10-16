@@ -123,7 +123,6 @@ def audit_note(
     area: list[str] | None = None,
     reason: str = "",
     by: str = "",
-    mirror: str = "",
 ) -> str:
     """Append one readable line. Skips and removals must never be silent."""
     from .store import append_project_jsonl
@@ -138,8 +137,6 @@ def audit_note(
     }
     if by:
         row["by"] = str(by)
-    if mirror:
-        row["mirror"] = str(mirror)
     return append_project_jsonl(real_root(root), AUDIT_NAME, row)
 
 
@@ -334,12 +331,6 @@ def insert(
     }
     blob["probes"].append(row)
     _save(path, blob)
-    try:
-        from .store import upsert_probe
-
-        upsert_probe(repo, _public_row(row, full=False))
-    except Exception:
-        pass
     return {
         "schema": SCHEMA,
         "id": probe_id,
@@ -501,13 +492,6 @@ def drop(root: Path, *, id: str, reason: str = "", by: str = "") -> dict[str, An
     area = [str(item) for item in (target.get("area") or []) if isinstance(item, str)]
     blob["probes"] = [row for row in blob["probes"] if str(row.get("id") or "") != probe_id]
     _save(path, blob)
-    mirror = "ok:0"
-    try:
-        from .store import delete_probe
-
-        mirror = f"ok:{delete_probe(repo, probe_id)}"
-    except Exception as exc:
-        mirror = f"failed:{exc.__class__.__name__}"
     audit = audit_note(
         repo,
         action="drop",
@@ -515,7 +499,6 @@ def drop(root: Path, *, id: str, reason: str = "", by: str = "") -> dict[str, An
         area=area,
         reason=str(reason or ""),
         by=str(by or ""),
-        mirror=mirror,
     )
     return {
         "schema": SCHEMA,
@@ -527,7 +510,6 @@ def drop(root: Path, *, id: str, reason: str = "", by: str = "") -> dict[str, An
         "audit": audit,
         "reason": str(reason or ""),
         "by": str(by or ""),
-        "mirror": mirror,
     }
 
 

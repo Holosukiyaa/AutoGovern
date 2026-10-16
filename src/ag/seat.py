@@ -22,7 +22,7 @@ from .critic import (
     verdict_problems,
 )
 from .managed import ChainBroken, ag_home, project_key, real_root
-from .store import append_llm_log, list_ticket_events, project_dir
+from .store import append_llm_log, last_llm_event, list_ticket_events, project_dir
 
 SEATS: dict[str, dict[str, Any]] = {
     "critic": {
@@ -250,10 +250,7 @@ def seat_result(
         blob["retried_void"] = True
     if retried_lazy:
         blob["retried_lazy"] = True
-    try:
-        blob["store"] = _write_report(kind, root, blob)
-    except OSError:
-        blob["store"] = ""
+    blob["store"] = str(report_path(kind, root))
     blob["report_id"] = append_log(
         kind,
         root,
@@ -271,6 +268,15 @@ def seat_result(
         thinking=thinking,
         timings=merged_timings if merged_timings else None,
     )
+    tail = last_llm_event(root, str(spec["table"]))
+    if isinstance(tail, dict):
+        for key in ("report_id", "ts", "outcome", "reason"):
+            if tail.get(key) not in (None, ""):
+                blob[key] = tail[key]
+    try:
+        _write_report(kind, root, blob)
+    except OSError:
+        pass
     return blob
 
 
