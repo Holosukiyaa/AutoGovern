@@ -296,6 +296,7 @@ def insert(
     area: Any,
     id: str | None = None,
     ttl_quiet_loops: int = DEFAULT_TTL,
+    task_id: str = "",
 ) -> dict[str, Any]:
     repo = real_root(root)
     evidence_text = str(evidence or "").strip()
@@ -329,6 +330,8 @@ def insert(
         "observation": obs,
         "evidence": evidence_text,
     }
+    if str(task_id or "").strip():
+        row["task_id"] = str(task_id).strip()
     blob["probes"].append(row)
     _save(path, blob)
     return {
@@ -381,6 +384,80 @@ def _bad_line_reason(snippet: str) -> str:
     return ""
 
 
+def _git_lines(tree: Path, *args: str) -> list[str]:
+    completed = subprocess.run(
+        ["git", "-C", str(tree), *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if completed.returncode != 0:
+        return []
+    return (completed.stdout or "").splitlines()
+
+
+def _changed_lines(tree: Path, source_head: str) -> dict[str, set[int]]:
+    """Lines added or modified by this ticket: {rel: {lineno}} from git diff source_head.
+
+    A must_exclude pin aimed at one of these lines targets the deliverable itself,
+    not a pre-existing defect. Physical fact from git, not wording.
+    """
+    out: dict[str, set[int]] = {}
+    if not str(source_head or "").strip():
+        return out
+    current: str | None = None
+    new_line = 0
+    for line in _git_lines(tree, "diff", "--unified=0", source_head, "--"):
+        if line.startswith("+++ b/"):
+            current = line[6:].strip().replace("\\", "/")
+            out.setdefault(current, set())
+        elif line.startswith("@@"):
+            match = re.search(r"\+(\d+)(?:,(\d+))?", line)
+            if match and current is not None:
+                new_line = int(match.group(1))
+                span = int(match.group(2) or "1")
+                for off in range(max(span, 1)):
+                    out[current].add(new_line + off)
+        elif line.startswith("+") and not line.startswith("+++"):
+            new_line += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            pass
+        elif current is not None and not line.startswith("\\"):
+            new_line += 1
+    return out
+
+
+def drop_newborn_for_task(root: Path, *, task_id: str, by: str = "") -> list[str]:
+    """连座清除：票作废时，清掉该票种的、仍 armed、且从没绿过的新生探针。
+
+    Only rows with task_id == this ticket AND state == armed AND quiet_count == 0.
+    Old pins without task_id, manual pins, other tickets' pins, quiet_count>0 pins,
+    and archived/dropped pins are never touched.
+    """
+    repo = real_root(root)
+    tid = str(task_id or "").strip()
+    if not tid:
+        return []
+    path = store_path(repo)
+    blob = _load(path)
+    dropped: list[str] = []
+    for row in list(blob["probes"]):
+        if str(row.get("task_id") or "") != tid:
+            continue
+        if str(row.get("state") or "armed") != "armed":
+            continue
+        if int(row.get("quiet_count") or 0) != 0:
+            continue
+        probe_id = str(row.get("id") or "")
+        if not probe_id:
+            continue
+        drop(repo, id=probe_id, reason=f"票作废连座清理 task={tid}", by=by)
+        dropped.append(probe_id)
+    return dropped
+
+
 def _plant_target(tree: Path, rel: str, lineno: int) -> tuple[str, str]:
     """Return (skip_reason, snippet). An empty skip_reason means the line can carry a pin."""
     path = Path(tree) / rel.replace("\\", "/")
@@ -417,7 +494,7 @@ def _plant_target(tree: Path, rel: str, lineno: int) -> tuple[str, str]:
     return "", snippet
 
 
-def plant_from_reject(root: Path, *, items: Any, tree: Path) -> list[str]:
+def plant_from_reject(root: Path, *, items: Any, tree: Path, source_head: str = "", task_id: str = "") -> list[str]:
     """Ship autonomy: critic reject with path:line becomes a must_exclude pin. Heal does not call this.
 
     A pin that can never be satisfied must not land: binary, oversized, or abnormal target lines are
@@ -428,6 +505,7 @@ def plant_from_reject(root: Path, *, items: Any, tree: Path) -> list[str]:
         return planted
     repo = real_root(root)
     tree_root = Path(tree)
+    changed = _changed_lines(tree_root, source_head)
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -451,6 +529,15 @@ def plant_from_reject(root: Path, *, items: Any, tree: Path) -> list[str]:
                 reason=f"{rel}:{lineno} {skip_reason}",
             )
             continue
+        if lineno in changed.get(rel, set()):
+            audit_note(
+                repo,
+                action="skip-plant",
+                probe_id=probe_id,
+                area=[rel],
+                reason=f"{rel}:{lineno} 交付物非缺陷 task={task_id}",
+            )
+            continue
         comment = str(item.get("comment") or "").strip()
         fragment = comment or f"{rel}:{lineno} must not keep this defect"
         evidence_text = f"{evidence} {comment} critic-reject auto-plant".strip()
@@ -466,6 +553,7 @@ def plant_from_reject(root: Path, *, items: Any, tree: Path) -> list[str]:
                 evidence=evidence_text,
                 area=[rel],
                 id=probe_id,
+                task_id=task_id,
             )
         except ChainBroken as exc:
             audit_note(

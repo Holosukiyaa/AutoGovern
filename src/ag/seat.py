@@ -5,6 +5,7 @@ import hashlib
 import inspect
 import json
 import re
+import subprocess
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1256,6 +1257,7 @@ def attach_verify(
     tests_failed: bool = False,
     critic: dict[str, Any] | None = None,
     redlines: list[str] | None = None,
+    source_head: str = "",
 ) -> dict[str, Any] | tuple[dict[str, Any], list[Any]]:
     sealed = [str(item).strip() for item in (redlines or []) if str(item).strip()]
     cfg = load_config(enrolled)
@@ -1305,7 +1307,19 @@ def attach_verify(
             if kind in {"critic", "switch"} and str(raw.get("outcome") or "") == "rejected":
                 from .probe import plant_from_reject
 
-                planted = list(plant_from_reject(enrolled, items=raw.get("items"), tree=worktree) or [])
+                if not str(source_head or "").strip():
+                    try:
+                        completed = subprocess.run(
+                            ["git", "-C", str(enrolled), "rev-parse", "HEAD"],
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
+                        )
+                        source_head = (completed.stdout or "").strip() if completed.returncode == 0 else ""
+                    except Exception:
+                        source_head = ""
+                planted = list(plant_from_reject(
+                    enrolled, items=raw.get("items"), tree=worktree,
+                    source_head=source_head, task_id=str(task_id or ""),
+                ) or [])
                 blob["probes_planted"] = planted
         except Exception as exc:
             blob = {

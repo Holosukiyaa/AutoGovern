@@ -1173,6 +1173,7 @@ def verify(root: Path) -> dict[str, Any]:
         critic=None,
         tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
         redlines=sealed_redlines,
+        source_head=str(task.get("source_head") or ""),
     )
     timings["switch_s"] = round(time.perf_counter() - t_switch, 3)
     timings["critic_s"] = 0.0
@@ -1183,7 +1184,10 @@ def verify(root: Path) -> dict[str, Any]:
 
         try:
             sw_blob = json.loads(seat_report_path("switch", enrolled).read_text(encoding="utf-8"))
-            planted = list(plant_from_reject(enrolled, items=sw_blob.get("items"), tree=worktree) or [])
+            planted = list(plant_from_reject(
+                enrolled, items=sw_blob.get("items"), tree=worktree,
+                source_head=str(task.get("source_head") or ""), task_id=task_id,
+            ) or [])
         except Exception:
             planted = []
     critic = dict(switch)
@@ -1547,6 +1551,9 @@ def abandon(root: Path) -> dict[str, Any]:
         return status(root)
     try:
         _cleanup(root, task)
+        from .probe import drop_newborn_for_task
+
+        drop_newborn_for_task(root, task_id=str(task.get("id") or ""), by="ag-abandon")
         save_task(key, None)
     finally:
         thaw_canonical(root)
