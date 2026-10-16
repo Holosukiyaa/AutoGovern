@@ -106,11 +106,25 @@ def _hook_src(enrolled: Path | None = None) -> Path:
 def _write_hook(key: str, enrolled: Path | None = None) -> Path:
     folder = _hooks_dir(key)
     folder.mkdir(parents=True, exist_ok=True)
+    home = _posix(ag_home())
+    src = _posix(_hook_src(enrolled))
+    exe = _posix(Path(sys.executable))
     body = (
         "#!/bin/sh\n"
-        f"export AG_HOME='{_posix(ag_home())}'\n"
-        f"export PYTHONPATH='{_posix(_hook_src(enrolled))}'\n"
-        f"'{_posix(Path(sys.executable))}' -m ag hook\n"
+        f"AG_HOME='{home}'\n"
+        f"AG_SRC='{src}'\n"
+        f"AG_PY='{exe}'\n"
+        "missing=''\n"
+        '[ -d "$AG_HOME" ] || missing="$missing AG_HOME"\n'
+        '[ -f "$AG_SRC/ag/__init__.py" ] || missing="$missing ag-source"\n'
+        '[ -f "$AG_PY" ] || missing="$missing python"\n'
+        'if [ -n "$missing" ]; then\n'
+        "\tprintf 'ag: scaffold missing:%s; skipping checks, commit allowed\\n' \"$missing\" >&2\n"
+        "\texit 0\n"
+        "fi\n"
+        "export AG_HOME\n"
+        'export PYTHONPATH="$AG_SRC"\n'
+        '"$AG_PY" -m ag hook\n'
         "exit $?\n"
     )
     for name in ("pre-commit", "prepare-commit-msg"):
