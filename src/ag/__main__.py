@@ -89,6 +89,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser("finish", help="ff-only if digest matches").add_argument("root")
     sub.add_parser("abandon", help="drop the open worktree").add_argument("root")
+    sub.add_parser("dream", help="distill knowledge/sessions into insights; never refuses").add_argument("root")
     sub.add_parser("unenroll", help="remove the hook and restore previous hooksPath").add_argument("root")
     sub.add_parser("usage", help="see lane: help/block counts per ship item").add_argument("root")
     sub.add_parser("lift", help="lift advice; does not refuse finish").add_argument("root")
@@ -495,6 +496,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "abandon":
             print(json.dumps(abandon(root), ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "dream":
+            from .knowledge import dream
+
+            print(json.dumps(dream(root), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "unenroll":
             print(json.dumps(unenroll(root), ensure_ascii=False, indent=2))

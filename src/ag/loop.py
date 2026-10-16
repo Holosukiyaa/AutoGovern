@@ -723,6 +723,12 @@ def status(root: Path) -> dict[str, Any]:
         out["see"] = see_run(root)
     except Exception:
         pass
+    try:
+        from .knowledge import load_insights
+
+        out["insights"] = load_insights(root)
+    except Exception:
+        out["insights"] = {}
     return out
 
 
@@ -1514,7 +1520,7 @@ def _finish_after_thaw(
     }
     append_task_step(root, str(task.get("id") or ""), "finish", head=head, product=product, critic_report_id=_critic_report_id(vblob), switch_report_id=_switch_report_id(vblob), anchor_progress=anchor_progress)
     try:
-        from .knowledge import archive_session
+        from .knowledge import archive_session, distill
 
         archive_session(
             root,
@@ -1525,6 +1531,7 @@ def _finish_after_thaw(
             process="completed",
             product=product,
         )
+        distill(root)
     except Exception as exc:
         usage_note(root, "see", 14, "help", f"knowledge archive skipped: {exc.__class__.__name__}")
     _cleanup(root, task)

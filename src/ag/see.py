@@ -27,6 +27,11 @@ TOOLS = [
         "description": "Run see strategies as a snapshot. Does not set product or refuse finish.",
         "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}}, "required": ["root"]},
     },
+    {
+        "name": "ag_dream",
+        "description": "Distill knowledge/sessions into insights (cross-session memory). Local rules only; never raises or refuses finish.",
+        "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}}, "required": ["root"]},
+    },
     *PROBE_TOOLS,
     *CRITIC_TOOLS,
     *SWITCH_TOOLS,
@@ -127,6 +132,10 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         return usage(Path(str(args.get("root") or "")))
     if name == "ag_see":
         return run(Path(str(args.get("root") or "")))
+    if name == "ag_dream":
+        from .knowledge import dream
+
+        return dream(Path(str(args.get("root") or "")))
     if name in {item["name"] for item in PROBE_TOOLS}:
         from .probe import call as probe_call
 

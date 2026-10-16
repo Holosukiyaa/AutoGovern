@@ -154,3 +154,125 @@ def archive_session(
     target = base / SESSIONS_NAME / f"{task_id}.json"
     _atomic_write(target, json.dumps(record, ensure_ascii=False, indent=2) + "\n")
     return str(target)
+
+INSIGHTS_NAME = "insights.json"
+
+
+def insights_path(root: Path) -> Path:
+    return knowledge_dir(root) / INSIGHTS_NAME
+
+
+def _empty_insights() -> dict[str, Any]:
+    return {
+        "schema": "ag.knowledge.insights.v1",
+        "generated_at": "",
+        "session_count": 0,
+        "hot_files": [],
+        "stubborn_probes": [],
+        "abandon_rate": {"total": 0, "abandoned": 0, "ratio": 0.0, "high": False},
+        "reject_focus": [],
+    }
+
+
+def load_insights(root: Path) -> dict[str, Any]:
+    """Read the current insights snapshot; missing or corrupt returns empty, never raises."""
+    path = insights_path(real_root(root))
+    if not path.is_file():
+        return _empty_insights()
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return _empty_insights()
+    return blob if isinstance(blob, dict) else _empty_insights()
+
+
+def _iter_sessions(base: Path) -> list[dict[str, Any]]:
+    folder = base / SESSIONS_NAME
+    if not folder.is_dir():
+        return []
+    out: list[dict[str, Any]] = []
+    for path in sorted(folder.glob("*.json")):
+        try:
+            blob = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(blob, dict):
+            out.append(blob)
+    return out
+
+
+def distill(root: Path) -> dict[str, Any]:
+    """Distill all sessions/*.json into insights.json. Local rules only, no AI.
+
+    hot_files / stubborn_probes / abandon_rate / reject_focus.
+    Index only: counts, task ids, file names, probe ids. Never exam/diff/source/keys.
+    """
+    repo = real_root(root)
+    base = knowledge_dir(repo)
+    sessions = _iter_sessions(base)
+
+    file_tickets: dict[str, list[dict[str, Any]]] = {}
+    for rec in sessions:
+        for f in (rec.get("touched_files") or []):
+            file_tickets.setdefault(str(f), []).append(rec)
+    hot_files = []
+    for fname, recs in sorted(file_tickets.items()):
+        if len(recs) < 2:
+            continue
+        if all(str(r.get("switch_outcome") or "") == "rejected" for r in recs):
+            hot_files.append({
+                "file": fname,
+                "count": len(recs),
+                "task_ids": sorted({str(r.get("task_id") or "") for r in recs if str(r.get("task_id") or "")}),
+            })
+
+    probe_hits: dict[str, set] = {}
+    for rec in sessions:
+        tid = str(rec.get("task_id") or "")
+        for pid in (rec.get("probe_red") or []):
+            probe_hits.setdefault(str(pid), set()).add(tid)
+    stubborn_probes = [
+        {"probe_id": pid, "count": len(tids), "task_ids": sorted(tids)}
+        for pid, tids in sorted(probe_hits.items())
+        if len(tids) >= 2
+    ]
+
+    total = len(sessions)
+    abandoned = sum(1 for r in sessions if str(r.get("process") or "") == "abandoned")
+    ratio = round(abandoned / total, 3) if total else 0.0
+    abandon_rate = {"total": total, "abandoned": abandoned, "ratio": ratio, "high": bool(ratio > 0.5)}
+
+    focus: dict[str, dict[str, Any]] = {}
+    for rec in sessions:
+        for seat in ("switch", "critic"):
+            if str(rec.get(seat + "_outcome") or "") == "rejected":
+                for f in (rec.get("touched_files") or []):
+                    k = seat + ":" + str(f)
+                    slot = focus.setdefault(k, {"seat": seat, "file": str(f), "count": 0, "task_ids": set()})
+                    slot["count"] += 1
+                    if str(rec.get("task_id") or ""):
+                        slot["task_ids"].add(str(rec.get("task_id")))
+    reject_focus = [
+        {"seat": v["seat"], "file": v["file"], "count": v["count"], "task_ids": sorted(v["task_ids"])}
+        for v in sorted(focus.values(), key=lambda x: -x["count"])
+    ]
+
+    insights = {
+        "schema": "ag.knowledge.insights.v1",
+        "generated_at": _utc_now(),
+        "session_count": total,
+        "hot_files": hot_files,
+        "stubborn_probes": stubborn_probes,
+        "abandon_rate": abandon_rate,
+        "reject_focus": reject_focus,
+    }
+    _atomic_write(insights_path(repo), json.dumps(insights, ensure_ascii=False, indent=2) + chr(10))
+    return insights
+
+
+def dream(root: Path) -> dict[str, Any]:
+    """Manual distill command. Never raises — returns empty structure on any failure."""
+    try:
+        return distill(root)
+    except Exception:
+        return _empty_insights()
