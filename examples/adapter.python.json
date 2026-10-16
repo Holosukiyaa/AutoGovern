@@ -1,0 +1,13 @@
+{
+  "_说明": "Python 适配器模板。复制为 <AG_HOME>/projects/<key>/adapter.json 后按你的仓改 entry_files 与 dep_manifest。",
+  "_ref_patterns": "抓 import/from 后的模块名；内核会把点分模块名映射回仓内文件。",
+  "_已知局限": "from . import x 这种同包成员 import 抓不到成员级，被引模块可能报为孤岛；如需精确请改用 ast 类专用适配器。", "_dep_pattern": "示例抓 pyproject.toml 的 name= 字段；requirements.txt 可改用 ^([\\w.-]+) 抓每行包名。",
+  "source_exts": [".py"],
+  "entry_files": ["src/ag/__main__.py"],
+  "ref_patterns": [
+    "(?:^|\\s)from\\s+([\\w.]+)\\s+import",
+    "(?:^|\\s)import\\s+([\\w.]+)"
+  ],
+  "dep_manifest": "pyproject.toml",
+  "dep_pattern": "^\\s*name\\s*=\\s*\"([^\"]+)\""
+}

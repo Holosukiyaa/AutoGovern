@@ -758,9 +758,16 @@ def pack(
         int(item.get("slimmed_chars") or len(str(item.get("content") or "")))
         for item in changed
     )
+    from .structure import check as structure_check
+
+    try:
+        structure = structure_check(repo)
+    except Exception as exc:
+        structure = {"configured": False, "detail": f"体检异常不阻断：{exc}"}
     return {
         "schema": PACK_SCHEMA,
         "exam": exam_text,
+        "structure": structure,
         "diff": annotated_diff,
         "annotated_diff": annotated_diff,
         "changed_files": changed,

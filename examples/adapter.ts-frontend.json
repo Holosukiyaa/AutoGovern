@@ -1,0 +1,18 @@
+{
+  "_说明": "TS 前端适配器模板。复制为 <AG_HOME>/projects/<key>/adapter.json 后按你的仓改三处：entry_files（真实入口）、dep_manifest（依赖清单路径）、dep_pattern（抓依赖名的正则）。",
+  "_entry_files": "入口门文件数组，仓内相对路径。体检从这几个门出发算可达。",
+  "_ref_patterns": "从源码文件抽出引用路径/包名的正则数组，每个正则的第一个捕获组是引用名。",
+  "_dep_manifest": "依赖清单文件（仓内相对路径），如 package.json / requirements.txt / pyproject.toml。",
+  "_dep_pattern": "从清单里抽出依赖名的正则，第一个捕获组是依赖名。",
+  "_dep_section": "可选：只扫清单里某个段落（如 dependencies），避免把 devDependencies 误报为假装配。",
+  "source_exts": [".ts", ".tsx", ".js", ".jsx"],
+  "entry_files": ["web/workbench/main.tsx"],
+  "ref_patterns": [
+    "import\\s+(?:[\\w{}*\\s,]+\\s+from\\s+)?['\"]([^'\"]+)['\"]",
+    "require\\(\\s*['\"]([^'\"]+)['\"]\\s*\\)",
+    "import\\(\\s*['\"]([^'\"]+)['\"]\\s*\\)"
+  ],
+  "dep_manifest": "web/package.json",
+  "dep_pattern": "\"([^\"]+)\"\\s*:\\s*\"[\\^~]?[0-9]",
+  "dep_section": "dependencies"
+}
