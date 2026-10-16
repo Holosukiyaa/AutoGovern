@@ -29,6 +29,45 @@ MAX_CHECK_FILE_BYTES = 64_000
 _HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _BACKTICK_TOKEN_RE = re.compile(r"`([^`\n]+)`")
 _FILE_TOKEN_RE = re.compile(r"[\w./\\-]+\.(?:py|ts|tsx|js|css|json|md|sqlite|rs|go)")
+_PROHIBITION_WORDS = (
+    "严禁",
+    "禁止",
+    "不得",
+    "不许",
+    "不准",
+    "切勿",
+    "勿",
+    "杜绝",
+    "must not",
+    "never",
+    "do not",
+    "don't",
+)
+_SCOPE_WORDS = (
+    "只许",
+    "只允许",
+    "只准",
+    "只改",
+    "只动",
+    "只碰",
+    "只在",
+    "只读",
+    "只写",
+    "只能",
+    "仅",
+    "可以",
+    "允许",
+    "必须",
+    "应当",
+    "本票",
+    "范围",
+    "作用域",
+    "用于",
+    "位于",
+    "属于",
+)
+_SENTENCE_SPLIT_RE = re.compile(r"[。；;！!？?\n]+")
+_CLAUSE_SPLIT_RE = re.compile(r"[，,、]+")
 _SHORTCUT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("silent-except-pass", re.compile(r"\bexcept\b.*:\s*pass\b")),
     ("mock-or-fixture", re.compile(r"\b(?:unittest\.mock|MagicMock|monkeypatch|pytest\.fixture)\b")),
@@ -401,6 +440,44 @@ def _added_diff_lines(diff_text: str) -> list[tuple[str, int, str]]:
     return added
 
 
+def _has_word(text: str, words: tuple[str, ...]) -> bool:
+    lowered = str(text or "").casefold()
+    return any(word.casefold() in lowered for word in words)
+
+
+def _redline_tokens(redline: str) -> list[str]:
+    """Tokens that a red line actually forbids naming.
+
+    A token counts only inside a prohibition clause. Scope wording such as
+    "只许用 Python 标准库" says where the work goes, not what is banned, so its
+    tokens are not collision words. A red line without any prohibition word keeps
+    its old behaviour: every token in it is taken.
+    """
+    text = str(redline or "").strip()
+    if not text:
+        return []
+    tokens: list[str] = []
+
+    def collect(blob: str) -> None:
+        for tok in _BACKTICK_TOKEN_RE.findall(blob) + _FILE_TOKEN_RE.findall(blob):
+            cleaned = tok.strip()
+            if len(cleaned) >= 2 and cleaned not in tokens:
+                tokens.append(cleaned)
+
+    sentences = [item for item in _SENTENCE_SPLIT_RE.split(text) if item.strip()]
+    if not any(_has_word(item, _PROHIBITION_WORDS) for item in sentences):
+        collect(text)
+        return tokens
+    for sentence in sentences:
+        if not _has_word(sentence, _PROHIBITION_WORDS):
+            continue
+        for clause in _CLAUSE_SPLIT_RE.split(sentence):
+            if _has_word(clause, _SCOPE_WORDS):
+                continue
+            collect(clause)
+    return tokens
+
+
 def pack_prescreen(
     repo: Path,
     names: list[str],
@@ -439,11 +516,7 @@ def pack_prescreen(
         rl_text = str(rl or "").strip()
         if not rl_text:
             continue
-        tokens: list[str] = []
-        for tok in _BACKTICK_TOKEN_RE.findall(rl_text) + _FILE_TOKEN_RE.findall(rl_text):
-            cleaned = tok.strip()
-            if len(cleaned) >= 2 and cleaned not in tokens:
-                tokens.append(cleaned)
+        tokens = _redline_tokens(rl_text)
         for tok in tokens:
             if len(redline_collisions) >= 15:
                 break

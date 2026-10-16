@@ -249,6 +249,14 @@ def project_dir(root: Path) -> Path:
     return ag_home() / "projects" / project_key(real_root(root))
 
 
+def append_project_jsonl(root: Path, name: str, row: dict[str, Any]) -> str:
+    path = project_dir(root) / str(name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return str(path)
+
+
 def timeline_path(root: Path, task_id: str) -> Path:
     return project_dir(root) / "tasks" / f"{task_id}.json"
 
@@ -373,6 +381,16 @@ def upsert_probe(root: Path, row: dict[str, Any]) -> None:
             ),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_probe(root: Path, probe_id: str) -> int:
+    conn = connect(root)
+    try:
+        cur = conn.execute("DELETE FROM probe WHERE id = ?", (str(probe_id or ""),))
+        conn.commit()
+        return int(cur.rowcount or 0)
     finally:
         conn.close()
 

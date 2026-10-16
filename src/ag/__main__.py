@@ -16,7 +16,7 @@ from .skill_install import install_skill
 
 
 def _probe_main(args: argparse.Namespace) -> int:
-    from .probe import insert, list_probes, run
+    from .probe import drop, insert, list_probes, run
 
     root = Path(args.root)
     if args.probe_cmd == "insert":
@@ -31,6 +31,15 @@ def _probe_main(args: argparse.Namespace) -> int:
                     id=args.id,
                     ttl_quiet_loops=args.ttl_quiet_loops,
                 ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return 0
+    if args.probe_cmd == "drop":
+        print(
+            json.dumps(
+                drop(root, id=str(args.id or ""), reason=str(args.reason or ""), by=str(args.by or "")),
                 ensure_ascii=False,
                 indent=2,
             )
@@ -72,7 +81,13 @@ def main(argv: list[str] | None = None) -> int:
     start_p.add_argument("--default", action="append", default=[], help="negotiable default shown beside the route; repeatable")
     start_p.add_argument("--hard-anchor", action="append", default=[], help="hard anchor only from explicit user/project rule; repeatable")
     sub.add_parser("verify", help="run enrolled tests and pin the tree").add_argument("root")
-    sub.add_parser("confirm-map", help="record user approval of the current intent map").add_argument("root")
+    confirm_p = sub.add_parser("confirm-map", help="record user approval of the current intent map")
+    confirm_p.add_argument("root")
+    confirm_p.add_argument(
+        "--by",
+        default="",
+        help="who approved, e.g. user-message@2026-10-16T04:40Z; recorded in task state and approvals.jsonl",
+    )
     sub.add_parser("finish", help="ff-only if digest matches").add_argument("root")
     sub.add_parser("abandon", help="drop the open worktree").add_argument("root")
     sub.add_parser("unenroll", help="remove the hook and restore previous hooksPath").add_argument("root")
@@ -150,6 +165,14 @@ def main(argv: list[str] | None = None) -> int:
     insert_p.add_argument("--area", action="append", required=True, help="repository-relative path; repeatable")
     insert_p.add_argument("--id", help="optional id; omitted id is content-addressed; duplicate id is refused")
     insert_p.add_argument("--ttl-quiet-loops", type=int, default=10)
+    drop_p = probe_sub.add_parser(
+        "drop",
+        help="remove one probe by id; unknown id is refused and the store is left unchanged",
+    )
+    drop_p.add_argument("root")
+    drop_p.add_argument("--id", required=True, help="probe id to remove")
+    drop_p.add_argument("--reason", default="", help="short readable reason, recorded in probe-audit.jsonl")
+    drop_p.add_argument("--by", default="", help="who removed it, recorded in probe-audit.jsonl")
     run_p = probe_sub.add_parser("run", help="run armed probes; no LLM; archived stay cold unless --awaken and --path hits")
     run_p.add_argument("root")
     run_p.add_argument("--path", action="append", help="only run probes whose area hits these paths")
@@ -440,7 +463,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(read_result(worktree, args.worker_id), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "confirm-map":
-            print(json.dumps(confirm_map(Path(args.root)), ensure_ascii=False, indent=2))
+            print(json.dumps(confirm_map(Path(args.root), by=str(args.by or "")), ensure_ascii=False, indent=2))
             return 0
         root = Path(args.root)
         if args.cmd == "enroll":

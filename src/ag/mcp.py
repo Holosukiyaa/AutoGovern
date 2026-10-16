@@ -17,6 +17,8 @@ INSTRUCTIONS = (
     "Only ship may set product or refuse finish. "
     "File-changing work: ag_status → ag_start → write ONLY in worktree.path → ag_verify → ag_finish. "
     "ag_start reads canonical .data/ticket.md and refuses when that file is missing. "
+    "ag_confirm_map records the user's own approval of that map: pass by=user-message@<utc> only after the user "
+    "says so in the conversation, and omit by when the user pressed it themselves. "
     "ag_verify runs the enrolled test command if any, then probes, critic, then the switch. "
     "The switch prompt is filled with the red lines sealed at start. "
     "process complete is not product passed. "

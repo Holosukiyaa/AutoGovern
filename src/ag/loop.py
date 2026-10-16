@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,7 @@ from .freeze import freeze_canonical, freeze_worktree, thaw_canonical, thaw_work
 from .hook import hook_main
 from .switch import block_message as _switch_block_message
 from .switch import report_id_from_verify as _switch_report_id
-from .store import append_task_step, ensure_start_step, latest_timeline_path
+from .store import append_project_jsonl, append_task_step, ensure_start_step, latest_timeline_path
 from .managed import ChainBroken, ag_home, lookup_project, project_key, real_root, load_managed, save_managed
 from .see import note as usage_note
 
@@ -1224,7 +1225,7 @@ def verify(root: Path) -> dict[str, Any]:
     return out
 
 
-def confirm_map(root: Path) -> dict[str, Any]:
+def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
     state = status(root)
     key = str(state["key"])
     task = load_task(key)
@@ -1253,9 +1254,26 @@ def confirm_map(root: Path) -> dict[str, Any]:
             )
         if bool(tr.get("configured")):
             usage_note(root, "ship", 13, "help", "ticket review passed")
+        by_text = str(by or "").strip()
+        confirmed_at = ""
+        if by_text:
+            confirmed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            task["intent_map_confirmed_by"] = by_text
+            task["intent_map_confirmed_at"] = confirmed_at
         task["intent_map_confirmed"] = True
         save_task(key, task)
-        append_task_step(root, str(task.get("id") or ""), "intent-map-confirmed")
+        append_task_step(root, str(task.get("id") or ""), "intent-map-confirmed", by=by_text or None)
+        if by_text:
+            append_project_jsonl(
+                root,
+                "approvals.jsonl",
+                {
+                    "t": confirmed_at,
+                    "key": key,
+                    "task": str(task.get("id") or ""),
+                    "by": by_text,
+                },
+            )
         worktree = Path(str(task.get("worktree") or ""))
         thaw_worktree(worktree)
     return status(root)

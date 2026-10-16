@@ -342,6 +342,8 @@ def ticket_prescreen(
             seen_ids.add(ev_tid)
         if str(ev.get("reason") or "") == "script-prescreen-rejected":
             continue
+        if str(ev.get("outcome") or "").strip().casefold() not in {"passed", "pass", "allow"}:
+            continue
         timings = ev.get("timings") if isinstance(ev.get("timings"), dict) else {}
         g = str(ev.get("understood_goal") or timings.get("understood_goal") or "").strip()
         s = str(ev.get("summary") or timings.get("summary") or "").strip()
@@ -534,8 +536,6 @@ def ticket_verdict_problems(
         problems.append("dimension score < 7 or status=fail requires verdict=reject")
 
     prev_goals = (prescreen or {}).get("prev_goals") if isinstance(prescreen, dict) else []
-    prev_summaries = (prescreen or {}).get("prev_summaries") if isinstance(prescreen, dict) else []
-    summary = str(verdict.get("summary") or "").strip()
 
     dup_prior = False
     if understood_goal and isinstance(prev_goals, list):
@@ -543,11 +543,7 @@ def ticket_verdict_problems(
             if _norm_text(understood_goal) == _norm_text(str(pg)) or _bigram_jaccard(understood_goal, str(pg)) >= 0.85:
                 dup_prior = True
                 break
-    if not dup_prior and summary and isinstance(prev_summaries, list):
-        for ps in prev_summaries:
-            if _norm_text(summary) == _norm_text(str(ps)) or _bigram_jaccard(summary, str(ps)) >= 0.85:
-                dup_prior = True
-                break
+    # 固定收尾措辞本身不算偷懒：只有实质重述（understood_goal）也撞往期评审，才判照抄
     if dup_prior:
         problems.append("lazy-review: review summary/goal duplicates a prior ticket review")
         is_lazy = True

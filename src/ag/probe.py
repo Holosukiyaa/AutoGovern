@@ -1,6 +1,7 @@
 """Out-of-tree observation probes. See lane. Never set product or refuse finish.
 
 Definitions live under AG_HOME/projects/<key>/probes.json, not the product tree.
+Skips and removals are recorded in AG_HOME/projects/<key>/probe-audit.jsonl.
 """
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import os
 import re
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,10 +20,14 @@ from .managed import ChainBroken, ag_home, project_key, real_root
 SCHEMA = "ag.probes.v1"
 RUN_SCHEMA = "ag.probe.run.v1"
 LIST_SCHEMA = "ag.probe.list.v1"
+AUDIT_NAME = "probe-audit.jsonl"
 MIN_EVIDENCE = 20
 DEFAULT_TTL = 10
 TAIL_CHARS = 2000
 CMD_TIMEOUT_S = 30
+PLANT_HEAD_BYTES = 4096
+PLANT_MAX_FILE_BYTES = 1_000_000
+PLANT_MAX_LINE_CHARS = 400
 KINDS = ("command", "text_in_file")
 
 TOOLS = [
@@ -43,6 +49,23 @@ TOOLS = [
                 "ttl_quiet_loops": {"type": "integer"},
             },
             "required": ["root", "observation", "exam_fragment", "evidence", "area"],
+        },
+    },
+    {
+        "name": "ag_probe_drop",
+        "description": (
+            "Remove one out-of-tree probe by id and append a readable line to probe-audit.jsonl. "
+            "Reduces pins only; an unknown id is refused and the store is left unchanged. See lane; not delivery."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "root": {"type": "string"},
+                "id": {"type": "string"},
+                "reason": {"type": "string"},
+                "by": {"type": "string"},
+            },
+            "required": ["root", "id"],
         },
     },
     {
@@ -82,6 +105,42 @@ def store_path(root: Path) -> Path:
 
 def _posix(rel: str) -> str:
     return str(rel or "").replace("\\", "/").strip().strip("/")
+
+
+def audit_path(root: Path) -> Path:
+    return ag_home() / "projects" / project_key(real_root(root)) / AUDIT_NAME
+
+
+def _utc_stamp() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def audit_note(
+    root: Path,
+    *,
+    action: str,
+    probe_id: str,
+    area: list[str] | None = None,
+    reason: str = "",
+    by: str = "",
+    mirror: str = "",
+) -> str:
+    """Append one readable line. Skips and removals must never be silent."""
+    from .store import append_project_jsonl
+
+    row: dict[str, Any] = {
+        "t": _utc_stamp(),
+        "key": project_key(real_root(root)),
+        "action": str(action),
+        "id": str(probe_id),
+        "area": [str(item) for item in (area or [])],
+        "reason": str(reason),
+    }
+    if by:
+        row["by"] = str(by)
+    if mirror:
+        row["mirror"] = str(mirror)
+    return append_project_jsonl(real_root(root), AUDIT_NAME, row)
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -316,12 +375,68 @@ def _line_at(tree: Path, rel: str, lineno: int) -> str:
     return str(lines[lineno - 1] or "").strip()
 
 
+def _binary_suffixes() -> set[str]:
+    from .critic import _BINARY_CHECK_SUFFIXES
+
+    return {str(item).lower() for item in _BINARY_CHECK_SUFFIXES}
+
+
+def _bad_line_reason(snippet: str) -> str:
+    if len(snippet) > PLANT_MAX_LINE_CHARS:
+        return f"line-too-long:{len(snippet)}"
+    for ch in snippet:
+        if (ord(ch) < 32 and ch != "\t") or ord(ch) == 127:
+            return "line-control-chars"
+    return ""
+
+
+def _plant_target(tree: Path, rel: str, lineno: int) -> tuple[str, str]:
+    """Return (skip_reason, snippet). An empty skip_reason means the line can carry a pin."""
+    path = Path(tree) / rel.replace("\\", "/")
+    if not path.is_file():
+        return "target-not-found", ""
+    try:
+        size = int(path.stat().st_size)
+    except OSError as exc:
+        return f"target-unreadable:{exc.__class__.__name__}", ""
+    if size > PLANT_MAX_FILE_BYTES:
+        return f"target-too-large:{size}", ""
+    suffix = path.suffix.lower()
+    if suffix in _binary_suffixes():
+        return f"binary-suffix:{suffix}", ""
+    try:
+        with path.open("rb") as handle:
+            head = handle.read(PLANT_HEAD_BYTES)
+    except OSError as exc:
+        return f"target-unreadable:{exc.__class__.__name__}", ""
+    if b"\x00" in head:
+        return "binary-nul-header", ""
+    snippet = _line_at(Path(tree), rel, lineno)
+    if not snippet:
+        try:
+            count = len(path.read_text(encoding="utf-8", errors="replace").splitlines())
+        except OSError:
+            count = 0
+        if lineno < 1 or lineno > count:
+            return f"line-out-of-range:{lineno}>{count}", ""
+        return "line-empty", ""
+    bad = _bad_line_reason(snippet)
+    if bad:
+        return bad, ""
+    return "", snippet
+
+
 def plant_from_reject(root: Path, *, items: Any, tree: Path) -> list[str]:
-    """Ship autonomy: critic reject with path:line becomes a must_exclude pin. Heal does not call this."""
+    """Ship autonomy: critic reject with path:line becomes a must_exclude pin. Heal does not call this.
+
+    A pin that can never be satisfied must not land: binary, oversized, or abnormal target lines are
+    skipped, and the skip reason is written to probe-audit.jsonl.
+    """
     planted: list[str] = []
     if not isinstance(items, list):
         return planted
     repo = real_root(root)
+    tree_root = Path(tree)
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -334,8 +449,16 @@ def plant_from_reject(root: Path, *, items: Any, tree: Path) -> list[str]:
             continue
         rel = match.group(1).replace("\\", "/")
         lineno = int(match.group(2))
-        snippet = _line_at(Path(tree), rel, lineno)
-        if not snippet:
+        skip_reason, snippet = _plant_target(tree_root, rel, lineno)
+        probe_id = "auto-" + hashlib.sha256(f"{rel}:{lineno}:{snippet}".encode("utf-8")).hexdigest()[:12]
+        if skip_reason:
+            audit_note(
+                repo,
+                action="skip-plant",
+                probe_id=probe_id,
+                area=[rel],
+                reason=f"{rel}:{lineno} {skip_reason}",
+            )
             continue
         comment = str(item.get("comment") or "").strip()
         fragment = comment or f"{rel}:{lineno} must not keep this defect"
@@ -344,7 +467,6 @@ def plant_from_reject(root: Path, *, items: Any, tree: Path) -> list[str]:
             evidence_text = (evidence_text + " " + "observed-in-worktree")[:].strip()
             if len(evidence_text) < MIN_EVIDENCE:
                 evidence_text = evidence_text + " " * (MIN_EVIDENCE - len(evidence_text))
-        probe_id = "auto-" + hashlib.sha256(f"{rel}:{lineno}:{snippet}".encode("utf-8")).hexdigest()[:12]
         try:
             insert(
                 repo,
@@ -354,10 +476,59 @@ def plant_from_reject(root: Path, *, items: Any, tree: Path) -> list[str]:
                 area=[rel],
                 id=probe_id,
             )
-        except ChainBroken:
+        except ChainBroken as exc:
+            audit_note(
+                repo,
+                action="skip-plant",
+                probe_id=probe_id,
+                area=[rel],
+                reason=f"{rel}:{lineno} insert-refused {exc}",
+            )
             continue
         planted.append(probe_id)
     return planted
+
+
+def drop(root: Path, *, id: str, reason: str = "", by: str = "") -> dict[str, Any]:
+    """Remove one pin by id. An unknown id is refused and the store is left unchanged."""
+    repo = real_root(root)
+    probe_id = _clean_id(id)
+    path = store_path(repo)
+    blob = _load(path)
+    target = next((row for row in blob["probes"] if str(row.get("id") or "") == probe_id), None)
+    if target is None:
+        raise ChainBroken(f"probe {probe_id} not found; store unchanged")
+    area = [str(item) for item in (target.get("area") or []) if isinstance(item, str)]
+    blob["probes"] = [row for row in blob["probes"] if str(row.get("id") or "") != probe_id]
+    _save(path, blob)
+    mirror = "ok:0"
+    try:
+        from .store import delete_probe
+
+        mirror = f"ok:{delete_probe(repo, probe_id)}"
+    except Exception as exc:
+        mirror = f"failed:{exc.__class__.__name__}"
+    audit = audit_note(
+        repo,
+        action="drop",
+        probe_id=probe_id,
+        area=area,
+        reason=str(reason or ""),
+        by=str(by or ""),
+        mirror=mirror,
+    )
+    return {
+        "schema": SCHEMA,
+        "action": "drop",
+        "id": probe_id,
+        "dropped": [probe_id],
+        "state": "dropped",
+        "store": str(path),
+        "audit": audit,
+        "reason": str(reason or ""),
+        "by": str(by or ""),
+        "mirror": mirror,
+    }
 
 
 def missing_fragments(root: Path, red_ids: list[str]) -> list[str]:
@@ -536,6 +707,13 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
             area=args.get("area"),
             id=str(args["id"]) if args.get("id") else None,
             ttl_quiet_loops=int(args.get("ttl_quiet_loops") or DEFAULT_TTL),
+        )
+    if name == "ag_probe_drop":
+        return drop(
+            root,
+            id=str(args.get("id") or ""),
+            reason=str(args.get("reason") or ""),
+            by=str(args.get("by") or ""),
         )
     if name == "ag_probe_run":
         raw_paths = args.get("path")

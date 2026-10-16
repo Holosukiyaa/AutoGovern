@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .loop import abandon, enroll, finish, start, status, unenroll, verify
+from .loop import abandon, confirm_map, enroll, finish, start, status, unenroll, verify
 
 ID = "ship"
 JOB = "交货"
@@ -61,6 +61,22 @@ TOOLS = [
         },
     },
     {
+        "name": "ag_confirm_map",
+        "description": (
+            "Record the user's approval of the current intent map and thaw the worktree. "
+            "Pass by=user-message@<utc> only after the user approves in the conversation; omit by when the user "
+            "pressed it themselves. Refused when the ticket review did not pass. The gate itself is unchanged."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "root": {"type": "string"},
+                "by": {"type": "string"},
+            },
+            "required": ["root"],
+        },
+    },
+    {
         "name": "ag_verify",
         "description": "Run enrolled tests (if any), probes, critic, then switch; pin git write-tree. product failed is not an MCP error.",
         "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}}, "required": ["root"]},
@@ -108,6 +124,8 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
             defaults=defaults,
             fixed=fixed,
         )
+    if name == "ag_confirm_map":
+        return confirm_map(root, by=str(args.get("by") or ""))
     if name == "ag_verify":
         return verify(root)
     if name == "ag_finish":
