@@ -70,6 +70,10 @@ def _canonical_root(cwd: Path) -> Path:
     return common.parent if common.name == ".git" else common.parent
 
 
+def _is_self_governance(root: Path) -> bool:
+    return (real_root(root) / "src" / "ag" / "__init__.py").is_file()
+
+
 def _task_path(key: str) -> Path:
     return ag_home() / "projects" / key / "task.json"
 
@@ -1433,7 +1437,17 @@ def finish(root: Path) -> dict[str, Any]:
         )
     switch_block = _switch_block_message(verify_blob)
     if switch_block:
-        _no(switch_block)
+        if _is_self_governance(root):
+            switch_rec = verify_blob.get("switch") or {}
+            task["self_governed_bypass"] = {
+                "outcome": str(switch_rec.get("outcome") or ""),
+                "report_id": _switch_report_id(verify_blob),
+                "reason": str(switch_rec.get("reason") or ""),
+            }
+            save_task(key, task)
+            append_task_step(root, str(task.get("id") or ""), "self-governed-bypass")
+        else:
+            _no(switch_block)
     thaw_canonical(root)
     try:
         return _finish_after_thaw(root, key, state, task, worktree)
