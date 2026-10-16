@@ -223,6 +223,8 @@ def _deliver_token_ok(root: Path) -> bool:
     return hmac.compare_digest(got, expected)
 
 
+# 既有的两条本地忽略项：一次性自检脚本目录，以及那个通用名数据目录。
+# ag 早已不再往通用名数据目录里写任何东西，这一条只为兼容仍留着旧票的项目。
 LOCAL_EXCLUDE_ENTRIES: tuple[str, ...] = (".data/", ".ag-check/")
 
 
@@ -547,7 +549,9 @@ def _onboarding_status(
     task: dict[str, Any] | None,
     exclude_info: dict[str, Any],
 ) -> dict[str, Any]:
-    t_path = root / ".data" / "ticket.md"
+    from .ticket_doc import active_ticket_path
+
+    t_path = active_ticket_path(root)
     ticket_ready = t_path.is_file()
     try:
         from .critic import config_guide
@@ -578,15 +582,15 @@ def _onboarding_status(
             guide = {"reviewer_ready": False, "api_key_present": False}
     reviewer_ready = bool(guide.get("reviewer_ready"))
     if not ticket_ready:
-        next_step = "1. 请在 .data/ticket.md 中编写 ## 意图、正反完整链路 anchor: 与聚焦 ## 红线，然后调用 ag_start。"
+        next_step = "1. 请在 <AG_HOME>/projects/<key>/ticket.md 中编写 ## 意图、正反完整链路 anchor: 与聚焦 ## 红线，然后调用 ag_start。"
     elif task is None:
-        next_step = "2. .data/ticket.md 已就绪；请先核对内容，再调用 ag_start 创建隔离工作树并运行开票审票（如需启用 DS 独立审核，请按 onboarding.config_guide 指引配置 critic.json）。"
+        next_step = "2. <AG_HOME>/projects/<key>/ticket.md 已就绪；请先核对内容，再调用 ag_start 创建隔离工作树并运行开票审票（如需启用 DS 独立审核，请按 onboarding.config_guide 指引配置 critic.json）。"
     elif not bool(task.get("intent_map_confirmed")):
         tr = task.get("ticket_review") if isinstance(task.get("ticket_review"), dict) else {}
         if bool(tr.get("configured")) and str(tr.get("outcome") or "").strip().casefold() not in {"passed", "pass", "allow"}:
-            next_step = "3. 开票审票未通过（ticket-review-rejected）：请根据 ticket_review.doubts 修改 .data/ticket.md，然后再次调用 ag_start 原地重封存并重审。"
+            next_step = "3. 开票审票未通过（ticket-review-rejected）：请根据 ticket_review.doubts 修改 <AG_HOME>/projects/<key>/ticket.md，然后再次调用 ag_start 原地重封存并重审。"
         else:
-            next_step = "3. 工作树已冻结：请将 anchor_preview（.data/ticket.md 全文）展示给用户审阅；待用户明确回复“确认”后，调用 confirm-map 解冻工作树。"
+            next_step = "3. 工作树已冻结：请将 anchor_preview（<AG_HOME>/projects/<key>/ticket.md 全文）展示给用户审阅；待用户明确回复“确认”后，调用 confirm-map 解冻工作树。"
     elif not task.get("verified_tree"):
         next_step = "4. 工作树已解冻：请仅在 worktree 目录内修改代码，并在 worktree/.ag-check/ 下编写本票一次性自检脚本，完成后调用 ag_verify。"
     else:
@@ -660,7 +664,7 @@ def status(root: Path) -> dict[str, Any]:
         "product": product,
         "reminder": "process complete is not product passed",
         "worker_note": "After ag_verify cite critic.report_id and switch.report_id. No report bodies. Switch is the finish gate; critic is not.",
-        "intent_gate": "STOP: show anchor_preview to the user; the file is .data/ticket.md at anchor_preview_path. Wait for explicit user approval, then run confirm-map.",
+        "intent_gate": "STOP: show anchor_preview to the user; the file is <AG_HOME>/projects/<key>/ticket.md at anchor_preview_path. Wait for explicit user approval, then run confirm-map.",
         "task": task,
         "ticket_review": (task or {}).get("ticket_review") if task else None,
         "portrait": (task or {}).get("portrait") if task else "",
@@ -816,8 +820,8 @@ def start(
                 usage_note(root, "ship", 8, "block", "start without intent anchors")
                 raise ChainBroken(
                     "intent sync required: provide a locked result or at least one attention anchor "
-                    "[原因] .data/ticket.md 中缺少 anchor: 意图锚点 "
-                    "[下一步] 请在 .data/ticket.md 的 ## 意图 下补充至少一条正反行为闭环 anchor: 后重试"
+                    "[原因] <AG_HOME>/projects/<key>/ticket.md 中缺少 anchor: 意图锚点 "
+                    "[下一步] 请在 <AG_HOME>/projects/<key>/ticket.md 的 ## 意图 下补充至少一条正反行为闭环 anchor: 后重试"
                 )
             redlines = collect_redlines(redline_body, task_anchors)
             baseline_prev = list(
@@ -906,8 +910,8 @@ def start(
         usage_note(root, "ship", 8, "block", "start without intent anchors")
         raise ChainBroken(
             "intent sync required: provide a locked result or at least one attention anchor "
-            "[原因] .data/ticket.md 中缺少 anchor: 意图锚点 "
-            "[下一步] 请在 .data/ticket.md 的 ## 意图 下补充至少一条正反行为闭环 anchor: 后重试"
+            "[原因] <AG_HOME>/projects/<key>/ticket.md 中缺少 anchor: 意图锚点 "
+            "[下一步] 请在 <AG_HOME>/projects/<key>/ticket.md 的 ## 意图 下补充至少一条正反行为闭环 anchor: 后重试"
         )
     redlines = collect_redlines(redline_body, task_anchors)
     prev_redlines = previous_redlines(root)
@@ -1032,13 +1036,13 @@ def verify(root: Path) -> dict[str, Any]:
         raise ChainBroken(
             "no open task; ag_start first "
             "[原因] 当前没有进行中的票据任务 "
-            "[下一步] 请先编写 .data/ticket.md 并调用 ag_start"
+            "[下一步] 请先编写 <AG_HOME>/projects/<key>/ticket.md 并调用 ag_start"
         )
     if not bool(task.get("intent_map_confirmed")):
         reason = (
             "intent-map-unconfirmed: ag_verify refused; user must confirm the anchor map first "
             "[原因] 尚未由用户确认意图锚点预览（工作树仍处于冻结态） "
-            "[下一步] 请先向用户展示 anchor_preview（.data/ticket.md 全文），待用户明确回复“确认”后调用 confirm-map，再执行 ag_verify"
+            "[下一步] 请先向用户展示 anchor_preview（<AG_HOME>/projects/<key>/ticket.md 全文），待用户明确回复“确认”后调用 confirm-map，再执行 ag_verify"
         )
         task["verify"] = {"exit": 1, "stderr": reason, "refused": "intent-map-unconfirmed"}
         task["verified_tree"] = ""
@@ -1288,7 +1292,7 @@ def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
         raise ChainBroken(
             "no open task; ag_start first "
             "[原因] 当前没有进行中的票据任务 "
-            "[下一步] 请先编写 .data/ticket.md 并调用 ag_start"
+            "[下一步] 请先编写 <AG_HOME>/projects/<key>/ticket.md 并调用 ag_start"
         )
     if not bool(task.get("intent_map_confirmed")):
         tr = task.get("ticket_review") if isinstance(task.get("ticket_review"), dict) else {}
@@ -1303,9 +1307,9 @@ def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
             )
             raise ChainBroken(
                 f"ticket-review-rejected: startup ticket failed review ({tr.get('reason') or tr.get('report_id') or tr.get('outcome')}); "
-                "revise .data/ticket.md and run ag_start to re-seal before confirm-map "
+                "revise <AG_HOME>/projects/<key>/ticket.md and run ag_start to re-seal before confirm-map "
                 "[原因] 开票审票（DS 首轮审票）未通过 "
-                "[下一步] 请根据 ticket_review.doubts 修改 .data/ticket.md，再次调用 ag_start 原地重封存并重审通过后再执行 confirm-map"
+                "[下一步] 请根据 ticket_review.doubts 修改 <AG_HOME>/projects/<key>/ticket.md，再次调用 ag_start 原地重封存并重审通过后再执行 confirm-map"
             )
         if bool(tr.get("configured")):
             usage_note(root, "ship", 13, "help", "ticket review passed")

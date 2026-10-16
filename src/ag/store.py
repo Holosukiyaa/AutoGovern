@@ -10,6 +10,9 @@ from typing import Any
 from .managed import ag_home, project_key, real_root
 
 LEGACY_DB_NAME = "ag.sqlite"
+# 通用名目录：可能是项目自己的数据（例如某个项目的应用数据就放在这里）。
+# ag 不再往项目里写它，扫描时一律跳过；只有搬运遗留票的那一次会读它。全仓唯一的字面量。
+FOREIGN_DIR_NAME = ".data"
 PENDING_NAME = "pending_repairs.json"
 LLM_PREFIX = {"critic_event": "cr", "switch_event": "sw", "ticket_event": "tr"}
 LLM_JSONL = {"critic_event": "critic.jsonl", "switch_event": "switch.jsonl", "ticket_event": "ticket.jsonl"}
@@ -18,6 +21,17 @@ LLM_JSONL = {"critic_event": "critic.jsonl", "switch_event": "switch.jsonl", "ti
 def legacy_db_path(root: Path) -> Path:
     """The retired mirror. Read-only: nothing writes it again."""
     return ag_home() / "projects" / project_key(real_root(root)) / LEGACY_DB_NAME
+
+
+def under_foreign(rel: Any) -> bool:
+    """True for a project-relative path that sits inside the foreign directory."""
+    text = str(rel or "").replace("\\", "/").strip("/")
+    return text == FOREIGN_DIR_NAME or text.startswith(FOREIGN_DIR_NAME + "/")
+
+
+def foreign_dir(root: Path) -> Path:
+    """The generic per-project directory ag keeps its hands off of."""
+    return Path(real_root(root)) / FOREIGN_DIR_NAME
 
 
 def project_dir(root: Path) -> Path:

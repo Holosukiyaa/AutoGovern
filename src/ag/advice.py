@@ -17,6 +17,7 @@ from typing import Any
 from .catalog import enabled, list_lane, plug_dir
 from .managed import load_managed, lookup_project, project_key, real_root
 from .see import note
+from .store import under_foreign
 
 _CSS_CLASS = re.compile(r"""(?<![0-9A-Za-z_-])\.([A-Za-z_][\w-]{2,})""")
 _SKIP_DIR = {"node_modules", "dist", "__pycache__", ".git"}
@@ -571,7 +572,7 @@ def _is_non_prod_path(rel: str) -> bool:
         or "test" in norm
         or norm.startswith(".ag-check/")
         or "/.ag-check/" in f"/{norm}"
-        or norm.startswith(".data/")
+        or under_foreign(norm)
         or _skip_rel(norm)
     )
 
@@ -684,7 +685,7 @@ def lift_17(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
         if rel
         and "/" in rel
         and not rel.startswith(".ag-check/")
-        and not rel.startswith(".data/")
+        and not under_foreign(rel)
         and not _skip_rel(rel)
     ]
     new_dirs: dict[str, list[str]] = {}
@@ -723,7 +724,7 @@ def lift_17(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
             if (
                 rel.startswith(prefix)
                 or rel.startswith(".ag-check/")
-                or rel.startswith(".data/")
+                or under_foreign(rel)
                 or _skip_rel(rel)
             ):
                 continue
@@ -811,7 +812,9 @@ def lift_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
         or 0
     )
     base_seq = max(len(archived_files), len(timeline_files), len(union_ids), digest_seq)
-    if base_seq == 0 and (repo / ".data" / "ticket.md").is_file():
+    from .ticket_doc import active_ticket_path
+
+    if base_seq == 0 and active_ticket_path(repo).is_file():
         base_seq = 1
     ticket_seq = base_seq
     strict_round_mode = bool(ticket_seq >= 3)

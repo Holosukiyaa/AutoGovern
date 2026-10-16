@@ -8,10 +8,10 @@
 
 **一句话定位**：`ag` 是面向 AI 编程（Vibe Coding）的**本地工程交付护栏与独立审核底座（MCP + CLI）**。
 
-它通过 **主仓冻结（Canonical Freeze）+ 独立工作树（`<WORKTREE>`）隔离施工 + 启动票意图锚点与红线封存（`<PROJECT_ROOT>/.data/ticket.md`）+ 0-Token 本地脚本预筛 + 一前一后（`ticket` 开票审 + `switch` 交卷守门）无状态 DS 审核 + 一次性验证（`<WORKTREE>/.ag-check/`）**，从物理机制上解决 AI 编程的三大核心痛点：
+它通过 **主仓冻结（Canonical Freeze）+ 独立工作树（`<WORKTREE>`）隔离施工 + 启动票意图锚点与红线封存（`<AG_HOME>/projects/<key>/ticket.md`）+ 0-Token 本地脚本预筛 + 一前一后（`ticket` 开票审 + `switch` 交卷守门）无状态 DS 审核 + 一次性验证（`<WORKTREE>` 内现场生成的一次性自检脚本）**，从物理机制上解决 AI 编程的三大核心痛点：
 
 1. **防止改乱主仓与半途污染**：主分支检出区（`<PROJECT_ROOT>`）在任务期间物理只读冻结；所有修改强制发生在隔离工作树 `<WORKTREE>`，验收通过后才以 `--ff-only` 原子合入主仓。
-2. **防止目标漂移与偷删红线**：开工前强制在 `<PROJECT_ROOT>/.data/ticket.md` 锁定业务意图、正反向行为链路锚点（`anchor:`）与聚焦红线（`## 红线`），封存为不可篡改的 `.data/redlines.copy`，并必须经用户显式执行 `confirm-map` 确认后才解冻工作树。
+2. **防止目标漂移与偷删红线**：开工前强制在 `<AG_HOME>/projects/<key>/ticket.md` 锁定业务意图、正反向行为链路锚点（`anchor:`）与聚焦红线（`## 红线`），封存为不可篡改的 `<AG_HOME>/projects/<key>/redlines.copy`，并必须经用户显式执行 `confirm-map` 确认后才解冻工作树。
 3. **防止“自己考自己”写假测试凑分**：废除常驻 `tests/` 答案库，每张票在 `<WORKTREE>/.ag-check/` 现场编写针对本票结果的一次性自检脚本（合入即销毁），配合异构/无状态的 `ticket`（开票三维审票）与 `switch`（交卷代码终审 + 自动种回归探针 `probes`）守住交付底线。
 
 ---
@@ -58,7 +58,7 @@ python -m ag config <PROJECT_ROOT>
 ```powershell
 python -m ag enroll <PROJECT_ROOT>
 ```
-该操作会自动将 `.data/` 与 `.ag-check/` 写入 `<PROJECT_ROOT>/.git/info/exclude`（**零污染主仓 `.gitignore`**），并在缺少票据时自动生成初始 `<PROJECT_ROOT>/.data/ticket.md` 模板。
+该操作会自动把 ag 的本地忽略项写入 `<PROJECT_ROOT>/.git/info/exclude`（**零污染主仓 `.gitignore`**），并在缺少票据时于 ag 家里自动生成初始 `<AG_HOME>/projects/<key>/ticket.md` 模板。票只住在 ag 家里；若旧项目仍把 `ticket.md` / `tickets/` / `redlines.copy` 三样留在项目里，`ag_start` 会先逐份核对 SHA256 后一次性搬进新家并留一份可读的搬家记录，项目里不留任何 ag 门牌。
 
 ### 第三步：引导配置独立 DS 审核席位（按需）
 若用户希望启用独立大模型审核（`ticket` 开票审 + `switch` 交卷守门）但 `reviewer_ready: false`：
@@ -67,8 +67,8 @@ python -m ag enroll <PROJECT_ROOT>
 3. 检查 `api_key_present` 布尔值，指导用户在终端或 MCP 配置中设置对应的环境变量（**安全铁律：AI 绝不向用户索要、读取或在任何日志中打印 API Key 明文**）。
 
 ### 第四步：严格执行 6 步受控交付闭环
-1. **写票**：协助用户编写 `<PROJECT_ROOT>/.data/ticket.md`（包含大白话 `## 意图`、带正反完整行为链路的 `anchor:`、窄化聚焦的 `## 红线`）。
-2. **开票与审票**：调用 `ag_start`（触发本地 0-Token 脚本预筛 + 无状态 `ticket` 席位三维审票；若被打回则修改 `.data/ticket.md` 后重跑 `ag_start`）。
+1. **写票**：协助用户编写 `<AG_HOME>/projects/<key>/ticket.md`（包含大白话 `## 意图`、带正反完整行为链路的 `anchor:`、窄化聚焦的 `## 红线`）。
+2. **开票与审票**：调用 `ag_start`（触发本地 0-Token 脚本预筛 + 无状态 `ticket` 席位三维审票；若被打回则修改 `<AG_HOME>/projects/<key>/ticket.md` 后重跑 `ag_start`）。
 3. **等待用户确认意图图**：向用户完整展示 `anchor_preview` 及 `anchor_preview_path`，**立即停手等待用户确认**。用户确认后由用户执行 `python -m ag confirm-map <PROJECT_ROOT>` 解冻 `<WORKTREE>`（AI 严禁替用户自调 `confirm-map`）。
 4. **隔离施工与一次性自检**：仅在 `<WORKTREE>` 内修改代码（复杂任务可用 `ag worker-create` 拆分最多 3 个 Worker），并在 `<WORKTREE>/.ag-check/` 下编写针对本票结果的一次性自检脚本。
 5. **交卷验货**：调用 `ag_verify`（执行本地预筛、历史回归探针 `probes`、`.ag-check/` 验证与单次无状态 `switch` 终审）。

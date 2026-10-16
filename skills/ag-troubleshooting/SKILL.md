@@ -3,7 +3,7 @@ name: ag-troubleshooting
 description: >
   Use when any ag command or MCP tool raises ChainBroken, refuses an
   action, or reports hazards such as canonical-dirty, missing
-  .data/ticket.md, script-prescreen-rejected, ticket-review-rejected,
+  <AG_HOME>/projects/<key>/ticket.md, script-prescreen-rejected, ticket-review-rejected,
   intent-map-unconfirmed, canonical freeze/read-only files, switch reject
   or void, missing worker results, or probe red.
 ---
@@ -38,15 +38,15 @@ description: >
 
 ---
 
-## 2. `ag_start requires .data/ticket.md`
+## 2. 找不到票：`ag_start needs a ticket`
 
 - **[现象/报错]**：
-  - 调用 `ag_start` 时报错：`ag_start requires .data/ticket.md (<PROJECT_ROOT>/.data/ticket.md)`，或提示缺少锚点/完成态描述。
+  - 调用 `ag_start` 时报错：`ag_start needs a ticket; missing <AG_HOME>/projects/<key>/ticket.md`（附中文原因与下一步），或提示缺少锚点/完成态描述。
 - **[原因]**：
-  - `<PROJECT_ROOT>/.data/ticket.md` 不存在，或者里面只有空模板，没有填写有效的 `做成之后：`（或 `固定:`）完成态意图与至少一条 `anchor:` 锚点。
+  - `<AG_HOME>/projects/<key>/ticket.md` 不存在，或者里面只有空模板，没有填写有效的 `做成之后：`（或 `固定:`）完成态意图与至少一条 `anchor:` 锚点。
 - **[解决办法]**：
-  1. 若尚未登记仓库，先运行 `python -m ag enroll <PROJECT_ROOT>`（会自动生成 `.data/ticket.md` 初始模板）。
-  2. 打开 `<PROJECT_ROOT>/.data/ticket.md`，在 `## 意图` 下填写 `做成之后：...` 及至少一条完整的 `anchor: ...`，在 `## 红线` 下填写聚焦禁令（写法详见 [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md) 与 [`skills/ag-guide/SKILL.md`](../ag-guide/SKILL.md) 第 2 步），保存后重新运行 `ag_start`。
+  1. 若尚未登记仓库，先运行 `python -m ag enroll <PROJECT_ROOT>`（会自动生成 `<AG_HOME>/projects/<key>/ticket.md` 初始模板）。
+  2. 打开 `<AG_HOME>/projects/<key>/ticket.md`，在 `## 意图` 下填写 `做成之后：...` 及至少一条完整的 `anchor: ...`，在 `## 红线` 下填写聚焦禁令（写法详见 [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md) 与 [`skills/ag-guide/SKILL.md`](../ag-guide/SKILL.md) 第 2 步），保存后重新运行 `ag_start`。
 
 ---
 
@@ -63,8 +63,8 @@ description: >
     - 独立审核模型对 `goal_clarity`（目标清晰度）、`anchor_chain`（锚点链路完整性）、`redline_focus`（红线聚焦度）任一维度打分 `< 7`，或者提出了需要澄清的疑惑（`doubts` 非空）。
 - **[解决办法]**：
   1. 查看 `ag_start` 或 `ag_status` 返回的 `ticket_review.reasons`、`ticket_review.suggestions`、`ticket_review.doubts` 以及 `ticket_review.script_digest.hard_failures`。
-  2. **无需执行 `ag_abandon`！** 在任务尚未 `confirm-map` 前，直接编辑 `<PROJECT_ROOT>/.data/ticket.md`，补齐大白话业务目标、正反向行为链路锚点和聚焦红线，解答 `doubts` 中的疑问。
-  3. 直接再次运行 `ag_start`：系统会自动用新票据原地更新封存红线（`.data/redlines.copy`）并开启新一轮无状态 `ticket` 审票，通过后再由用户执行 `confirm-map`。
+  2. **无需执行 `ag_abandon`！** 在任务尚未 `confirm-map` 前，直接编辑 `<AG_HOME>/projects/<key>/ticket.md`，补齐大白话业务目标、正反向行为链路锚点和聚焦红线，解答 `doubts` 中的疑问。
+  3. 直接再次运行 `ag_start`：系统会自动用新票据原地更新封存红线（`<AG_HOME>/projects/<key>/redlines.copy`）并开启新一轮无状态 `ticket` 审票，通过后再由用户执行 `confirm-map`。
 
 ---
 
@@ -73,7 +73,7 @@ description: >
 - **[现象/报错]**：
   - AI 尝试在 `<WORKTREE>` 修改文件时提示 Permission denied / 文件只读，或运行 `ag_verify` / `ag_finish` 报错 `intent-map-unconfirmed: show anchor_preview to the user and run ag confirm-map first`。
 - **[原因]**：
-  - `ag_start` 创建工作树后，默认会将 `<WORKTREE>` 也设为只读冻结状态，强制要求 AI 先把 `.data/ticket.md`（`anchor_preview`）展示给用户看，防止 AI 不经用户同意就直接闷头改代码。
+  - `ag_start` 创建工作树后，默认会将 `<WORKTREE>` 也设为只读冻结状态，强制要求 AI 先把 `<AG_HOME>/projects/<key>/ticket.md`（`anchor_preview`）展示给用户看，防止 AI 不经用户同意就直接闷头改代码。
 - **[解决办法]**：
   1. AI 将 `anchor_preview` 展示给用户，等待用户明确回复确认。
   2. 由用户在终端执行解冻命令：
@@ -107,7 +107,7 @@ description: >
     - **原因**：`<WORKTREE>` 中修改的 Python 文件存在语法错误（`ast.parse` 编译失败），被本地 0-Token 预筛直接熔断短路，未调用远程大模型。
     - **办法**：查看 `verify.switch.findings` 中指出的具体 `file` 和 `line`，在 `<WORKTREE>` 中修复语法错误后重跑 `ag_verify`。
   - **子情况 6.2：`outcome: "rejected"`（代码终审不通过）**
-    - **原因**：`switch` 终审发现代码未实现 `.data/ticket.md` 的意图、触碰了 `## 红线`、存在未处理的边界漏洞，或 `.ag-check/` 自检脚本没有真正检验核心逻辑。同时，`switch` 会根据发现的问题自动种入回归探针（记录在 `planted_probes` 中）。
+    - **原因**：`switch` 终审发现代码未实现 `<AG_HOME>/projects/<key>/ticket.md` 的意图、触碰了 `## 红线`、存在未处理的边界漏洞，或工作树里的一次性自检脚本没有真正检验核心逻辑。同时，`switch` 会根据发现的问题自动种入回归探针（记录在 `planted_probes` 中）。
     - **办法**：仔细阅读 `verify.switch.summary` 与 `verify.switch.findings`（含精确 `file`、`line` 和 `message`），在 `<WORKTREE>` 中修复代码并完善 `.ag-check/` 脚本，确保新种入的探针也能跑绿，然后重新运行 `ag_verify`。
   - **子情况 6.3：`outcome: "unavailable"`（审核服务不可用）**
     - 查看 `verify.switch.reason`：

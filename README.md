@@ -50,14 +50,14 @@ python -m ag mcp
 
 ---
 
-## 意图锚点与启动票（`.data/ticket.md`）
+## 意图锚点与启动票（`<AG_HOME>/projects/<key>/ticket.md`）
 
-开工（`ag_start`）前必须在主仓准备好 `<PROJECT_ROOT>/.data/ticket.md`（首次 `enroll` 会自动生成模板并加入本地 `.git/info/exclude`）。
+开工（`ag_start`）前必须先准备好 `<AG_HOME>/projects/<key>/ticket.md`——票不住在项目里（首次 `enroll` 会在 ag 家里自动生成模板；旧项目里遗留的 `ticket.md` / `tickets/` / `redlines.copy` 会在 `ag_start` 时先逐份核对 SHA256、再一次性搬进新家，并留一份可读的搬家记录）。
 
 - `## 意图`：用大白话写明本票业务目标与可观察的完成态，保持原文不变。
-- `## 红线`：`ag_start` 会将 `## 红线` 及硬锚点（`anchor!:`）封存到 `.data/redlines.copy`，并归档至 `.data/tickets/<TASK_ID>.md`。
+- `## 红线`：`ag_start` 会将 `## 红线` 及硬锚点（`anchor!:`）封存到 `<AG_HOME>/projects/<key>/redlines.copy`，并归档至 `<AG_HOME>/projects/<key>/tickets/<TASK_ID>.md`。
 - `## 现场`：由 `start`、`verify`、`finish` 自动刷新任务状态，不覆盖 `## 意图` 与已封存的 `## 红线`。
-- **强制人工确认门禁（`confirm-map`）**：`ag_start` 后工作树处于冻结状态。AI 必须先将 `anchor_preview`（即 `.data/ticket.md` 全文）展示给用户，等待用户明确回复“确认”后，再执行 `confirm-map` 解冻工作树。AI 严禁自行偷偷调用 `confirm-map`。
+- **强制人工确认门禁（`confirm-map`）**：`ag_start` 后工作树处于冻结状态。AI 必须先将 `anchor_preview`（即 `<AG_HOME>/projects/<key>/ticket.md` 全文）展示给用户，等待用户明确回复“确认”后，再执行 `confirm-map` 解冻工作树。AI 严禁自行偷偷调用 `confirm-map`。
 
 ### 锚点类型
 
@@ -82,7 +82,7 @@ anchor!: 严禁修改原有的鉴权中间件签名
      - `goal_clarity`：仅凭本票能否看懂业务目标，并用大白话独立复述 `understood_goal`（有任何疑惑即判不通过）。
      - `anchor_chain`：意图锚点是否锁住包含正向与反向/边界拒绝的完整行为链路。
      - `redline_focus`：红线是否合理且范围收缩聚焦。
-   - 若已配置审核且未通过，`confirm-map` 会拒绝解冻工作树；此时直接修改 `.data/ticket.md` 并再次运行 `ag_start` 即可原地重封存、重审。
+   - 若已配置审核且未通过，`confirm-map` 会拒绝解冻工作树；此时直接修改 `<AG_HOME>/projects/<key>/ticket.md` 并再次运行 `ag_start` 即可原地重封存、重审。
    - **多轮反偷懒严审（`lift-18`）**：连续第 3+ 张票（`ticket_seq >= 3`）自动开启严审模式，本地脚本硬核校验审核方是否照抄原文、跨票评语雷同或全满分敷衍放水（`lazy-review`），检出即自动触发重审。
 2. **后门：交卷单次守门与考卷瘦身（`see-15`，单次 `switch` 席位）**
    - `ag_verify` 先由本地脚本 0 Token 执行 `pack_prescreen`（Python/JSON 语法校验、红线文件名/反引号标识符碰撞扫描、吞异常/塞 mock 作弊扫描、`.ag-check/` 断言检查）。
@@ -163,7 +163,7 @@ python -m ag worker-create <PROJECT_ROOT> --portrait "做成之后：..." --anch
   - `see-10` / `see-11`：重复样式症状与所有权归属透视。
   - `see-12`（强推与反向引用）：统计跨语言类型/Lint 压制符净增与反向 import。
   - `see-13`（考卷净荷与防抖）：观测实时日志体积、红线封存状态与 `.ag-check` 大文件过滤。
-  - `see-14`（票据与红线轨迹）：汇总 `.data/tickets/` 历史票据与高频红线分布。
+  - `see-14`（票据与红线轨迹）：汇总 `<AG_HOME>/projects/<key>/tickets/` 历史票据与高频红线分布。
   - `see-15`（一前一后精简考卷）：记录单次 `switch` 与窗口裁剪节省的字符与 Token 账本。
   - `see-17`（评审跑没跑）：现算开票审 / 批改 / 开关三席各跑过多少次、通过 / 拒绝 / 没审各多少、没审的原因与次数，以及每席最近一条结论与时间。
   - `see-18`（正本对账）：把评审历史的正本 jsonl 与 `-last.json` 缓存逐字段对上，报出不一致字段、坏行数，以及旧 `ag.sqlite` 里还剩多少行镜像。

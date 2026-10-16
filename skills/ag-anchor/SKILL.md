@@ -4,12 +4,12 @@ description: >
   Use before ag_start or during any ag-governed delivery task when the user's
   request needs to be distilled into an observable done-state, positive and
   negative/boundary behavior-chain anchors (anchor:), and narrow focused red
-  lines (## 红线) in <PROJECT_ROOT>/.data/ticket.md. Also use when the user says
+  lines (## 红线) in <AG_HOME>/projects/<key>/ticket.md. Also use when the user says
   锚点, 意图锚点, route, ticket.md, or when a later suggestion drifts from an
   existing anchor.
 ---
 
-# `ag-anchor`：意图锚点提取与 `.data/ticket.md` 编写规范
+# `ag-anchor`：意图锚点提取与 `<AG_HOME>/projects/<key>/ticket.md` 编写规范
 
 意图锚点（Intent Anchors）用于把用户一句话需求背后隐含的完整业务路线显式化，而不是把它变成死板的步骤清单。`ag` 将意图锚点与红线持久化在任务状态中，AI 必须在开票前、施工中和交卷验货前始终对齐锚点。
 
@@ -39,7 +39,7 @@ description: >
    - **边界（scope）**：明确包含什么、明确排除什么？
    - **验据（finish）**：什么机器可验证的证据能证明本轮完成？
 3. 不要反复向用户讨要“是否可以开始”的许可；合理的默认决策直接放入 `我替你定的`。
-4. 将提炼出的意图写入 `<PROJECT_ROOT>/.data/ticket.md` 及 `ag_start` 的 `portrait`：
+4. 将提炼出的意图写入 `<AG_HOME>/projects/<key>/ticket.md` 及 `ag_start` 的 `portrait`：
    - `anchor: <带正反向完整行为链路的软锚点>`
    - `anchor!: <仅当源自用户或项目明确硬规则时使用的硬锚点>`
 5. 硬锚点（`anchor!:`）绝不能由 AI 凭空猜测生成；AI 可以建议升级，但必须标明来源。
@@ -47,9 +47,9 @@ description: >
 
 ---
 
-## 二、高质量 `<PROJECT_ROOT>/.data/ticket.md` 编写规范
+## 二、高质量 `<AG_HOME>/projects/<key>/ticket.md` 编写规范
 
-`<PROJECT_ROOT>/.data/ticket.md` 是唯一权威意图文档，缺失或未填写有效内容时 `ag_start` 会直接拒绝。
+`<AG_HOME>/projects/<key>/ticket.md` 是唯一权威意图文档，缺失或未填写有效内容时 `ag_start` 会直接拒绝。
 
 ### 标准模板
 
@@ -80,20 +80,20 @@ anchor: 在哪个交互或数据链路上收敛什么行为：当输入或状态
 3. **`## 红线` 窄化聚焦、拒绝套话与照抄**：
    - 只写与本票改动强相关的 3~5 条具体硬边界（如禁止触碰某模块、禁止引入非标准库、禁止出现硬编码个人路径等）。
    - 严禁写“代码要整洁”“保证没有 bug”等放之四海皆准的废话，也严禁原封不动照抄上一张票的红线。
-   - 开工时，`## 红线` 与硬锚点（`anchor!:`）会被自动封存写入 `<PROJECT_ROOT>/.data/redlines.copy`。
+   - 开工时，`## 红线` 与硬锚点（`anchor!:`）会被自动封存写入 `<AG_HOME>/projects/<key>/redlines.copy`。
 
 ### 审票打回（`rejected`）原地重审机制
 
 若 `ag_start` 返回 `ticket_review.outcome == "rejected"`（无论是 `script-prescreen-rejected` 还是 `ticket-review-rejected`）：
 - 查看 `ticket_review.reasons`、`suggestions`、`doubts` 以及 `script_digest.hard_failures`。
-- **无需执行 `ag_abandon`**：在尚未 `confirm-map` 前，直接编辑 `<PROJECT_ROOT>/.data/ticket.md` 补齐正反向链路、聚焦红线并回答 `doubts`，然后**直接重新运行 `ag_start`** 即可原地更新 `.data/redlines.copy` 并开启新一轮无状态审票。
+- **无需执行 `ag_abandon`**：在尚未 `confirm-map` 前，直接编辑 `<AG_HOME>/projects/<key>/ticket.md` 补齐正反向链路、聚焦红线并回答 `doubts`，然后**直接重新运行 `ag_start`** 即可原地更新 `<AG_HOME>/projects/<key>/redlines.copy` 并开启新一轮无状态审票。
 
 ---
 
 ## 三、强制意图图确认门禁（Mandatory `confirm-map` Gate）
 
 `ag_start` 执行成功（且 `ticket_review` 通过或未启用）后，**AI 必须立即停手**：
-1. 将返回的 `anchor_preview` 完整展示给用户，并附上 `<PROJECT_ROOT>/.data/ticket.md` 的路径（`anchor_preview_path`）。
+1. 将返回的 `anchor_preview` 完整展示给用户，并附上 `<AG_HOME>/projects/<key>/ticket.md` 的路径（`anchor_preview_path`）。
 2. 等待用户审阅并在终端执行：
    ```powershell
    python -m ag confirm-map <PROJECT_ROOT>
@@ -112,5 +112,5 @@ anchor: 在哪个交互或数据链路上收敛什么行为：当输入或状态
   - 若实现方式与硬锚点（`anchor!:`）或 `## 红线` 冲突，必须先停下说明冲突，询问用户是否放弃当前票重开（`ag_abandon`）。
   - 严禁静默篡改或删除已锁定的锚点。
 - **Worker 协同与验货**：
-  - 如需拆分任务，仅使用 `python -m ag worker-create <PROJECT_ROOT> ...` 创建（最多 3 个 Worker），并将 `anchor_preview`、`<PROJECT_ROOT>/.data/ticket.md` 与对应锚点传入 Worker 提示词。
+  - 如需拆分任务，仅使用 `python -m ag worker-create <PROJECT_ROOT> ...` 创建（最多 3 个 Worker），并将 `anchor_preview`、`<AG_HOME>/projects/<key>/ticket.md` 与对应锚点传入 Worker 提示词。
   - 完工后必须运行 `ag_verify` 接受机器与 `switch` 终审，严禁口头自证通过。

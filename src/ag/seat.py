@@ -281,27 +281,26 @@ def seat_result(
 
 
 def _prev_ticket_redlines(repo: Path, task_id: str) -> list[str]:
-    from .ticket_doc import previous_redlines, section_lines, split_document
+    from .ticket_doc import archived_ticket_docs, previous_redlines, section_lines, split_document
 
     tid = str(task_id or "").strip()
-    t_dir = repo / ".data" / "tickets"
-    if t_dir.is_dir():
-        candidates = [
-            p
-            for p in t_dir.glob("*.md")
-            if p.is_file() and p.stem.strip() and (not tid or p.stem.strip() != tid)
-        ]
-        if candidates:
-            latest = max(candidates, key=lambda p: p.stat().st_mtime)
-            try:
-                _, red_body = split_document(latest.read_text(encoding="utf-8"))
-                lines = section_lines(red_body)
-                if lines:
-                    return lines
-            except OSError:
-                pass
-    # Only fall back to .data/redlines.copy if tid was not already sealed into .data/tickets/{tid}.md
-    if not (tid and (t_dir / f"{tid}.md").is_file()):
+    candidates = [
+        p
+        for p in archived_ticket_docs(repo)
+        if p.stem.strip() and (not tid or p.stem.strip() != tid)
+    ]
+    if candidates:
+        latest = max(candidates, key=lambda p: p.stat().st_mtime)
+        try:
+            _, red_body = split_document(latest.read_text(encoding="utf-8"))
+            lines = section_lines(red_body)
+            if lines:
+                return lines
+        except OSError:
+            # 这份存档读不出来就当它不存在：上一票的红线回显只是提示，不阻断。
+            pass
+    # Only fall back to the sealed copy when this ticket was not already archived under its own id.
+    if not (tid and any(p.stem.strip() == tid for p in archived_ticket_docs(repo))):
         copied = previous_redlines(repo)
         if copied:
             return copied
@@ -318,16 +317,16 @@ def ticket_prescreen(
     task_id: str = "",
 ) -> dict[str, Any]:
     """Deterministic 0-token local script pre-screening for startup ticket review."""
+    from .ticket_doc import archived_ticket_docs
+
     repo = real_root(root)
     tid = str(task_id or "").strip()
     seen_ids: set[str] = set()
     if tid:
         seen_ids.add(tid)
-    t_dir = repo / ".data" / "tickets"
-    if t_dir.is_dir():
-        for p in t_dir.glob("*.md"):
-            if p.is_file() and p.stem.strip():
-                seen_ids.add(p.stem.strip())
+    for p in archived_ticket_docs(repo):
+        if p.stem.strip():
+            seen_ids.add(p.stem.strip())
     p_tasks = project_dir(repo) / "tasks"
     if p_tasks.is_dir():
         for p in p_tasks.glob("*.json"):

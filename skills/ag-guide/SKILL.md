@@ -25,7 +25,7 @@ description: >
 | 常见翻车现场 | 没有 `ag` 时的后果 | `ag` 的物理护栏解法 |
 | :--- | :--- | :--- |
 | **1. 主仓直接改烂** | AI 在主工作区改了一半报错，未提交脏文件混在一起，回滚都找不到干净基线。 | **主仓冻结 + `<WORKTREE>` 隔离施工**：开工即把 `<PROJECT_ROOT>` 设为只读冻结，所有代码只能在独立工作树 `<WORKTREE>` 中修改，验收合格才 `--ff-only` 合入。 |
-| **2. 需求理解跑偏 & 偷删底线** | 用户说一句话，AI 脑补出一套复杂架构，改着改着把原有的安全/兼容红线忘得一干二净。 | **启动票锚点 + 红线封存 + 用户确认解冻**：开工前必须把目标、正反向 `anchor:` 和 `## 红线` 写进 `<PROJECT_ROOT>/.data/ticket.md`，封存到 `.data/redlines.copy`，经 `ticket` 席位审票且用户执行 `confirm-map` 后才解冻工作树。 |
+| **2. 需求理解跑偏 & 偷删底线** | 用户说一句话，AI 脑补出一套复杂架构，改着改着把原有的安全/兼容红线忘得一干二净。 | **启动票锚点 + 红线封存 + 用户确认解冻**：开工前必须把目标、正反向 `anchor:` 和 `## 红线` 写进 `<AG_HOME>/projects/<key>/ticket.md`，封存到 `<AG_HOME>/projects/<key>/redlines.copy`，经 `ticket` 席位审票且用户执行 `confirm-map` 后才解冻工作树。 |
 | **3. 写假测试“自己考自己”** | 仓库里留着常驻 `tests/`，AI 为了让测试变绿直接改测试断言或写 `assert True` 糊弄交差。 | **禁止常驻 `tests/` + `.ag-check/` 一次性自检**：本仓不留常驻测试答案库。每张票在 `<WORKTREE>/.ag-check/` 现场写针对本票真实验收逻辑的自检脚本，合入时随 `<WORKTREE>` 自动销毁。 |
 | **4. 审校 Token 爆炸或走过场** | 每次检查全量喂大文件耗尽 Token，或者连续几轮审校后大模型开始“盖章放行”。 | **0-Token 脚本预筛 + 一前一后（`ticket` + `switch`）无状态审核**：本地脚本先拦语法/结构/红线硬伤并裁剪大文件行号窗口，只在开票（`ticket`）和交卷（`switch`）各调一次全新无状态审核线程，并在第 3 轮起启用 `lift-18` 防偷懒重审。 |
 
@@ -63,14 +63,14 @@ description: >
 **执行效果**：
 - 在 `<AG_HOME>/projects/<PROJECT_KEY>/` 下初始化项目治理数据库与目录。
 - 自动将 `.data/` 与 `.ag-check/` 写入 `<PROJECT_ROOT>/.git/info/exclude`（不会污染项目本身的 `.gitignore`）。
-- 若 `<PROJECT_ROOT>/.data/ticket.md` 尚不存在，自动生成一份带中文说明的初始票据模板。
+- 若 `<AG_HOME>/projects/<key>/ticket.md` 尚不存在，自动生成一份带中文说明的初始票据模板。
 - 安装 Git `pre-commit` 钩子，防止在任务进行中意外向主仓直接提交。
 
 ---
 
-### 第 2 步：编写启动票（`<PROJECT_ROOT>/.data/ticket.md`）
+### 第 2 步：编写启动票（`<AG_HOME>/projects/<key>/ticket.md`）
 
-每次开工前，必须先编辑 `<PROJECT_ROOT>/.data/ticket.md`。这是本轮任务的唯一权威意图文档（详细提炼方法参见 [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)）。
+每次开工前，必须先编辑 `<AG_HOME>/projects/<key>/ticket.md`。这是本轮任务的唯一权威意图文档（详细提炼方法参见 [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)）。
 
 #### 标准写法模板：
 
@@ -97,7 +97,7 @@ anchor: 在哪个交互或数据链路上收敛什么行为：当输入或状态
 
 ### 第 3 步：开工建工地与开票独立审票（`ag_start`）
 
-写好 `.data/ticket.md` 后，启动任务：
+写好 `<AG_HOME>/projects/<key>/ticket.md` 后，启动任务：
 
 - **MCP 调用**：`ag_start(root="<PROJECT_ROOT>", portrait="做成之后：...")`
 - **CLI 命令**：
@@ -108,11 +108,11 @@ anchor: 在哪个交互或数据链路上收敛什么行为：当输入或状态
 **底层发生了什么？**
 1. **主仓冻结（Canonical Freeze）**：`<PROJECT_ROOT>` 下所有受跟踪文件被设为只读（Windows 下附加可恢复的当前用户写拒绝 ACL），防止 AI 误改主仓。
 2. **创建隔离工作树 `<WORKTREE>`**：在 `<AG_HOME>/worktrees/<PROJECT_KEY>/<TASK_ID>` 创建独立 Git 工作树。此时 `<WORKTREE>` 也处于初始冻结状态，等待用户确认意图图后解冻。
-3. **封存红线**：提取 `## 红线` 与硬锚点（`anchor!:`），封存写入 `<PROJECT_ROOT>/.data/redlines.copy`。
+3. **封存红线**：提取 `## 红线` 与硬锚点（`anchor!:`），封存写入 `<AG_HOME>/projects/<key>/redlines.copy`。
 4. **0-Token 脚本预筛 + 无状态 `ticket` 审票**：
    - 本地 `ticket_prescreen` 先检查意图长度、锚点正反链路完整性、套话红线与跨票重复率。
    - 若配置了独立审核模型，开启全新无状态的 `ticket` 线程（分配独立 `thread_id`），从 **目标清晰度（`goal_clarity`）**、**锚点链路完整性（`anchor_chain`）**、**红线聚焦度（`redline_focus`）** 三个维度（0-10 分，均 `>= 7` 且无疑惑 `doubts` 方可通过）独立审票，并复述它所理解的目标（`understood_goal`）。
-   - 若审票未通过（`rejected`），直接根据返回的 `reasons`、`suggestions` 和 `doubts` 修改 `<PROJECT_ROOT>/.data/ticket.md`，然后**再次运行 `ag_start`** 即可原地重封存、重审，无需先 `abandon`。
+   - 若审票未通过（`rejected`），直接根据返回的 `reasons`、`suggestions` 和 `doubts` 修改 `<AG_HOME>/projects/<key>/ticket.md`，然后**再次运行 `ag_start`** 即可原地重封存、重审，无需先 `abandon`。
 
 ---
 
@@ -168,7 +168,7 @@ anchor: 在哪个交互或数据链路上收敛什么行为：当输入或状态
     ```powershell
     python -m ag finish <PROJECT_ROOT>
     ```
-  - **效果**：将 `<WORKTREE>` 的提交以 `--ff-only` 快进合入 `<PROJECT_ROOT>`，解除 `<PROJECT_ROOT>` 只读冻结，销毁 `<WORKTREE>` 及其 `.ag-check/`，并更新 `.data/ticket.md` 的 `## 现场` 为已完成。
+  - **效果**：将 `<WORKTREE>` 的提交以 `--ff-only` 快进合入 `<PROJECT_ROOT>`，解除 `<PROJECT_ROOT>` 只读冻结，销毁 `<WORKTREE>` 及其中的一次性自检脚本，并更新 `<AG_HOME>/projects/<key>/ticket.md` 的 `## 现场` 为已完成。
 - 若中途决定取消当前任务：
   - **MCP 调用**：`ag_abandon(root="<PROJECT_ROOT>")`
   - **CLI 命令**：

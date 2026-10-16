@@ -169,7 +169,7 @@ export AG_CRITIC_API_KEY="<YOUR_API_KEY>"
 ## 七、一键安装自带的 4 套独立 Skill
 
 `ag` 在 `skills/` 目录下内置了 4 套职责分明的独立技能包：
-- [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)：意图锚点提炼、`.data/ticket.md` 编写与 `confirm-map` 确认纪律
+- [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)：意图锚点提炼、`<AG_HOME>/projects/<key>/ticket.md` 编写与 `confirm-map` 确认纪律
 - [`skills/ag-guide/SKILL.md`](../ag-guide/SKILL.md)：项目核心原理、三条正交轨道与 6 步完整工作流
 - [`skills/ag-config/SKILL.md`](../ag-config/SKILL.md)：`critic.json` 配置、环境变量与 MCP 挂载指南
 - [`skills/ag-troubleshooting/SKILL.md`](../ag-troubleshooting/SKILL.md)：常见报错码与问题排障手册
