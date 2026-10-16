@@ -1513,6 +1513,20 @@ def _finish_after_thaw(
         "reminder": "Before accepting delivery, re-read the intent map and compare each anchor with the final result; soft anchors are not auto-completion states.",
     }
     append_task_step(root, str(task.get("id") or ""), "finish", head=head, product=product, critic_report_id=_critic_report_id(vblob), switch_report_id=_switch_report_id(vblob), anchor_progress=anchor_progress)
+    try:
+        from .knowledge import archive_session
+
+        archive_session(
+            root,
+            task,
+            verify=vblob,
+            touched=_ticket_paths(worktree, str(task.get("source_head") or "")),
+            check_exit=(vblob or {}).get("exit") if isinstance(vblob, dict) else None,
+            process="completed",
+            product=product,
+        )
+    except Exception as exc:
+        usage_note(root, "see", 14, "help", f"knowledge archive skipped: {exc.__class__.__name__}")
     _cleanup(root, task)
     save_task(key, None)
     blob = load_managed()
@@ -1554,6 +1568,21 @@ def abandon(root: Path) -> dict[str, Any]:
         from .probe import drop_newborn_for_task
 
         drop_newborn_for_task(root, task_id=str(task.get("id") or ""), by="ag-abandon")
+        try:
+            from .knowledge import archive_session
+
+            vblob = task.get("verify") if isinstance(task.get("verify"), dict) else None
+            archive_session(
+                root,
+                task,
+                verify=vblob,
+                touched=[],
+                check_exit=(vblob or {}).get("exit") if isinstance(vblob, dict) else None,
+                process="abandoned",
+                product="undeclared",
+            )
+        except Exception as exc:
+            usage_note(root, "see", 14, "help", f"knowledge archive skipped: {exc.__class__.__name__}")
         save_task(key, None)
     finally:
         thaw_canonical(root)
