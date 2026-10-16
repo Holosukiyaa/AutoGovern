@@ -1372,8 +1372,8 @@ def see_17(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     }
 
 def see_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    """正本对账：评审历史只有一份正本，对出残留镜像与会被改坏的缓存。只出事实。"""
-    from .store import LLM_JSONL, legacy_db_residue, project_dir, scan_llm_log
+    """正本对账：评审历史只有一份正本，对出会被改坏的缓存。只出事实。"""
+    from .store import LLM_JSONL, project_dir, scan_llm_log
 
     pdir = project_dir(root)
     seats: list[dict[str, Any]] = []
@@ -1435,15 +1435,8 @@ def see_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
         if mismatches:
             diffs.append(f"{seat}：" + "；".join(mismatches))
         briefs.append(f"{seat} {len(rows)}" + (f"(差{len(mismatches)})" if mismatches else ""))
-    residue = legacy_db_residue(root)
     detail = " · ".join(briefs)
     detail += f" · 坏行 {bad_total}"
-    if residue["present"]:
-        detail += f" · 残留镜像 {residue['rows']} 行/{len(residue['tables'])} 表"
-        if residue["error"]:
-            detail += f"（读不了：{residue['error']}）"
-    else:
-        detail += " · 无残留镜像"
     detail += f" · 不一致 {len(diffs)} 席"
     folder = plug_dir(root, "see", 18)
     _write_json(
@@ -1452,7 +1445,6 @@ def see_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
             "t": time.time(),
             "source": str(pdir),
             "seats": seats,
-            "legacy_mirror": residue,
             "rows": rows_total,
             "bad_lines": bad_total,
             "mismatches": diffs,
@@ -1461,7 +1453,6 @@ def see_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     )
     return {
         "seats": seats,
-        "legacy_mirror": residue,
         "rows": rows_total,
         "bad_lines": bad_total,
         "mismatches": diffs,

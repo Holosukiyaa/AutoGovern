@@ -2,25 +2,18 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .managed import ag_home, project_key, real_root
 
-LEGACY_DB_NAME = "ag.sqlite"
 # 通用名目录：可能是项目自己的数据（例如某个项目的应用数据就放在这里）。
-# ag 不再往项目里写它，扫描时一律跳过；只有搬运遗留票的那一次会读它。全仓唯一的字面量。
+# ag 不再往项目里写它，扫描时一律跳过。全仓唯一的字面量。
 FOREIGN_DIR_NAME = ".data"
 PENDING_NAME = "pending_repairs.json"
 LLM_PREFIX = {"critic_event": "cr", "switch_event": "sw", "ticket_event": "tr"}
 LLM_JSONL = {"critic_event": "critic.jsonl", "switch_event": "switch.jsonl", "ticket_event": "ticket.jsonl"}
-
-
-def legacy_db_path(root: Path) -> Path:
-    """The retired mirror. Read-only: nothing writes it again."""
-    return ag_home() / "projects" / project_key(real_root(root)) / LEGACY_DB_NAME
 
 
 def under_foreign(rel: Any) -> bool:
@@ -117,35 +110,6 @@ def list_ticket_events(root: Path, limit: int = 20) -> list[dict[str, Any]]:
 def last_llm_event(root: Path, table: str) -> dict[str, Any] | None:
     rows = scan_llm_log(root, table)["rows"]
     return dict(rows[-1]) if rows else None
-
-
-def legacy_db_residue(root: Path) -> dict[str, Any]:
-    """Rows left in the retired mirror, if an old file is still on disk. Read-only."""
-    path = legacy_db_path(root)
-    out: dict[str, Any] = {"path": str(path), "present": path.is_file(), "tables": {}, "rows": 0, "error": ""}
-    if not out["present"]:
-        return out
-    try:
-        conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
-    except sqlite3.Error as exc:
-        out["error"] = f"{exc.__class__.__name__}: {exc}"
-        return out
-    try:
-        names = [
-            str(row[0])
-            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-        ]
-        for name in names:
-            if name == "sqlite_sequence":
-                continue
-            count = int(conn.execute(f"SELECT COUNT(*) FROM [{name}]").fetchone()[0])
-            out["tables"][name] = count
-            out["rows"] += count
-    except sqlite3.Error as exc:
-        out["error"] = f"{exc.__class__.__name__}: {exc}"
-    finally:
-        conn.close()
-    return out
 
 
 def timeline_path(root: Path, task_id: str) -> Path:

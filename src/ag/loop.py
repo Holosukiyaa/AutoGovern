@@ -223,9 +223,8 @@ def _deliver_token_ok(root: Path) -> bool:
     return hmac.compare_digest(got, expected)
 
 
-# 既有的两条本地忽略项：一次性自检脚本目录，以及那个通用名数据目录。
-# ag 早已不再往通用名数据目录里写任何东西，这一条只为兼容仍留着旧票的项目。
-LOCAL_EXCLUDE_ENTRIES: tuple[str, ...] = (".data/", ".ag-check/")
+# 本地忽略项：本票一次性自检脚本目录。ag 不往通用名数据目录里写任何东西，那条也就没有存在的必要。
+LOCAL_EXCLUDE_ENTRIES: tuple[str, ...] = (".ag-check/",)
 
 
 def ensure_local_excludes(root: Path) -> dict[str, Any]:

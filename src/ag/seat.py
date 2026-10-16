@@ -189,10 +189,46 @@ def append_log(
         return ""
 
 
+_BULKY_PACK_KEYS = ("changed_files", "diff", "annotated_diff", "this_ticket_checks", "neighbors")
+
+
+def _slim_blob(blob: dict[str, Any]) -> dict[str, Any]:
+    """结论落盘前抹掉考卷大块：diff、改过的文件正文、一跳邻居、本票自检原文。"""
+    packed = blob.get("pack")
+    if not isinstance(packed, dict):
+        return blob
+    out = dict(blob)
+    out["pack"] = {key: value for key, value in packed.items() if key not in _BULKY_PACK_KEYS}
+    return out
+
+
+def _live_tail(prev: str, now: str) -> tuple[str, bool]:
+    """本次比上次新增的尾巴；接不上就整段重来并让调用方标 reset。"""
+    if now.startswith(prev):
+        return now[len(prev):], False
+    return now, True
+
+
+def _live_row(
+    schema: str, task_id: str, thread_id: str, tail_r: str, tail_c: str, reset: bool
+) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "schema": schema,
+        "task_id": task_id,
+        "thread_id": thread_id,
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+        "reasoning": tail_r,
+        "content": tail_c,
+    }
+    if reset:
+        row["reset"] = True
+    return row
+
+
 def _write_report(kind: str, root: Path, blob: dict[str, Any]) -> str:
     path = report_path(kind, root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(blob, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(_slim_blob(blob), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return str(path)
 
 
@@ -721,18 +757,16 @@ def ticket_run(
         {"role": "user", "content": json.dumps(packed, ensure_ascii=False)},
     ]
     held = {"r": "", "c": ""}
+    seen = {"r": "", "c": ""}
 
     def live_log(reasoning_text: str, content_text: str) -> None:
         try:
             path = project_dir(repo) / "ticket-live.jsonl"
-            row = {
-                "schema": "ag.ticket-live.v1",
-                "task_id": task_id,
-                "thread_id": thread_id,
-                "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
-                "reasoning": str(reasoning_text)[-12000:],
-                "content": str(content_text)[-12000:],
-            }
+            now_r, now_c = str(reasoning_text), str(content_text)
+            tail_r, reset_r = _live_tail(seen["r"], now_r)
+            tail_c, reset_c = _live_tail(seen["c"], now_c)
+            seen["r"], seen["c"] = now_r, now_c
+            row = _live_row("ag.ticket-live.v1", task_id, thread_id, tail_r, tail_c, reset_r or reset_c)
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
@@ -1109,18 +1143,16 @@ def seat_run(
         {"role": "user", "content": json.dumps(packed, ensure_ascii=False)},
     ]
     held = {"r": "", "c": ""}
+    seen = {"r": "", "c": ""}
 
     def live_log(reasoning_text: str, content_text: str) -> None:
         try:
             path = project_dir(root) / f"{kind}-live.jsonl"
-            row = {
-                "schema": f"ag.{kind}-live.v1",
-                "task_id": task_id,
-                "thread_id": thread_id,
-                "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
-                "reasoning": str(reasoning_text)[-12000:],
-                "content": str(content_text)[-12000:],
-            }
+            now_r, now_c = str(reasoning_text), str(content_text)
+            tail_r, reset_r = _live_tail(seen["r"], now_r)
+            tail_c, reset_c = _live_tail(seen["c"], now_c)
+            seen["r"], seen["c"] = now_r, now_c
+            row = _live_row(f"ag.{kind}-live.v1", task_id, thread_id, tail_r, tail_c, reset_r or reset_c)
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
