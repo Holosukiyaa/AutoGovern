@@ -1271,6 +1271,104 @@ def see_15(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
+def see_17(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
+    """评审跑没跑：三席各跑过几次、通过/拒绝/没审各多少、没审的原因是什么。只出事实。"""
+    from .store import LLM_JSONL, project_dir
+
+    pdir = project_dir(root)
+    seats: list[dict[str, Any]] = []
+    briefs: list[str] = []
+    bad_total = 0
+    for seat, table in (("ticket", "ticket_event"), ("critic", "critic_event"), ("switch", "switch_event")):
+        name = LLM_JSONL[table]
+        path = pdir / name
+        present = path.is_file()
+        total = passed = rejected = unavailable = bad = 0
+        other: dict[str, int] = {}
+        reasons: dict[str, int] = {}
+        last: dict[str, str] | None = None
+        last_key: tuple[str, int] = ("", -1)
+        note = ""
+        raw_text: str | None = ""
+        if not present:
+            note = f"该席 0 次（没有 {name}）"
+        else:
+            try:
+                raw_text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError as exc:
+                raw_text = None
+                note = f"该席 0 次（{name} 读不了：{exc}）"
+        for idx, line in enumerate((raw_text or "").splitlines()):
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                bad += 1
+                continue
+            if not isinstance(row, dict):
+                bad += 1
+                continue
+            total += 1
+            outcome = str(row.get("outcome") or "").strip() or "(missing outcome)"
+            if outcome == "passed":
+                passed += 1
+            elif outcome == "rejected":
+                rejected += 1
+            elif outcome == "unavailable":
+                unavailable += 1
+                why = str(row.get("reason") or "").strip() or "(空原因)"
+                reasons[why] = reasons.get(why, 0) + 1
+            else:
+                other[outcome] = other.get(outcome, 0) + 1
+            key = (str(row.get("ts") or ""), idx)
+            if key >= last_key:
+                last_key = key
+                last = {
+                    "ts": str(row.get("ts") or ""),
+                    "outcome": outcome,
+                    "reason": str(row.get("reason") or ""),
+                }
+        if present and raw_text is not None and total == 0 and not note:
+            note = f"该席 0 次（{name} 是空文件）"
+        bad_total += bad
+        seats.append(
+            {
+                "seat": seat,
+                "file": str(path),
+                "file_present": present,
+                "total": total,
+                "passed": passed,
+                "rejected": rejected,
+                "unavailable": unavailable,
+                "other": other,
+                "bad_lines": bad,
+                "unavailable_reasons": [
+                    {"reason": why, "count": n}
+                    for why, n in sorted(reasons.items(), key=lambda kv: (-kv[1], kv[0]))
+                ],
+                "last": last,
+                "note": note,
+            }
+        )
+        briefs.append(f"{seat} {total}(p{passed}/r{rejected}/u{unavailable})")
+    detail = " · ".join(briefs)
+    if bad_total:
+        detail += f" · 坏行 {bad_total}"
+    folder = plug_dir(root, "see", 17)
+    _write_json(
+        folder / "attendance.json",
+        {"t": time.time(), "source": str(pdir), "seats": seats, "bad_lines": bad_total, "detail": detail},
+    )
+    return {
+        "seats": seats,
+        "bad_lines": bad_total,
+        "detail": detail,
+        "source": str(pdir),
+        "full_report": str(folder / "attendance.json"),
+    }
+
+
 HANDLERS = {
     ("lift", 1): lift_1,
     ("lift", 2): lift_2,
@@ -1305,6 +1403,7 @@ HANDLERS = {
     ("see", 13): see_13,
     ("see", 14): see_14,
     ("see", 15): see_15,
+    ("see", 17): see_17,
 }
 
 
