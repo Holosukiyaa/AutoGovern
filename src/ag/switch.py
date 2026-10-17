@@ -94,6 +94,7 @@ def switch_run(
     probe_red: list[str] | None = None,
     critic: dict[str, Any] | None = None,
     redlines: list[str] | None = None,
+    source_head: str = "",
 ) -> dict[str, Any]:
     from .seat import seat_run
 
@@ -152,6 +153,7 @@ def attach_verify(
     critic: dict[str, Any] | None = None,
     tests_failed: bool = False,
     redlines: list[str] | None = None,
+    source_head: str = "",
 ) -> dict[str, Any]:
     from .seat import attach_verify as seat_attach
 
@@ -165,6 +167,7 @@ def attach_verify(
         critic=critic,
         tests_failed=tests_failed,
         redlines=redlines,
+        source_head=source_head,
     )
     return raw if isinstance(raw, dict) else raw[0]
 
