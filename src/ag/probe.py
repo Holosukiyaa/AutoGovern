@@ -355,6 +355,11 @@ def _public_row(row: dict[str, Any], *, full: bool) -> dict[str, Any]:
 
 _PATH_LINE = re.compile(r"([\w./\\-]+):(\d+)")
 
+_DEFECT_HINTS = (
+    "still", "missing", " defect", "defects", "violation", "violate", "leftover", "residue",
+    "仍未", "仍有", "缺失", "未改", "错误", "违反", "残留", "缺陷", "仍是", "不应", "不该", "没有删",
+)
+
 
 def _line_at(tree: Path, rel: str, lineno: int) -> str:
     path = Path(tree) / rel.replace("\\", "/")
@@ -529,13 +534,33 @@ def plant_from_reject(root: Path, *, items: Any, tree: Path, source_head: str = 
                 reason=f"{rel}:{lineno} {skip_reason}",
             )
             continue
-        if lineno in changed.get(rel, set()):
+        name = str(item.get("name") or "")
+        if not (rel.startswith("src/ag/") and rel.endswith(".py") and (tree_root / rel).is_file()):
             audit_note(
                 repo,
                 action="skip-plant",
                 probe_id=probe_id,
                 area=[rel],
-                reason=f"{rel}:{lineno} 交付物非缺陷 task={task_id}",
+                reason=f"{rel}:{lineno} 文件闸：非本票 src/ag/*.py 真实代码文件 task={task_id}",
+            )
+            continue
+        if lineno not in changed.get(rel, set()):
+            audit_note(
+                repo,
+                action="skip-plant",
+                probe_id=probe_id,
+                area=[rel],
+                reason=f"{rel}:{lineno} 改动闸：证据行不在本票改动行集（指针非缺陷）task={task_id}",
+            )
+            continue
+        defect_text = (name + " " + str(item.get("comment") or "")).casefold()
+        if not any(hint in defect_text for hint in _DEFECT_HINTS):
+            audit_note(
+                repo,
+                action="skip-plant",
+                probe_id=probe_id,
+                area=[rel],
+                reason=f"{rel}:{lineno} 缺陷闸：文本未确证该行为缺陷 task={task_id}",
             )
             continue
         comment = str(item.get("comment") or "").strip()
