@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from .loop import abandon, confirm_map, enroll, finish, hook_main, start, status, unenroll, verify
+from .loop import abandon, approve_self, confirm_map, enroll, finish, hook_main, start, status, unenroll, verify
 from .lift import run as lift_run
 from .see import run as see_run
 from .see import usage
@@ -89,6 +89,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser("finish", help="ff-only if digest matches").add_argument("root")
     sub.add_parser("abandon", help="drop the open worktree").add_argument("root")
+    approve_p = sub.add_parser("approve-self", help="record explicit human approval to let a self-governance ticket finish")
+    approve_p.add_argument("root")
+    approve_p.add_argument("task_id", nargs="?", default="")
     sub.add_parser("dream", help="distill knowledge/sessions into insights; never refuses").add_argument("root")
     sub.add_parser("unenroll", help="remove the hook and restore previous hooksPath").add_argument("root")
     sub.add_parser("usage", help="see lane: help/block counts per ship item").add_argument("root")
@@ -496,6 +499,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "abandon":
             print(json.dumps(abandon(root), ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "approve-self":
+            print(json.dumps(approve_self(root, task_id=str(args.task_id or "")), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "dream":
             from .knowledge import dream

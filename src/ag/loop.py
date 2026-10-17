@@ -1448,14 +1448,31 @@ def finish(root: Path) -> dict[str, Any]:
     switch_block = _switch_block_message(verify_blob)
     if switch_block:
         if _is_self_governance(root):
-            switch_rec = verify_blob.get("switch") or {}
-            task["self_governed_bypass"] = {
-                "outcome": str(switch_rec.get("outcome") or ""),
-                "report_id": _switch_report_id(verify_blob),
-                "reason": str(switch_rec.get("reason") or ""),
-            }
-            save_task(key, task)
-            append_task_step(root, str(task.get("id") or ""), "self-governed-bypass")
+            task_id = str(task.get("id") or "")
+            if task.get("self_approved"):
+                task["self_governed_approved"] = {
+                    "outcome": str((verify_blob.get("switch") or {}).get("outcome") or ""),
+                    "report_id": _switch_report_id(verify_blob),
+                    "reason": str((verify_blob.get("switch") or {}).get("reason") or ""),
+                    "approved": True,
+                }
+                save_task(key, task)
+                append_task_step(root, task_id, "self-governed-approved")
+            else:
+                switch_rec = verify_blob.get("switch") or {}
+                task["self_governance_pending"] = {
+                    "outcome": str(switch_rec.get("outcome") or ""),
+                    "report_id": _switch_report_id(verify_blob),
+                    "reason": str(switch_rec.get("reason") or ""),
+                }
+                save_task(key, task)
+                usage_note(root, "ship", 6, "block", "self-governance pending approval")
+                append_task_step(root, task_id, "self-governance-pending")
+                raise ChainBroken(
+                    "self-governance pending approval "
+                    "[原因] 本票改动触及 ag 自身（src/ag/**），switch 拒单后需人工放行 "
+                    f"[下一步] 请核对后运行 python -m ag approve-self {root} {task_id} 再放行 ag_finish"
+                )
         else:
             _no(switch_block)
     thaw_canonical(root)
@@ -1560,6 +1577,55 @@ def _finish_after_thaw(
         "head": head,
         "hazards": status(root)["hazards"],
     }
+
+
+def approve_self(root: Path, task_id: str = "") -> dict[str, Any]:
+    """Record explicit human approval for a self-governance ticket whose switch rejected it.
+
+    Only valid when the open task touches ag itself (canonical root has src/ag/__init__.py)
+    and finish has parked it in the self_governance_pending state. Anything else refuses.
+    """
+    state = status(root)
+    root = Path(state["root"])
+    key = str(state["key"])
+    task = load_task(key)
+    if not task:
+        raise ChainBroken(
+            "no open task "
+            "[原因] 当前没有进行中的票据任务 "
+            "[下一步] 请先调用 ag_start"
+        )
+    if not _is_self_governance(root):
+        raise ChainBroken(
+            "not a self-governance repo "
+            "[原因] 目标仓根不存在 src/ag/__init__.py，本票不是改 ag 自己 "
+            "[下一步] approve-self 仅用于改 ag 自身的票"
+        )
+    tid = str(task.get("id") or "")
+    if task_id and task_id != tid:
+        raise ChainBroken(
+            f"task id mismatch: given {task_id}, open task is {tid} "
+            "[原因] 指定票号与当前开放票不一致 "
+            f"[下一步] 请改用 python -m ag approve-self {root} {tid}"
+        )
+    pending = task.get("self_governance_pending")
+    if not isinstance(pending, dict):
+        raise ChainBroken(
+            "no self-governance pending approval "
+            "[原因] 本票未处于 switch 拒单后的待批准态（或 switch 未拒/已通过） "
+            "[下一步] 请先跑 ag_verify 再 ag_finish，待其停在待批准提示后再批准"
+        )
+    task["self_approved"] = {
+        "by": "approve-self",
+        "task_id": tid,
+        "report_id": str(pending.get("report_id") or ""),
+        "outcome": str(pending.get("outcome") or ""),
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
+    save_task(key, task)
+    usage_note(root, "ship", 6, "help", "self-governance approved")
+    append_task_step(root, tid, "self-governance-approved")
+    return status(root)
 
 
 def abandon(root: Path) -> dict[str, Any]:
