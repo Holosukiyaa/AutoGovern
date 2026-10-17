@@ -226,10 +226,41 @@ def _live_row(
     return row
 
 
+def _cleanup_live_log(kind: str, root: Path) -> None:
+    """Drop this seat's -live.jsonl process log once its -last.json conclusion has landed.
+
+    Live logs only serve an in-flight seat (checker-log tails them). After the conclusion is
+    written the increments are pure noise. The deletion is recorded in cleanup-audit.jsonl;
+    if that audit write itself fails, the fact is surfaced to stderr rather than swallowed.
+    """
+    live = project_dir(root) / f"{kind}-live.jsonl"
+    if not live.is_file():
+        return
+    try:
+        size = int(live.stat().st_size)
+        live.unlink()
+    except OSError:
+        return
+    try:
+        from .store import append_project_jsonl
+
+        append_project_jsonl(root, "cleanup-audit.jsonl", {
+            "action": "drop-live-log",
+            "seat": str(kind),
+            "file": f"{kind}-live.jsonl",
+            "freed_bytes": size,
+        })
+    except Exception as exc:
+        import sys
+
+        sys.stderr.write(f"ag: live-log cleanup audit write failed ({exc.__class__.__name__}); deletion happened but was not logged\n")
+
+
 def _write_report(kind: str, root: Path, blob: dict[str, Any]) -> str:
     path = report_path(kind, root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(_slim_blob(blob), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    _cleanup_live_log(kind, root)
     return str(path)
 
 

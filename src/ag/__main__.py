@@ -9,6 +9,7 @@ from .loop import abandon, approve_self, confirm_map, enroll, finish, hook_main,
 from .lift import run as lift_run
 from .see import run as see_run
 from .see import usage
+from .prune import prune
 from .catalog import plug, plug_list
 from .managed import ChainBroken
 from .skill_install import install_skill
@@ -97,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("usage", help="see lane: help/block counts per ship item").add_argument("root")
     sub.add_parser("lift", help="lift advice; does not refuse finish").add_argument("root")
     sub.add_parser("see", help="see snapshot; does not refuse finish").add_argument("root")
+    sub.add_parser("prune", help="prune old process residue; conclusions stay").add_argument("root")
     worker_create_p = sub.add_parser(
         "worker-create",
         help="write a vendor-neutral worker dossier in the active AG worktree",
@@ -519,6 +521,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "see":
             print(json.dumps(see_run(root), ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "prune":
+            print(json.dumps(prune(root), ensure_ascii=False, indent=2))
             return 0
     except ChainBroken as exc:
         print(str(exc), file=sys.stderr)
