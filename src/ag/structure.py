@@ -19,6 +19,24 @@ from .store import ag_home
 ADAPTER_NAME = "adapter.json"
 
 
+def _detect_languages(root: Path, adapters: dict[str, Any]) -> list[str]:
+    """Return the languages whose source files actually exist in the repo.
+
+    A language is only checked when the repo really uses it; absent languages are skipped.
+    """
+    repo = real_root(root)
+    hits: list[str] = []
+    for lang, cfg in adapters.items():
+        if not isinstance(cfg, dict):
+            continue
+        exts = {str(e).lower() for e in (cfg.get("source_exts") or [])}
+        if not exts:
+            continue
+        if _tracked_source_files(repo, sorted(exts)):
+            hits.append(lang)
+    return hits
+
+
 def adapter_path(root: Path) -> Path:
     return ag_home() / "projects" / project_key(real_root(root)) / ADAPTER_NAME
 
@@ -40,6 +58,13 @@ def load_adapter(root: Path) -> dict[str, Any]:
     cfg = None
     sec = _settings.get_section(root, "structure")
     if sec:
+        # multi-language table: {enabled, adapters: {lang: cfg}} -> hand back the table
+        if isinstance(sec.get("adapters"), dict):
+            adapters = {lang: c for lang, c in sec["adapters"].items() if isinstance(c, dict)}
+            if not sec.get("enabled", True):
+                return {"ok": True, "errors": [], "config": None, "configured": True, "multi": True, "adapters": {}, "languages": []}
+            return {"ok": True, "errors": [], "config": None, "configured": True, "multi": True,
+                    "adapters": adapters, "languages": _detect_languages(root, adapters)}
         cfg = sec
     else:
         path = adapter_path(root)
@@ -182,7 +207,10 @@ def _depth(rel: str) -> int:
 
 
 def check(root: Path) -> dict[str, Any]:
-    """跑一次结构体检。返回只读事实字典；不拦截、不写产品树。"""
+    """跑一次结构体检。返回只读事实字典；不拦截、不写产品树。
+
+    多语言：structure.adapters 表存在时，对仓里实际存在的每种语言各跑一遍再合并；
+    单语言（老单适配器或只命中一种语言）行为与升级前完全一致。"""
     root = real_root(root)
     adapter = load_adapter(root)
     if not adapter["configured"]:
@@ -190,7 +218,58 @@ def check(root: Path) -> dict[str, Any]:
     if not adapter["ok"]:
         return {"configured": True, "ok": False, "errors": adapter["errors"], "detail": "适配器配置不合法"}
 
-    cfg = adapter["config"]
+    # multi-language table: run each detected language with its own adapter, then merge
+    if adapter.get("multi"):
+        languages = adapter.get("languages") or []
+        if not languages:
+            return {"configured": True, "ok": True, "multi": True, "languages": [], "detail": "仓里未检测到受支持语言的源文件"}
+        per_lang: dict[str, Any] = {}
+        all_islands: list[str] = []
+        all_phantom: set[str] = set()
+        all_reverse: list[dict[str, str]] = []
+        tracked_total = 0
+        reachable_total = 0
+        unrec_total = 0
+        for lang in languages:
+            cfg = adapter["adapters"][lang]
+            r = _check_with_cfg(root, cfg)
+            r["language"] = lang
+            per_lang[lang] = r
+            tracked_total += r.get("tracked_source_files", 0)
+            reachable_total += r.get("reachable", 0)
+            unrec_total += r.get("unrecognized_files", 0)
+            all_islands.extend(r.get("islands") or [])
+            all_phantom.update(r.get("phantom_deps") or [])
+            all_reverse.extend(r.get("reverse_edges") or [])
+        result = {
+            "configured": True,
+            "ok": True,
+            "multi": True,
+            "languages": languages,
+            "per_language": per_lang,
+            "tracked_source_files": tracked_total,
+            "reachable": reachable_total,
+            "unrecognized_files": unrec_total,
+            "islands": sorted(set(all_islands)),
+            "island_count": len(set(all_islands)),
+            "phantom_deps": sorted(all_phantom),
+            "phantom_dep_count": len(all_phantom),
+            "reverse_edges": all_reverse,
+            "reverse_edge_count": len(all_reverse),
+        }
+        result["detail"] = (
+            f"语言 {len(languages)}({", ".join(languages)}) · "
+            f"可达 {reachable_total}/{tracked_total} · 孤岛 {len(set(all_islands))} · "
+            f"假装配 {len(all_phantom)} · 反向引用 {len(all_reverse)}"
+        )
+        return result
+
+    # single-language legacy path: unchanged behavior
+    return _check_with_cfg(root, adapter["config"])
+
+
+def _check_with_cfg(root: Path, cfg: dict[str, Any]) -> dict[str, Any]:
+    """Run the single-language checkup with one adapter config. Read-only."""
     source_exts = [str(e) for e in (cfg.get("source_exts") or [".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs"])]
     compiled = [re.compile(str(p)) for p in cfg["ref_patterns"]]
 

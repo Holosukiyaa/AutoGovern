@@ -529,7 +529,26 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "config-show":
             from . import settings as _settings
 
-            print(json.dumps(_settings.load_settings(root), ensure_ascii=False, indent=2))
+            blob = _settings.load_settings(root)
+            # human-readable listing: strategy switches per lane, then the other sections
+            plugins = blob.get("plugins") or {}
+            lanes = plugins.get("lanes") or {}
+            if lanes:
+                print("== 策略开关 (plugins) ==")
+                for lane in ("ship", "lift", "see"):
+                    rows = lanes.get(lane) or {}
+                    if not rows:
+                        continue
+                    on_n = sum(1 for r in rows.values() if r.get("on"))
+                    print(f"[{lane}] {on_n}/{len(rows)} 开")
+                    for seq in sorted(rows, key=lambda s: int(s) if str(s).isdigit() else 0):
+                        r = rows[seq]
+                        mark = "ON " if r.get("on") else "off"
+                        lock = "" if r.get("pluggable") else " [核心不可关]"
+                        print(f"  {mark} {r.get('code'):9s} {r.get('name')}{lock}")
+                print()
+            print("== 完整配置 (config.json) ==")
+            print(json.dumps(blob, ensure_ascii=False, indent=2))
             return 0
     except ChainBroken as exc:
         print(str(exc), file=sys.stderr)

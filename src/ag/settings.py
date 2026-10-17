@@ -30,6 +30,57 @@ _CRITIC_DEFAULTS: dict[str, Any] = {
 }
 _PRUNE_DEFAULTS: dict[str, Any] = {"usage_max_bytes": 200 * 1024, "usage_keep_bytes": 128 * 1024}
 
+# Built-in per-language checkup adapters (the "用到什么语言就专门写一个适配器" table).
+# Each maps a language to its source_exts / ref_patterns / dep manifest. entry_files
+# are intentionally empty by default: the user fills in the real doors per repo.
+_BUILTIN_ADAPTERS: dict[str, dict[str, Any]] = {
+    "python": {
+        "source_exts": [".py"],
+        "entry_files": [],
+        "ref_patterns": ["(?:^|\\s)from\\s+([\\w.]+)\\s+import", "(?:^|\\s)import\\s+([\\w.]+)"],
+        "dep_manifest": "pyproject.toml",
+        "dep_pattern": "^\\s*name\\s*=\\s*\"([^\"]+)\"",
+    },
+    "typescript": {
+        "source_exts": [".ts", ".tsx", ".js", ".jsx"],
+        "entry_files": [],
+        "ref_patterns": [
+            "import\\s+(?:[\\w{}*\\s,]+\\s+from\\s+)?['\"]([^'\"]+)['\"]",
+            "require\\(\\s*['\"]([^'\"]+)['\"]\\s*\\)",
+            "import\\(\\s*['\"]([^'\"]+)['\"]\\s*\\)",
+        ],
+        "dep_manifest": "package.json",
+        "dep_pattern": "\"([^\"]+)\"\\s*:\\s*\"[\\^~]?[0-9]",
+        "dep_section": "dependencies",
+    },
+    "go": {
+        "source_exts": [".go"],
+        "entry_files": [],
+        "ref_patterns": ["^\\s*(?:[\\w.]+\\s+)?\"([^\"]+)\""],
+        "dep_manifest": "go.mod",
+        "dep_pattern": "^\\s*([\\w./-]+)\\s+v[0-9]",
+    },
+    "rust": {
+        "source_exts": [".rs"],
+        "entry_files": [],
+        "ref_patterns": ["^\\s*use\\s+([\\w:]+)", "^\\s*mod\\s+([\\w]+)"],
+        "dep_manifest": "Cargo.toml",
+        "dep_pattern": "^([\\w-]+)\\s*=",
+    },
+    "java": {
+        "source_exts": [".java"],
+        "entry_files": [],
+        "ref_patterns": ["^\\s*import\\s+(?:static\\s+)?([\\w.]+)"],
+        "dep_manifest": "pom.xml",
+        "dep_pattern": "<artifactId>([^<]+)</artifactId>",
+    },
+}
+
+
+def default_adapters() -> dict[str, dict[str, Any]]:
+    """A fresh copy of the built-in language adapter table."""
+    return {lang: dict(cfg) for lang, cfg in _BUILTIN_ADAPTERS.items()}
+
 
 def settings_path(root: Path) -> Path:
     return project_dir(real_root(root)) / SETTINGS_NAME
@@ -76,6 +127,35 @@ def _legacy_off(root: Path) -> list[str]:
     return [str(x) for x in ((item or {}).get("off") or [])]
 
 
+def _catalog_listing(off: list[str]) -> dict[str, Any]:
+    """Build the human-readable per-lane strategy listing from the SQLite catalog.
+
+    Each entry: name / on / pluggable / story. `off` marks a strategy off by code.
+    Falls back to an empty mapping when the catalog DB is unavailable.
+    """
+    off_set = {str(x) for x in off}
+    lanes: dict[str, Any] = {}
+    try:
+        from . import catalog as _catalog
+
+        for lane in ("ship", "lift", "see"):
+            rows = {}
+            for item in _catalog.list_lane(lane):
+                code = item["code"]
+                seq = str(item["seq"])
+                rows[seq] = {
+                    "code": code,
+                    "name": item["name"],
+                    "on": code not in off_set,
+                    "pluggable": bool(item["pluggable"]),
+                    "story": item.get("story") or "",
+                }
+            lanes[lane] = rows
+    except Exception:
+        return {}
+    return lanes
+
+
 def _migrate(root: Path, blob: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     """Fold legacy files into the root config. Returns (blob, migrated?). Idempotent."""
     root = real_root(root)
@@ -91,17 +171,26 @@ def _migrate(root: Path, blob: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             blob["critic"] = merged
             changed = True
             removed.append("critic.json")
-    if "structure" not in blob:
-        legacy = _legacy_adapter(root)
-        if legacy is not None:
-            blob["structure"] = legacy
-            changed = True
+    # structure: always converge to the multi-language adapters table
+    sec_struct = blob.get("structure")
+    if not isinstance(sec_struct, dict) or "adapters" not in sec_struct:
+        # legacy single adapter (from adapter.json or an old flat structure section)
+        legacy = sec_struct if isinstance(sec_struct, dict) and sec_struct else _legacy_adapter(root)
+        adapters = default_adapters()
+        if legacy:
+            # fold the old single adapter in as the python entry (field-equivalent)
+            adapters["python"] = {k: v for k, v in legacy.items() if not str(k).startswith("_")}
+        enabled = bool(sec_struct.get("enabled")) if isinstance(sec_struct, dict) and "enabled" in sec_struct else True
+        blob["structure"] = {"enabled": enabled, "adapters": adapters}
+        changed = True
+        if not isinstance(sec_struct, dict):
             removed.append("adapter.json")
-    if "plugins" not in blob:
-        off = _legacy_off(root)
-        blob["plugins"] = {"off": sorted(set(off))}
-        if off:
-            changed = True
+    # plugins: always converge to a full catalog listing (name/on/pluggable/story per strategy)
+    sec_plugins = blob.get("plugins")
+    if not isinstance(sec_plugins, dict) or "lanes" not in sec_plugins:
+        off = _legacy_off(root) if not isinstance(sec_plugins, dict) else [str(x) for x in (sec_plugins.get("off") or [])]
+        blob["plugins"] = {"off": sorted(set(off)), "lanes": _catalog_listing(off)}
+        changed = True
     if "prune" not in blob:
         blob["prune"] = dict(_PRUNE_DEFAULTS)
 
@@ -143,7 +232,18 @@ def set_plugin_off(root: Path, off: list[str]) -> None:
     root = real_root(root)
     blob = _read(settings_path(root)) or {}
     blob, _ = _migrate(root, blob)
-    blob.setdefault("plugins", {})["off"] = sorted({str(x) for x in off})
+    off_sorted = sorted({str(x) for x in off})
+    sec = blob.setdefault("plugins", {})
+    sec["off"] = off_sorted
+    # keep the human-readable listing's on-flags in sync with the off array
+    lanes = sec.get("lanes")
+    if isinstance(lanes, dict):
+        off_set = set(off_sorted)
+        for lane_rows in lanes.values():
+            if isinstance(lane_rows, dict):
+                for row in lane_rows.values():
+                    if isinstance(row, dict) and "code" in row:
+                        row["on"] = str(row["code"]) not in off_set
     blob["schema"] = "ag.config.v2"
     _write(settings_path(root), blob)
 
