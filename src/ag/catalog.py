@@ -1,7 +1,7 @@
 """Strategy catalog in SQLite. Probes bind to (lane, seq), e.g. ship-9.
 
 Every handler must call enabled() before running. Core ship rows are not pluggable.
-Unplug writes managed.json off[] and never touches the product tree.
+Unplug records the code in config.json plugins.off and never touches the product tree.
 """
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from . import settings as _settings
 from .managed import ChainBroken, ag_home, load_managed, lookup_project, project_key, save_managed
 
 DB_PATH = Path(__file__).with_name("strategies.sqlite")
@@ -127,25 +128,18 @@ def enabled(root: Path, lane: str, seq: int) -> bool:
     item = get(lane, seq)
     if not item["pluggable"]:
         return True
-    off = [str(x) for x in ((lookup_project(root) or {}).get("off") or [])]
+    off = _settings.plugin_off(root)
     return item["code"] not in off
 
 
 def _set_off(root: Path, off: list[str]) -> None:
-    item = lookup_project(root)
-    if item is None:
+    if lookup_project(root) is None:
         raise ChainBroken(f"not enrolled: {root}")
-    blob = load_managed()
-    key = str(item.get("key") or "")
-    for row in blob["projects"]:
-        if isinstance(row, dict) and str(row.get("key") or "") == key:
-            row["off"] = sorted(set(off))
-            break
-    save_managed(blob)
+    _settings.set_plugin_off(root, off)
 
 
 def plug_list(root: Path) -> dict[str, Any]:
-    off = {str(x) for x in ((lookup_project(root) or {}).get("off") or [])}
+    off = set(_settings.plugin_off(root))
     rows = []
     for lane in ("ship", "lift", "see"):
         for item in list_lane(lane):
@@ -166,7 +160,7 @@ def plug(root: Path, code: str, *, on: bool) -> dict[str, Any]:
     item = get(lane, seq)
     if not item["pluggable"]:
         raise ChainBroken(f"{item['code']} is ship core; unenroll the whole loop instead")
-    off = [str(x) for x in ((lookup_project(root) or {}).get("off") or [])]
+    off = _settings.plugin_off(root)
     if on:
         off = [x for x in off if x != item["code"]]
     elif item["code"] not in off:

@@ -99,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("lift", help="lift advice; does not refuse finish").add_argument("root")
     sub.add_parser("see", help="see snapshot; does not refuse finish").add_argument("root")
     sub.add_parser("prune", help="prune old process residue; conclusions stay").add_argument("root")
+    sub.add_parser("config-show", help="print the converged root config (config.json) a user opens").add_argument("root")
     worker_create_p = sub.add_parser(
         "worker-create",
         help="write a vendor-neutral worker dossier in the active AG worktree",
@@ -524,6 +525,11 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.cmd == "prune":
             print(json.dumps(prune(root), ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "config-show":
+            from . import settings as _settings
+
+            print(json.dumps(_settings.load_settings(root), ensure_ascii=False, indent=2))
             return 0
     except ChainBroken as exc:
         print(str(exc), file=sys.stderr)

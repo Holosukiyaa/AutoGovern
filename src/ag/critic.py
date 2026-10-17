@@ -898,7 +898,22 @@ def load_config(root: Path | None = None) -> dict[str, Any]:
         err = _apply_config_blob(cfg, g_path)
         if err is not None:
             return err
-    if p_path is not None and p_path.is_file():
+    if root is not None:
+        # single door: project-level seat config lives in config.json -> critic section
+        from . import settings as _settings
+
+        sec = _settings.get_section(root, "critic")
+        if sec:
+            for k in ("enabled", "endpoint", "model", "api_key_env", "timeout", "worker_model", "allow_same_family"):
+                if k in sec:
+                    cfg[k] = sec[k]
+            cfg["path"] = str(_settings.settings_path(root))
+        elif p_path is not None and p_path.is_file():
+            # legacy fallback: old projects that only have critic.json still work
+            err = _apply_config_blob(cfg, p_path)
+            if err is not None:
+                return err
+    elif p_path is not None and p_path.is_file():
         err = _apply_config_blob(cfg, p_path)
         if err is not None:
             return err

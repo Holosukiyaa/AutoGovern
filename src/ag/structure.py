@@ -32,14 +32,23 @@ def _git(root: Path, *args: str) -> str:
 
 
 def load_adapter(root: Path) -> dict[str, Any]:
-    """读适配器配置。返回 {ok, errors, config}。不存在 → ok=False, errors 说明未配置。"""
-    path = adapter_path(root)
-    if not path.is_file():
-        return {"ok": False, "errors": ["未配置适配器"], "config": None, "configured": False}
-    try:
-        cfg = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        return {"ok": False, "errors": [f"适配器读不了或不是合法 JSON：{exc}"], "config": None, "configured": True}
+    """读适配器配置。返回 {ok, errors, config}。不存在 → ok=False, errors 说明未配置。
+
+    单入口：优先读 config.json 的 structure 段；老项目只有 adapter.json 时回落兼容。"""
+    from . import settings as _settings
+
+    cfg = None
+    sec = _settings.get_section(root, "structure")
+    if sec:
+        cfg = sec
+    else:
+        path = adapter_path(root)
+        if not path.is_file():
+            return {"ok": False, "errors": ["未配置适配器"], "config": None, "configured": False}
+        try:
+            cfg = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            return {"ok": False, "errors": [f"适配器读不了或不是合法 JSON：{exc}"], "config": None, "configured": True}
     errors: list[str] = []
     if not isinstance(cfg, dict):
         return {"ok": False, "errors": ["适配器必须是 JSON 对象"], "config": None, "configured": True}

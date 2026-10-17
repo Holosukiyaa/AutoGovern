@@ -45,17 +45,21 @@ def _usage_path(key: str) -> Path:
 _USAGE_MAX_BYTES = 200 * 1024
 _USAGE_KEEP_BYTES = 128 * 1024
 
-def _rolling_truncate_usage(path: Path) -> int:
-    """Return freed bytes after capping usage.jsonl to a recent tail; 0 if untouched. Never raises."""
+def _rolling_truncate_usage(path: Path, max_bytes: int | None = None, keep_bytes: int | None = None) -> int:
+    """Return freed bytes after capping usage.jsonl to a recent tail; 0 if untouched. Never raises.
+
+    Thresholds default to the module constants but are overridden by config.json prune.*."""
+    cap = _USAGE_MAX_BYTES if max_bytes is None else int(max_bytes)
+    keep = _USAGE_KEEP_BYTES if keep_bytes is None else int(keep_bytes)
     try:
         size = int(path.stat().st_size)
     except OSError:
         return 0
-    if size <= _USAGE_MAX_BYTES:
+    if size <= cap:
         return 0
     try:
         with path.open("rb") as handle:
-            handle.seek(max(0, size - _USAGE_KEEP_BYTES))
+            handle.seek(max(0, size - keep))
             handle.readline()  # skip a possibly-partial first line
             tail = handle.read()
         path.write_bytes(tail)
@@ -82,7 +86,10 @@ def note(root: Path, lane: str, seq: int, kind: str, detail: str = "") -> None:
         }
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-        freed = _rolling_truncate_usage(path)
+        from . import settings as _settings
+
+        _max_b, _keep_b = _settings.prune_limits(root)
+        freed = _rolling_truncate_usage(path, _max_b, _keep_b)
         if freed:
             try:
                 from .store import append_project_jsonl
