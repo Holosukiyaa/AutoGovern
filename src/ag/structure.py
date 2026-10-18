@@ -18,6 +18,12 @@ from .store import ag_home
 
 ADAPTER_NAME = "adapter.json"
 
+# Catches "from . import a, b, c" / "from .sub import x" member lists so the imported
+# sibling modules are seen as references too (the user-supplied ref_patterns only capture
+# the module after "from", not the members). Purely additive: members that do not resolve
+# to a real in-repo file are dropped, never an error.
+_MEMBER_IMPORT_RE = __import__("re").compile(r"(?:^|\s)from\s+(\.+[\w.]*)\s+import\s+([\w., ]+)")
+
 
 def _detect_languages(root: Path, adapters: dict[str, Any]) -> list[str]:
     """Return the languages whose source files actually exist in the repo.
@@ -146,6 +152,21 @@ def _extract_refs(root: Path, rel: str, compiled: list[re.Pattern[str]]) -> tupl
             if not cand:
                 continue
             refs.append(cand)
+    # member-level imports: "from . import ship" / "from .sub import a, b" -> resolve each
+    # member against the package so the sibling module file is reachable, not an island.
+    for m in _MEMBER_IMPORT_RE.finditer(text):
+        module = str(m.group(1) or "")          # leading dots + optional subpackage, e.g. "." or "..pkg"
+        members = str(m.group(2) or "")
+        if not module.startswith("."):
+            continue
+        dots = len(module) - len(module.lstrip("."))
+        sub = module.lstrip(".")
+        prefix = ("." * dots) + (sub + "." if sub else "")
+        for mem in members.split(","):
+            name = mem.strip().split(" ")[0].strip()
+            if not name or not name.isidentifier():
+                continue
+            refs.append(prefix + name)          # e.g. ".ship" / "..pkg.mod"
     return refs, bool(refs)
 
 
@@ -156,6 +177,8 @@ def _resolve_ref(root: Path, from_rel: str, cand: str, known: set[str]) -> str |
         dots = len(cand) - len(cand.lstrip("."))
         mod = cand.lstrip(".").replace(".", "/")
         base_dir = str(Path(from_rel).parent).replace("\\", "/")
+        if base_dir == ".":
+            base_dir = ""
         # Python 相对 import：1 点=当前目录，2 点=上一级，依此类推
         for _ in range(dots - 1):
             base_dir = str(Path(base_dir).parent).replace("\\", "/")
