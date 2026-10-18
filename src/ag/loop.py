@@ -1563,6 +1563,9 @@ def _finish_after_thaw(
             product=product,
         )
         distill(root)
+        from .state_git import commit_state
+
+        commit_state(root, f"finish {task.get('id')}: product={product}")
     except Exception as exc:
         usage_note(root, "see", 14, "help", f"knowledge archive skipped: {exc.__class__.__name__}")
     _cleanup(root, task)
@@ -1668,6 +1671,9 @@ def abandon(root: Path) -> dict[str, Any]:
                 process="abandoned",
                 product="undeclared",
             )
+            from .state_git import commit_state
+
+            commit_state(root, f"abandon {task.get('id')}")
         except Exception as exc:
             usage_note(root, "see", 14, "help", f"knowledge archive skipped: {exc.__class__.__name__}")
         save_task(key, None)
