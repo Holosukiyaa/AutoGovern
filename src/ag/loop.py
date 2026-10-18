@@ -704,6 +704,16 @@ def status(root: Path) -> dict[str, Any]:
                 out["current_anchor"] = task.get("current_anchor") or ""
                 out["fixed"] = list(task.get("fixed") or [])
                 out["fixed_rules"] = list(task.get("fixed_rules") or [])
+                # feed the cumulative project redlines to whoever writes the next ticket
+                try:
+                    from .knowledge import load_active_redlines
+
+                    hist = load_active_redlines(root)
+                    out["project_redlines"] = hist
+                    task["project_redlines"] = hist
+                    save_task(key, task)
+                except Exception:
+                    out["project_redlines"] = []
                 out["intent_map_confirmed"] = bool(task.get("intent_map_confirmed"))
                 out["subagent"]["ready"] = bool(task.get("intent_map_confirmed"))
         except Exception:
@@ -1537,8 +1547,12 @@ def _finish_after_thaw(
     }
     append_task_step(root, str(task.get("id") or ""), "finish", head=head, product=product, critic_report_id=_critic_report_id(vblob), switch_report_id=_switch_report_id(vblob), anchor_progress=anchor_progress)
     try:
-        from .knowledge import archive_session, distill
+        from .knowledge import archive_session, append_redlines, distill
 
+        try:
+            append_redlines(root, task)
+        except Exception:
+            pass
         archive_session(
             root,
             task,

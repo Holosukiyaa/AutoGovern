@@ -126,6 +126,136 @@ def build_session_record(
     return record
 
 
+# --- review (复盘) ------------------------------------------------------------
+
+_REDLINES_NAME = "redlines.md"
+
+
+def redlines_path(root: Path) -> Path:
+    return knowledge_dir(real_root(root)) / _REDLINES_NAME
+
+
+def _seat_items(root: Path, seat: str) -> list[dict[str, Any]]:
+    """Read a seat's -last.json report items (name/status/comment). Never raises."""
+    try:
+        path = project_dir(real_root(root)) / f"{seat}-last.json"
+        blob = json.loads(path.read_text(encoding="utf-8"))
+        items = blob.get("items")
+        return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _theme_label(task: dict[str, Any]) -> str:
+    """A short topic label for the ticket, not the exam body.
+
+    Prefers the intent's first short clause; strips code/quotes/long tokens so what
+    lands in the review is a label like '修复孤岛误报', not the ticket's prose."""
+    raw = _first_line(task.get("portrait")) or _first_line(task.get("intent"))
+    s = _sanitize(raw)
+    # keep only the first clause, drop colons/anchors so it reads as a label
+    for sep in ("，", "。", "：", ":", ";", "；", "——", "——"):
+        if sep in s:
+            s = s.split(sep)[0]
+    return s.strip()[:40]
+
+
+def _sanitize(text: str) -> str:
+    """Strip code/diff/secret-like fragments from a review comment, keep the conclusion.
+
+    Removes inline code spans, long tokens, file:line refs, and JSON blobs so the
+    retrospective stores the lesson, not the exam body."""
+    import re as _re
+
+    s = str(text or "")
+    s = _re.sub(r"`[^`]*`", "", s)                       # inline code spans
+    s = _re.sub(r"\{[^{}]*\}", "", s)                   # JSON-ish blobs
+    s = _re.sub(r"[\w./\\-]+\.(py|json|md|jsonl|ts|js):\d+", "[file]", s)  # file:line refs
+    s = _re.sub(r"[A-Za-z0-9+/=_-]{32,}", "[token]", s)  # long tokens / hashes / keys
+    s = _re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def build_review(root: Path, task: dict[str, Any], verify: dict[str, Any] | None) -> dict[str, Any]:
+    """Distill a ticket's retrospective: what it tried, what it found, what went right/wrong.
+
+    Conclusions and indexes only — never exam text, diff source, or secrets."""
+    anchors = [a for a in (task.get("anchors") or []) if isinstance(a, dict)]
+    switch_items = _seat_items(root, "switch")
+    critic_items = _seat_items(root, "critic")
+    items = switch_items + critic_items
+
+    went_well = [str(i.get("name") or "") for i in items if str(i.get("status") or "").casefold() == "pass" and str(i.get("name") or "").strip()]
+    wrong_items = [i for i in items if str(i.get("status") or "").casefold() == "fail"]
+    went_wrong = [str(i.get("name") or "") for i in wrong_items if str(i.get("name") or "").strip()]
+    found = []
+    for i in wrong_items:
+        comment = _sanitize(str(i.get("comment") or ""))
+        if comment:
+            found.append(f"{i.get('name') or '?'}: {comment[:160]}")
+
+    # lesson: was this a real defect or a false-positive that needed the human gate?
+    product = ""
+    if isinstance(verify, dict):
+        product = str(verify.get("product") or "")
+    approved = False
+    try:
+        appr = project_dir(real_root(root)) / "approvals.jsonl"
+        if appr.is_file():
+            for line in appr.read_text(encoding="utf-8").splitlines():
+                if str(task.get("id") or "") in line:
+                    approved = True
+    except OSError:
+        pass
+    if wrong_items and approved:
+        lesson = "审核打回但最终经人工闸门放行——驳回多为误报（机械碰撞/旧代码体检悖论），非真缺陷。"
+    elif wrong_items:
+        lesson = "审核打回并修复后通过——发现的是真缺陷，已逐条修复。"
+    else:
+        lesson = "一次通过，无驳回。"
+
+    return {
+        "problem_wanted": _theme_label(task),
+        "problem_found": found,
+        "went_well": went_well,
+        "went_wrong": went_wrong,
+        "lesson": lesson,
+    }
+
+
+def append_redlines(root: Path, task: dict[str, Any]) -> int:
+    """Append this ticket's redlines to the cumulative project redlines.md. Append-only.
+
+    Returns the number of redline entries appended. Never deletes history."""
+    repo = real_root(root)
+    lines = [str(r) for r in (task.get("redlines") or []) if str(r or "").strip()]
+    if not lines:
+        return 0
+    path = redlines_path(repo)
+    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    if not existing:
+        existing = "# 项目红线册（跨票累积，append-only）\n\n每次 finish 把本票红线追加到这。过期标 [obsolete]，不删历史。\n"
+    topic = _theme_label(task) or "(无主题)"
+    tid = str(task.get("id") or "")
+    stamp = _utc_now()[:10]
+    block = f"\n## {stamp} · {tid} · {topic}\n" + "\n".join(f"- {line}" for line in lines) + "\n"
+    _atomic_write(path, existing.rstrip("\n") + "\n" + block)
+    return len(lines)
+
+
+def load_active_redlines(root: Path) -> list[str]:
+    """All non-obsolete redlines from the cumulative book, fed to the next ticket's review."""
+    path = redlines_path(real_root(root))
+    if not path.is_file():
+        return []
+    out: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if s.startswith("- ") and "[obsolete]" not in s:
+            out.append(s[2:].strip())
+    return [x for x in out if x]
+
+
 def archive_session(
     root: Path,
     task: dict[str, Any],
@@ -146,6 +276,11 @@ def archive_session(
         process=process,
         product=product,
     )
+    # attach the four-section retrospective (problem wanted/found, went well/wrong+lesson)
+    try:
+        record["review"] = build_review(repo, task, verify)
+    except Exception:
+        record["review"] = {"problem_wanted": "", "problem_found": [], "went_well": [], "went_wrong": [], "lesson": ""}
     base = knowledge_dir(repo)
     readme = base / README_NAME
     if not readme.is_file():
@@ -257,6 +392,25 @@ def distill(root: Path) -> dict[str, Any]:
         for v in sorted(focus.values(), key=lambda x: -x["count"])
     ]
 
+    # retrospective patterns across sessions (modes, not a ledger)
+    reviewed = [r for r in sessions if isinstance(r.get("review"), dict)]
+    gate_passes = sum(1 for r in reviewed if "人工闸门" in str(r["review"].get("lesson") or ""))
+    real_defects = sum(1 for r in reviewed if "真缺陷" in str(r["review"].get("lesson") or ""))
+    clean_passes = sum(1 for r in reviewed if "一次通过" in str(r["review"].get("lesson") or ""))
+    theme_hits: dict[str, int] = {}
+    for r in reviewed:
+        for name in (r["review"].get("went_wrong") or []):
+            theme_hits[str(name)] = theme_hits.get(str(name), 0) + 1
+    recurring = sorted([{"theme": k, "count": v} for k, v in theme_hits.items() if v >= 2], key=lambda x: -x["count"])
+    review_patterns = {
+        "reviewed_tickets": len(reviewed),
+        "review_coverage": round(len(reviewed) / total, 3) if total else 0.0,
+        "gate_passes": gate_passes,
+        "real_defects_fixed": real_defects,
+        "clean_passes": clean_passes,
+        "recurring_defect_themes": recurring,
+    }
+
     insights = {
         "schema": "ag.knowledge.insights.v1",
         "generated_at": _utc_now(),
@@ -265,6 +419,7 @@ def distill(root: Path) -> dict[str, Any]:
         "stubborn_probes": stubborn_probes,
         "abandon_rate": abandon_rate,
         "reject_focus": reject_focus,
+        "review_patterns": review_patterns,
     }
     _atomic_write(insights_path(repo), json.dumps(insights, ensure_ascii=False, indent=2) + chr(10))
     return insights
@@ -276,3 +431,30 @@ def dream(root: Path) -> dict[str, Any]:
         return distill(root)
     except Exception:
         return _empty_insights()
+
+
+def retro(root: Path, limit: int = 8) -> dict[str, Any]:
+    """Human-readable retrospective of recent tickets: what each tried/found/did right/wrong."""
+    repo = real_root(root)
+    sessions = _iter_sessions(knowledge_dir(repo))
+    recent = sessions[-limit:][::-1]
+    rows = []
+    for rec in recent:
+        rev = rec.get("review") if isinstance(rec.get("review"), dict) else {}
+        rows.append({
+            "task_id": str(rec.get("task_id") or ""),
+            "archived_at": str(rec.get("archived_at") or ""),
+            "problem_wanted": str(rev.get("problem_wanted") or ""),
+            "problem_found": list(rev.get("problem_found") or []),
+            "went_well": list(rev.get("went_well") or []),
+            "went_wrong": list(rev.get("went_wrong") or []),
+            "lesson": str(rev.get("lesson") or ""),
+        })
+    return {
+        "schema": "ag.knowledge.retro.v1",
+        "root": str(repo),
+        "session_count": len(sessions),
+        "shown": len(rows),
+        "tickets": rows,
+        "redlines_active": len(load_active_redlines(repo)),
+    }

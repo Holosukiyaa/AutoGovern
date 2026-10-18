@@ -100,6 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("see", help="see snapshot; does not refuse finish").add_argument("root")
     sub.add_parser("prune", help="prune old process residue; conclusions stay").add_argument("root")
     sub.add_parser("config-show", help="print the converged root config (config.json) a user opens").add_argument("root")
+    sub.add_parser("retro", help="human-readable cross-session retrospective (problem/found/right/wrong/lesson)").add_argument("root")
     worker_create_p = sub.add_parser(
         "worker-create",
         help="write a vendor-neutral worker dossier in the active AG worktree",
@@ -549,6 +550,24 @@ def main(argv: list[str] | None = None) -> int:
                 print()
             print("== 完整配置 (config.json) ==")
             print(json.dumps(blob, ensure_ascii=False, indent=2))
+            return 0
+        if args.cmd == "retro":
+            from .knowledge import retro
+
+            out = retro(root)
+            print(f"== 跨会话复盘 · {out['session_count']} 张票 · 展示最近 {out['shown']} 张 · 现存红线 {out['redlines_active']} 条 ==")
+            for t in out["tickets"]:
+                print(f"\n[{t['task_id']}] {t['archived_at'][:10]}")
+                if t["problem_wanted"]:
+                    print(f"  想解决: {t['problem_wanted']}")
+                for f in t["problem_found"]:
+                    print(f"  发现: {f}")
+                if t["went_well"]:
+                    print(f"  做对: {', '.join(t['went_well'])}")
+                if t["went_wrong"]:
+                    print(f"  做错: {', '.join(t['went_wrong'])}")
+                if t["lesson"]:
+                    print(f"  教训: {t['lesson']}")
             return 0
     except ChainBroken as exc:
         print(str(exc), file=sys.stderr)

@@ -684,6 +684,16 @@ def ticket_run(
     cfg = load_config(repo)
     configured = bool(cfg.get("error") or _configured(cfg))
     exam_text = str(portrait or intent_body or "")
+    # feed the cumulative project redlines into the ticket review exam, so the writer
+    # sees prior hard-won boundaries instead of re-learning them from scratch
+    try:
+        from .knowledge import load_active_redlines
+
+        _hist_redlines = load_active_redlines(repo)
+        if _hist_redlines:
+            exam_text += "\n\n## 项目历史红线（跨票累积，供参考）\n" + "\n".join(f"- {r}" for r in _hist_redlines)
+    except Exception:
+        pass
 
     def _enrich(
         blob: dict[str, Any],
