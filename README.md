@@ -19,6 +19,19 @@
 
 ---
 
+## v0.4 新能力
+
+继 v0.3（交付护栏 + 独立审核底座）之后，v0.4 让 ag「越用越懂你的项目」，并把状态目录管得不膨胀、可回溯。
+
+- **结构体检**：通用内核发现孤岛文件、假装配依赖、反向引用；多语言适配器表（Python / TS / Go / Rust / Java），仓里有什么语言就自动用哪套规则；只出事实不拦截。
+- **一根配置 `config.json`**：项目所有开关汇到一份根配置——审核席位、体检适配器、防膨胀闸、48 条策略清单（带中文名 / 开关 / 可否关）；`python -m ag config-show <PROJECT_ROOT>` 一键看人读版。
+- **跨会话复盘**：每张票归档「想解决什么 / 发现什么 / 做对 / 做错 + 教训」四段；项目红线册随票累积、开票自动喂给 AI；`python -m ag retro <PROJECT_ROOT>` 出人读复盘报告。新会话的 AI 不再从零开始。
+- **防膨胀闸**：席位过程日志跑完即清、usage 计数滚动截断、`python -m ag prune <PROJECT_ROOT>` 压旧残留留索引——留结论、砍流水。
+- **项目状态版本化**：`<AG_HOME>/projects/<key>` 是本地 git 仓，只跟踪结论与配置，误删可恢复。
+- **改自己人工闸门**：改 ag 自身代码的票，switch 拒单后 finish 停下等 `python -m ag approve-self <PROJECT_ROOT> <TASK_ID>` 人工放行，杜绝「自己改自己没人拦」。
+
+---
+
 ## 核心交付闭环
 
 主仓（`<PROJECT_ROOT>`）永远不是施工现场，所有代码修改必须在隔离工作树（`<WORKTREE>`）中完成：
@@ -44,9 +57,10 @@ python -m ag config <PROJECT_ROOT>
 python -m ag mcp
 ```
 
-审计与状态存储在 `<AG_HOME>/projects/<PROJECT_KEY>/`（默认 `<AG_HOME>` 为 `~/.ag`）：
-- 数据库：`ag.sqlite`
+审计与状态存储在 `<AG_HOME>/projects/<PROJECT_KEY>/`（默认 `<AG_HOME>` 为 `~/.ag`），整个目录是一个本地 git 仓——只跟踪结论与配置（票文、红线册、复盘、config.json），不跟踪流水日志；每次 `finish`/`abandon` 自动提交一次，误删可 `git` 恢复：
+- 结论流水：`<seat>.jsonl`（append-only 事件日志，0-Token 脚本预筛与 DS 审核结论的唯一正本）
 - 任务步进链：`<AG_HOME>/projects/<PROJECT_KEY>/tasks/<TASK_ID>.json`（可通过 `ag_status.timeline_path` 或 `python -m ag critic-log <PROJECT_ROOT>` 查看）
+- 一根配置：`config.json`（审核席位 / 体检适配器 / 防膨胀闸 / 48 条策略开关，一眼看清开了什么）
 
 ---
 

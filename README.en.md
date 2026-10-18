@@ -10,6 +10,19 @@ Only `ship` may set `product` or refuse `finish`. `lift` and `see` provide advic
 
 ---
 
+## What's New in v0.4
+
+After v0.3 (delivery guardrails + stateless review foundation), v0.4 makes ag learn your project over time, and keeps the state dir lean and recallable.
+
+- **Structural checkup**: a language-agnostic kernel finds island files, phantom (declared-but-unused) dependencies, and reverse references; a multi-language adapter table (Python / TS / Go / Rust / Java) auto-selects per language actually present. Read-only facts, never blocks.
+- **One root `config.json`**: all project switches in one file — review seat, checkup adapters, anti-bloat gate, and a 48-strategy listing (name / on-off / pluggable). `python -m ag config-show <PROJECT_ROOT>` prints a human-readable view.
+- **Cross-session retrospective**: each ticket archives what it tried / found / did right / did wrong + lesson; a cumulative project redlines book is fed to the AI on every `ag_start`; `python -m ag retro <PROJECT_ROOT>` prints a human-readable report. A fresh session no longer starts from zero.
+- **Anti-bloat gate**: seat process logs are dropped once the conclusion lands, the usage ledger rolls to a bounded window, and `python -m ag prune <PROJECT_ROOT>` compacts old residue to index lines — keep conclusions, cut process noise.
+- **Versioned project state**: `<AG_HOME>/projects/<key>` is a local git repo tracking conclusions and config only, so accidental deletes are recoverable.
+- **Self-governance human gate**: a ticket that modifies ag's own code, when rejected by switch, makes finish stop and wait for a manual `python -m ag approve-self <PROJECT_ROOT> <TASK_ID>` — never silently auto-approving changes to ag itself.
+
+---
+
 ## Bundled AI Skills & Entry Navigation
 
 - 🧭 **AI & User Entry Anchor (`AGENTS.md`)**: [`AGENTS.md`](AGENTS.md)
@@ -40,7 +53,7 @@ python -m ag config <PROJECT_ROOT>
 python -m ag mcp
 ```
 
-Critic config lives in `<AG_HOME>/critic.json` (default `~/.ag/critic.json`) or per-project `<AG_HOME>/projects/<PROJECT_KEY>/critic.json`. Audit: sqlite `ag.sqlite`. Task step chain (not in git): `<AG_HOME>/projects/<PROJECT_KEY>/tasks/<TASK_ID>.json` — one object with a `steps` array, appended at start / verify-refused / verify-tests / verify-probes / verify-switch / finish / finish-refused. `ag_status.timeline_path` points at the current or latest file. `ag critic-log` prints that timeline. `python -m ag config <PROJECT_ROOT>` outputs the structured configuration guide (`config_guide`) and readiness diagnostics.
+Critic config lives in `<AG_HOME>/critic.json` (default `~/.ag/critic.json`) or per-project `<AG_HOME>/projects/<PROJECT_KEY>/config.json`. The whole state dir is a local git repo tracking conclusions and config (not rolling logs); every `finish`/`abandon` auto-commits, so accidental deletes are recoverable. Audit: append-only `<seat>.jsonl` event logs. Task step chain (not in git): `<AG_HOME>/projects/<PROJECT_KEY>/tasks/<TASK_ID>.json` — one object with a `steps` array, appended at start / verify-refused / verify-tests / verify-probes / verify-switch / finish / finish-refused. `ag_status.timeline_path` points at the current or latest file. `ag critic-log` prints that timeline. `python -m ag config <PROJECT_ROOT>` outputs the structured configuration guide (`config_guide`) and readiness diagnostics.
 
 ---
 
