@@ -172,13 +172,42 @@ def _extract_refs(root: Path, rel: str, compiled: list[re.Pattern[str]]) -> tupl
 
 def _resolve_ref(root: Path, from_rel: str, cand: str, known: set[str]) -> str | None:
     """把抽到的引用解析成仓内相对路径。只接受仓内真实存在的文件。"""
-    # 相对 import（.loop / ..loop）：相对当前文件解析
+    # 相对 import：分两类。
+    #  - 纯点号路径（./x、../x，TS/JS）：相对当前文件目录解析，补全多语言后缀。
+    #  - 点号模块（.foo、..pkg.mod，Python）：dots 层数=上溯目录数，按 Python 语义补 .py。
     if cand.startswith("."):
-        dots = len(cand) - len(cand.lstrip("."))
-        mod = cand.lstrip(".").replace(".", "/")
         base_dir = str(Path(from_rel).parent).replace("\\", "/")
         if base_dir == ".":
             base_dir = ""
+        if cand.startswith("./") or cand.startswith("../"):
+            # TS/JS 纯点号相对路径：保留 ../ 上溯段，只去掉前导 ./ 与开头的 /。
+            # ../ 段交给下方的 .. 规整逻辑弹出目录。
+            cand = cand.replace("\\", "/")
+            while cand.startswith("./"):
+                cand = cand[2:]
+            cand = cand.lstrip("/")
+            joined = (base_dir + "/" + cand).replace("\\", "/")
+            parts: list[str] = []
+            for seg in joined.split("/"):
+                if seg in ("", "."):
+                    continue
+                if seg == "..":
+                    if parts:
+                        parts.pop()
+                    continue
+                parts.append(seg)
+            norm = "/".join(parts)
+            if norm in known:
+                return norm
+            for ext in (".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs"):
+                if norm + ext in known:
+                    return norm + ext
+                if (norm + "/index" + ext) in known:
+                    return norm + "/index" + ext
+            return None
+        # Python 点号模块：.foo / ..pkg.mod
+        dots = len(cand) - len(cand.lstrip("."))
+        mod = cand.lstrip(".").replace(".", "/")
         # Python 相对 import：1 点=当前目录，2 点=上一级，依此类推
         for _ in range(dots - 1):
             base_dir = str(Path(base_dir).parent).replace("\\", "/")
