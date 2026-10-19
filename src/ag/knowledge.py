@@ -146,13 +146,58 @@ def _seat_items(root: Path, seat: str) -> list[dict[str, Any]]:
         return []
 
 
+def _intent_excerpt(task: dict[str, Any]) -> str:
+    """Extract the ticket's plain-language intent, never raw exam prose.
+
+    Privacy rule: the sealed exam body (portrait / intent / anchor_preview full text)
+    must NOT land verbatim into sessions/*.json. We only keep a short cleaned clause.
+
+    Priority: portrait first line, then intent first line, then the first plain
+    sentence under the `## 意图` heading of anchor_preview (skipping anchor:/#/list lines,
+    stripping filler prefixes like '大白话：').
+    """
+    for key in ("portrait", "intent"):
+        first = str(task.get(key) or "").strip().splitlines()
+        if first and first[0].strip():
+            return first[0].strip()
+    text = str(task.get("anchor_preview") or "")
+    if not text.strip():
+        return ""
+    lines = text.splitlines()
+    start = None
+    for i, ln in enumerate(lines):
+        if ln.strip().startswith("## ") and "意图" in ln:
+            start = i + 1
+            break
+    if start is None:
+        return ""
+    for ln in lines[start:]:
+        s = ln.strip()
+        if not s:
+            continue
+        if s.startswith("## "):
+            return ""
+        if s.startswith("anchor:") or s.startswith("#"):
+            continue
+        s = s.lstrip("-*>").strip()
+        for prefix in ("大白话：", "大白话:", "固定：", "固定:"):
+            if s.startswith(prefix):
+                s = s[len(prefix):].strip()
+                break
+        if s:
+            return s
+    return ""
+
+
 def _theme_label(task: dict[str, Any]) -> str:
     """A short topic label for the ticket, not the exam body.
 
     Prefers the intent's first short clause; strips code/quotes/long tokens so what
-    lands in the review is a label like '修复孤岛误报', not the ticket's prose."""
-    raw = _first_line(task.get("portrait")) or _first_line(task.get("intent"))
-    s = _sanitize(raw)
+    lands in the review is a label like '修复孤岛误报', not the ticket's prose.
+    Falls back to the `## 意图` paragraph in anchor_preview when portrait/intent are empty."""
+    # 隐私铁律：考卷正文不直接落盘。_intent_excerpt 已按 portrait>intent>anchor_preview
+    # 优先序取出人话意图句，再经 _sanitize 清洗后才作为主题。
+    s = _sanitize(_intent_excerpt(task))
     # keep only the first clause, drop colons/anchors so it reads as a label
     for sep in ("，", "。", "：", ":", ";", "；", "——", "——"):
         if sep in s:
