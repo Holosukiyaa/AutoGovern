@@ -170,6 +170,30 @@ def _extract_refs(root: Path, rel: str, compiled: list[re.Pattern[str]]) -> tupl
     return refs, bool(refs)
 
 
+def _resolve_norm(norm: str, known: set[str]) -> str | None:
+    """Resolve a normalized repo-relative path (no leading ./) against known files.
+    Order: exact path -> suffix completion (.ts/.tsx/.js/.../index.*) -> when the
+    ref carried an explicit .js/.jsx that is absent, fall back to same-name .ts/.tsx
+    (ESM+TS convention: source imports './x.js' but the real file is './x.ts')."""
+    if norm in known:
+        return norm
+    for ext in (".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs"):
+        if norm + ext in known:
+            return norm + ext
+        if (norm + "/index" + ext) in known:
+            return norm + "/index" + ext
+    # ESM same-source fallback: explicit .js/.jsx that is not in git -> try .ts/.tsx.
+    lower = norm.lower()
+    if lower.endswith((".js", ".jsx")):
+        base = norm[: norm.rindex(".")]
+        for ext in (".ts", ".tsx"):
+            if base + ext in known:
+                return base + ext
+            if (base + "/index" + ext) in known:
+                return base + "/index" + ext
+    return None
+
+
 def _resolve_ref(root: Path, from_rel: str, cand: str, known: set[str]) -> str | None:
     """把抽到的引用解析成仓内相对路径。只接受仓内真实存在的文件。"""
     # 相对 import：分两类。
@@ -197,14 +221,7 @@ def _resolve_ref(root: Path, from_rel: str, cand: str, known: set[str]) -> str |
                     continue
                 parts.append(seg)
             norm = "/".join(parts)
-            if norm in known:
-                return norm
-            for ext in (".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs"):
-                if norm + ext in known:
-                    return norm + ext
-                if (norm + "/index" + ext) in known:
-                    return norm + "/index" + ext
-            return None
+            return _resolve_norm(norm, known)
         # Python 点号模块：.foo / ..pkg.mod
         dots = len(cand) - len(cand.lstrip("."))
         mod = cand.lstrip(".").replace(".", "/")
@@ -243,15 +260,7 @@ def _resolve_ref(root: Path, from_rel: str, cand: str, known: set[str]) -> str |
             continue
         parts.append(seg)
     norm = "/".join(parts)
-    if norm in known:
-        return norm
-    # 尝试补后缀（import './x' → x.ts）
-    for ext in (".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs"):
-        if norm + ext in known:
-            return norm + ext
-        if (norm + "/index" + ext) in known:
-            return norm + "/index" + ext
-    return None
+    return _resolve_norm(norm, known)
 
 
 def _depth(rel: str) -> int:
