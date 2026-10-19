@@ -779,6 +779,24 @@ def lift_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     tasks_dir = pdir / "tasks"
     timeline_files = [p for p in tasks_dir.glob("*.json") if p.is_file()] if tasks_dir.is_dir() else []
     timeline_ids = {p.stem for p in timeline_files}
+    # merged residues live in tasks/index.jsonl now; fold their task ids in so the
+    # ticket-sequence base does not shrink after prune folds loose files away.
+    index_path = tasks_dir / "index.jsonl" if tasks_dir.is_dir() else None
+    if index_path and index_path.is_file():
+        try:
+            for ln in index_path.read_text(encoding="utf-8").splitlines():
+                ln = ln.strip()
+                if not ln:
+                    continue
+                try:
+                    row = json.loads(ln)
+                except ValueError:
+                    continue
+                tid = str(row.get("task_id") or "").strip()
+                if tid:
+                    timeline_ids.add(tid)
+        except OSError:
+            pass
 
     task = _task(root) or {}
     active_id = str(task.get("id") or "").strip()

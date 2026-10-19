@@ -92,6 +92,67 @@ def _compact_task_file(path: Path, root: Path, freed: list[int]) -> bool:
     return True
 
 
+def _merge_compacted_tasks(tasks_dir: Path, root: Path, active_id: str, freed: list[int], exclude: set[str] | None = None) -> list[str]:
+    """Fold compacted one-line task indexes into tasks/index.jsonl, then drop the loose files.
+
+    Only files whose JSON body has compacted:true are merged (they are prune's own residue).
+    Unfinished timelines (with steps), the active task, task.json and index.jsonl stay put.
+    Each task_id is appended once (dedup by id already present in index). Every delete is audited.
+    """
+    index_path = tasks_dir / "index.jsonl"
+    existing_ids: set[str] = set()
+    if index_path.is_file():
+        try:
+            for ln in index_path.read_text(encoding="utf-8").splitlines():
+                ln = ln.strip()
+                if not ln:
+                    continue
+                try:
+                    row = json.loads(ln)
+                except ValueError:
+                    continue
+                tid = str(row.get("task_id") or "").strip()
+                if tid:
+                    existing_ids.add(tid)
+        except OSError:
+            pass
+    merged: list[str] = []
+    new_lines: list[str] = []
+    for path in sorted(tasks_dir.glob("*.json")):
+        if not path.is_file():
+            continue
+        if path.name == "task.json" or (active_id and path.stem == active_id):
+            continue
+        if exclude and path.name in exclude:
+            continue  # just compacted this run; keep its index one more cycle for traceability
+        try:
+            blob = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not (isinstance(blob, dict) and blob.get("compacted") is True):
+            continue  # leave uncompressed timelines (with steps) untouched
+        tid = str(blob.get("task_id") or path.stem).strip() or path.stem
+        if tid and tid not in existing_ids:
+            row = {
+                "task_id": tid,
+                "process": str(blob.get("process") or ""),
+                "product": str(blob.get("product") or ""),
+                "step_count": int(blob.get("step_count") or 0),
+            }
+            new_lines.append(json.dumps(row, ensure_ascii=False))
+            existing_ids.add(tid)
+        if _drop(path, root, "merge-compacted-task", freed):
+            merged.append(path.name)
+    if new_lines:
+        try:
+            with index_path.open("a", encoding="utf-8") as fh:
+                for ln in new_lines:
+                    fh.write(ln + "\n")
+        except OSError:
+            pass
+    return merged
+
+
 def prune(root: Path) -> dict[str, Any]:
     """Prune old process residue in a project's AG_HOME dir. Foundations stay untouched.
 
@@ -143,11 +204,17 @@ def prune(root: Path) -> dict[str, Any]:
             if _compact_task_file(path, root, freed):
                 compacted.append(path.name)
 
+    # 3) fold already-compacted one-line residues into tasks/index.jsonl, then drop them.
+    merged: list[str] = []
+    if tasks_dir.is_dir():
+        merged = _merge_compacted_tasks(tasks_dir, root, active_id, freed, exclude=set(compacted))
+
     return {
         "schema": "ag.prune.v1",
         "root": str(root),
         "active_task": active_id or None,
         "removed_live": removed,
         "compacted_tasks": compacted,
+        "merged_tasks": merged,
         "freed_bytes": sum(freed),
     }
