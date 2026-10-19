@@ -630,6 +630,12 @@ def status(root: Path) -> dict[str, Any]:
             "[下一步] 请先在主仓根目录执行 ag_enroll"
         )
     key = str(item.get("key") or project_key(root))
+    try:
+        from .upgrade import ensure_upgraded
+
+        ensure_upgraded(root)
+    except Exception as exc:
+        usage_note(root, "ship", 9, "help", f"upgrade skipped: {exc.__class__.__name__}")
     _ensure_hook_files(key, root)
     _write_mcp_entry()
     exclude_info = ensure_local_excludes(root)
