@@ -1274,6 +1274,44 @@ def see_15(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
+def see_16(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
+    """孤岛清单：把 structure.check 算出的孤岛摆到人面前。只读只报，不当门不写盘。"""
+    from .structure import check as structure_check
+
+    try:
+        res = structure_check(root)
+    except Exception as exc:  # 体检自身崩溃也不能拖垮整个 see 报告
+        return {"configured": False, "island_count": 0, "islands": [], "detail": f"结构体检跑不起来：{exc}"}
+
+    if not res.get("configured"):
+        return {"configured": False, "island_count": 0, "islands": [],
+                "detail": res.get("detail") or "未配置适配器：去 .ag 项目配置 structure.adapters 填入口"}
+    if not res.get("ok", True):
+        errs = res.get("errors") or []
+        return {"configured": True, "ok": False, "island_count": 0, "islands": [],
+                "errors": errs, "detail": (res.get("detail") or "适配器配置不合法") + "：" + "；".join(str(e) for e in errs[:3])}
+
+    islands = [str(x) for x in (res.get("islands") or [])]
+    out: dict[str, Any] = {
+        "configured": True,
+        "ok": True,
+        "island_count": int(res.get("island_count") or len(islands)),
+        "islands": islands[:60],
+        "truncated": len(islands) > 60,
+        "detail": res.get("detail") or "",
+    }
+    if res.get("multi"):
+        per: dict[str, Any] = {}
+        for lang, r in (res.get("per_language") or {}).items():
+            li = [str(x) for x in (r.get("islands") or [])]
+            per[lang] = {
+                "entry_files": [str(e) for e in (r.get("doors") or [])],
+                "island_count": len(li),
+                "islands": li[:40],
+            }
+        out["per_language"] = per
+    return out
+
 def see_17(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     """评审跑没跑：三席各跑过几次、通过/拒绝/没审各多少、没审的原因是什么。只出事实。"""
     from .store import LLM_JSONL, project_dir
@@ -1495,6 +1533,7 @@ HANDLERS = {
     ("see", 13): see_13,
     ("see", 14): see_14,
     ("see", 15): see_15,
+    ("see", 16): see_16,
     ("see", 17): see_17,
     ("see", 18): see_18,
 }
