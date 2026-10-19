@@ -95,6 +95,51 @@ def _match_language(source_exts: Any) -> str:
     return best
 
 
+def _step_pickup_legacy_adapter(root: Path) -> str:
+    """Pick up a loose legacy adapter.json still lying on the floor and fold it
+    into the structure adapters table at its REAL language slot (by source_exts),
+    then remove the corpse. Runs before reslot so a never-folded TS adapter lands
+    in typescript, not python. Idempotent: no file -> no action."""
+    from .settings import settings_path
+
+    base = project_dir(real_root(root))
+    legacy_file = base / "adapter.json"
+    if not legacy_file.is_file():
+        return "no loose adapter.json"
+    legacy = _read_json(legacy_file)
+    if not legacy:
+        try:
+            legacy_file.unlink()
+        except OSError:
+            pass
+        return "adapter.json unreadable; removed"
+    real = _match_language(legacy.get("source_exts")) or "python"
+    path = settings_path(root)
+    blob = _read_json(path)
+    struct = blob.get("structure")
+    if not isinstance(struct, dict):
+        struct = {"enabled": True, "adapters": {}}
+    adapters = struct.get("adapters")
+    if not isinstance(adapters, dict):
+        adapters = {}
+    from .settings import default_adapters
+
+    table = default_adapters()
+    table.update({k: v for k, v in adapters.items() if isinstance(v, dict)})
+    clean = {k: v for k, v in legacy.items() if not str(k).startswith("_")}
+    table[real] = clean
+    struct["adapters"] = table
+    struct.setdefault("enabled", True)
+    blob["structure"] = struct
+    blob["schema"] = "ag.config.v2"
+    _write_json(path, blob)
+    try:
+        legacy_file.unlink()
+    except OSError:
+        pass
+    return f"picked up adapter.json -> {real} slot (dep_manifest={clean.get('dep_manifest')})"
+
+
 def _step_reslot_adapters(root: Path) -> str:
     """Move an adapter that sits in the wrong language slot to its real language.
     Legacy folds dropped every old adapter into the python slot; re-slot by exts."""
@@ -198,6 +243,7 @@ def _step_flow_hint(root: Path) -> str:
 
 # (from_version, to_version, step). Walked in order from the stored version.
 MIGRATIONS: list[tuple[int, int, Callable[[Path], str]]] = [
+    (1, 2, _step_pickup_legacy_adapter),
     (1, 2, _step_reslot_adapters),
     (1, 2, _step_scaffold_home),
     (1, 2, _step_flow_hint),
