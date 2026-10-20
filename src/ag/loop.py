@@ -1194,6 +1194,8 @@ def verify(root: Path) -> dict[str, Any]:
         probe_red=probe_red,
         critic=None,
         tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
+
+        tests_record={"exit": record.get("exit"), "stdout_tail": str(record.get("stdout") or "")[-1200:], "stderr_tail": str(record.get("stderr") or "")[-1200:], "declared": not bool(record.get("undeclared"))},
         redlines=sealed_redlines,
         source_head=str(task.get("source_head") or ""),
     )

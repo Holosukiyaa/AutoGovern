@@ -1089,6 +1089,7 @@ def seat_run(
     task_id: str = "",
     probe_red: list[str] | None = None,
     critic: dict[str, Any] | None = None,
+    tests_record: dict[str, Any] | None = None,
     redlines: list[str] | None = None,
 ) -> dict[str, Any]:
     if kind == "ticket":
@@ -1122,6 +1123,7 @@ def seat_run(
     packed = pack(root, **pack_kwargs)
     if kind == "switch":
         packed = _user_pack(packed, critic)
+        packed["verify_tests"] = tests_record
     packed["redlines"] = [str(item).strip() for item in (redlines or []) if str(item).strip()]
     thread_id = f"{SEATS[kind]['table'][:2]}-{task_id or 'run'}-{uuid.uuid4().hex[:8]}"
     packed["thread_id"] = thread_id
@@ -1297,6 +1299,7 @@ def attach_verify(
     probe_red: list[str],
     tests_failed: bool = False,
     critic: dict[str, Any] | None = None,
+    tests_record: dict[str, Any] | None = None,
     redlines: list[str] | None = None,
     source_head: str = "",
 ) -> dict[str, Any] | tuple[dict[str, Any], list[Any]]:
@@ -1327,6 +1330,7 @@ def attach_verify(
                 probe_red=probe_red,
                 critic=critic,
                 redlines=sealed,
+                tests_record=tests_record,
             )
             logged = True
             blob = {
