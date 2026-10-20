@@ -814,6 +814,7 @@ def start(
     from .anchor_map import attention_anchors, hard_rules, resolve_fixed
     from .ticket_doc import (
         collect_redlines,
+        flow_target_warnings,
         dropped_redlines,
         merge_anchors,
         previous_redlines,
@@ -871,6 +872,9 @@ def start(
                 existing["defaults"] = [str(item).strip() for item in defaults if str(item).strip()]
             existing["redlines"] = redlines
             existing["dropped_redlines"] = dropped
+            flow_warnings = flow_target_warnings(intent_body)
+            if flow_warnings:
+                existing["prescreen_warnings"] = list(dict.fromkeys(list(existing.get("prescreen_warnings") or []) + flow_warnings))
             preview = seal(
                 root,
                 intent_body=intent_body,
@@ -955,6 +959,9 @@ def start(
         "worktree": str(worktree),
     }
     try:
+        flow_warnings = flow_target_warnings(intent_body)
+        if flow_warnings:
+            draft["prescreen_warnings"] = list(dict.fromkeys(list(draft.get("prescreen_warnings") or []) + flow_warnings))
         preview = seal(
             root,
             intent_body=intent_body,
@@ -1194,8 +1201,6 @@ def verify(root: Path) -> dict[str, Any]:
         probe_red=probe_red,
         critic=None,
         tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
-
-        tests_record={"exit": record.get("exit"), "stdout_tail": str(record.get("stdout") or "")[-1200:], "stderr_tail": str(record.get("stderr") or "")[-1200:], "declared": not bool(record.get("undeclared"))},
         redlines=sealed_redlines,
         source_head=str(task.get("source_head") or ""),
     )

@@ -152,7 +152,24 @@ def section_lines(body: str) -> list[str]:
         if line and line not in lines:
             lines.append(line)
     return lines
+# 开票限制：票是"建机器"，不是"跑流程"。一张票的目标应是建好/修好某段具体代码；
+# "造一条业务卡带并端到端跑一遍"是运行，不是票的交付物。命中流程类措辞且未声明
+# 收窄为"只建设其中某段代码"时，预筛产出一条 warning（只提醒，不硬拦；判票归审票席位）。
+FLOW_TARGET_RE = re.compile(r"端到端|全链路|跑通流程|跑通业务|边到边|end[-\s]?to[-\s]?end|\be2e\b", re.IGNORECASE)
+NARROWING_RE = re.compile(r"只建|仅建|只补|仅补|只新增|仅新增|只改|仅改|只修|仅修|本票只|本票仅|其中.{0,12}段|那段代码|这段代码")
 
+
+def flow_target_warnings(intent_body: str) -> list[str]:
+    text = str(intent_body or "")
+    if not text.strip():
+        return []
+    if not FLOW_TARGET_RE.search(text):
+        return []
+    if NARROWING_RE.search(text):
+        return []
+    return [
+        "票面目标疑似把『跑通业务流程』当成交付物；一张票的目标应是建好/修好该流程缺失的那段具体代码，端到端跑通是运行不是票的交付物。请考虑收窄票面为『建设其中某段代码』，把跑通验证放进 .ag-check 自检。"
+    ]
 
 def collect_redlines(redline_body: str, anchors: list[dict[str, Any]]) -> list[str]:
     lines = section_lines(redline_body)

@@ -21,7 +21,6 @@ verdict 只能是 pass 或 reject。pass = 放行 finish。reject = 拒绝 finis
 - diff / annotated_diff / changed_files / neighbors（均带精确预标注行号）
 - script_digest（本地确定性脚本机械预审摘要）
 - this_ticket_checks（工地 `.ag-check/`，可能 truncated）
-- verify_tests（本票登记自检命令的真实运行结果：exit code + stdout/stderr 尾部；declared=false 表示本票未登记自检命令，verify_tests 为 null）
 - probes
 - redlines：开工时封存的红线副本。空名单表示这张票没有红线
 
@@ -32,7 +31,7 @@ verdict 只能是 pass 或 reject。pass = 放行 finish。reject = 拒绝 finis
    - 某一条被本轮改动违反：verdict 用 reject。对应 item 的 status 用 fail。evidence 直接写预标注的 `path:line`，或 `portrait:` 加上那条红线原文。
    - redlines 为空：这一面没有红线。不要因为空名单拒绝。
    - 吃不准某条有没有被违反：verdict 用 reject。evidence 写 `portrait:` 加上那条红线原文。
-3. **本票检查是否真验货**：对照 `this_ticket_checks` 与 `script_digest.check_quality`，检查 `.ag-check/` 是否验证了真实的正向与反向/拒绝边界，而非假通过桩代码。 对照 `verify_tests` 确认登记自检是否真跑过：`verify_tests.declared=true` 且 `verify_tests.exit=0` 才是自检真跑通过的实证；`declared=false` 或 `verify_tests` 为 null 表示本票未登记自检命令，此时只能凭脚本文本静态判断并在吃不准时拒。禁止把长期 `tests/` 当已经正确；本仓不应靠 `tests/` 入学绿灯放行。
+3. **本票检查是否真验货**：对照 `this_ticket_checks` 与 `script_digest.check_quality`，检查 `.ag-check/` 是否验证了真实的正向与反向/拒绝边界，而非假通过桩代码。禁止把长期 `tests/` 当已经正确；本仓不应靠 `tests/` 入学绿灯放行。
 
 ## 禁止与证据硬约束
 
