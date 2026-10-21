@@ -28,7 +28,37 @@ DIFF_WINDOW_RADIUS = 30
 MAX_CHECK_FILE_BYTES = 64_000
 _HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _BACKTICK_TOKEN_RE = re.compile(r"`([^`\n]+)`")
-_FILE_TOKEN_RE = re.compile(r"[\w./\\-]+\.(?:py|ts|tsx|js|css|json|md|sqlite|rs|go)")
+_MUTATION_WORDS = (
+    "严禁改",
+    "严禁动",
+    "严禁删",
+    "严禁重构",
+    "严禁碰",
+    "严禁触碰",
+    "禁止改",
+    "禁止动",
+    "禁止删",
+    "禁止重构",
+    "不得改",
+    "不得动",
+    "不得删",
+    "不得重构",
+    "不许改",
+    "不许动",
+    "不许删",
+    "modify",
+    "delete",
+    "remove",
+    "refactor",
+    "rename",
+    "do not change",
+    "do not modify",
+    "never change",
+)
+
+_EXCEPT_ONLY_RE = re.compile(r"(?:除|except\s+)([^。；;，,外]+?)(?:外|以外)")
+_IN_SCOPE_RE = re.compile(r"(?:严禁|禁止|不得|不许|不准|切勿|勿|杜绝)在?\s*([^。；;，,]+?)\s*(?:里|中|内|里面|之中)")
+_FILE_TOKEN_RE = re.compile(r"[\w./\\-]+\.(?:sqlite|tsx|json|css|py|js|ts|md|rs|go)\b")
 _PROHIBITION_WORDS = (
     "严禁",
     "禁止",
@@ -76,7 +106,11 @@ _SHORTCUT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 _EXCEPT_HEADER_RE = re.compile(r"^\s*except\b.*:\s*(?:#.*)?$")
 _PASS_LINE_RE = re.compile(r"^\s*pass\b(?:\s*#.*)?$")
-_ASSERT_SIGNAL_RE = re.compile(r"\b(?:assert|AssertionError|unittest)\b")
+_ASSERT_SIGNAL_RE = re.compile(
+    r"\b(?:assert|AssertionError|unittest)\b"
+    r"|\b(?:ok|check|expect|verify|require)\s*\([^)]*,"  # verdict-recording helpers
+    r"|sys\.exit\s*\(\s*(?:1|[^0(])"  # non-zero exit on failure
+)
 _BINARY_CHECK_SUFFIXES = {
     ".pyc",
     ".png",
@@ -446,37 +480,81 @@ def _has_word(text: str, words: tuple[str, ...]) -> bool:
 
 
 def _redline_tokens(redline: str) -> list[str]:
-    """Tokens that a red line actually forbids naming.
+    """File tokens a red line actually forbids CHANGING.
 
-    A token counts only inside a prohibition clause. Scope wording such as
-    "只许用 Python 标准库" says where the work goes, not what is banned, so its
-    tokens are not collision words. A red line without any prohibition word keeps
-    its old behaviour: every token in it is taken.
+    A file name becomes a collision word only when the red line forbids mutating it
+    (e.g. "严禁改 X" / "严禁动 X" / "never modify X"). Names that appear only as a
+    behaviour location ("严禁在 X 里直接 fetch") or as an allowed exception
+    ("除 X 外严禁动其它") are NOT collision words, so editing X does not raise a false
+    positive. This keeps real "do-not-touch" guards while no longer punishing the very
+    file the ticket is meant to edit.
     """
     text = str(redline or "").strip()
     if not text:
         return []
     tokens: list[str] = []
 
-    def collect(blob: str) -> None:
-        for tok in _BACKTICK_TOKEN_RE.findall(blob) + _FILE_TOKEN_RE.findall(blob):
+    # Exception spans are recorded per-clause: ("除 X 外" in clause A) must not exempt X when a
+    # DIFFERENT clause ("严禁删 X") guards it. We keep them as (clause_text, span) pairs.
+    exception_spans: list[tuple[str, str]] = []
+    for _sentence in _SENTENCE_SPLIT_RE.split(text):
+        for _clause in _CLAUSE_SPLIT_RE.split(_sentence):
+            for _m in _EXCEPT_ONLY_RE.finditer(_clause):
+                _span = next((g for g in _m.groups() if g), "")
+                if _span:
+                    exception_spans.append((_clause, _span))
+            # "严禁在 X 里做某事" is a behaviour location; it exempts X only within its own clause
+            # and only when that clause carries no mutation verb.
+            if not _has_word(_clause, _MUTATION_WORDS):
+                for _m in _IN_SCOPE_RE.finditer(_clause):
+                    _span = next((g for g in _m.groups() if g), "")
+                    if _span:
+                        exception_spans.append((_clause, _span))
+
+    def exempted_in(clause: str, cleaned: str) -> bool:
+        # A token is exempt only by an exception span that lives in THIS clause.
+        return any(
+            (c is clause or c == clause) and (cleaned in span or span in cleaned)
+            for c, span in exception_spans
+        )
+
+    # First pass: file tokens that are the direct object of a mutation verb, excluding only those
+    # exempted within the SAME clause (e.g. "除 X 外严禁动其它" -> X exempt, verb governs 其它).
+    mutation_targets: list[str] = []
+    for sentence in _SENTENCE_SPLIT_RE.split(text):
+        if not _has_word(sentence, _MUTATION_WORDS):
+            continue
+        for clause in _CLAUSE_SPLIT_RE.split(sentence):
+            if not _has_word(clause, _MUTATION_WORDS):
+                continue
+            for tok in _BACKTICK_TOKEN_RE.findall(clause) + _FILE_TOKEN_RE.findall(clause):
+                cleaned = tok.strip()
+                if len(cleaned) < 2 or cleaned in mutation_targets:
+                    continue
+                if exempted_in(clause, cleaned):
+                    continue
+                mutation_targets.append(cleaned)
+
+    def collect_mutation(clause: str) -> None:
+        if not _has_word(clause, _MUTATION_WORDS):
+            return
+        for tok in _BACKTICK_TOKEN_RE.findall(clause) + _FILE_TOKEN_RE.findall(clause):
             cleaned = tok.strip()
-            if len(cleaned) >= 2 and cleaned not in tokens:
-                tokens.append(cleaned)
+            if len(cleaned) < 2 or cleaned in tokens:
+                continue
+            if exempted_in(clause, cleaned):
+                continue
+            tokens.append(cleaned)
 
     sentences = [item for item in _SENTENCE_SPLIT_RE.split(text) if item.strip()]
-    if not any(_has_word(item, _PROHIBITION_WORDS) for item in sentences):
-        collect(text)
-        return tokens
     for sentence in sentences:
         if not _has_word(sentence, _PROHIBITION_WORDS):
             continue
         for clause in _CLAUSE_SPLIT_RE.split(sentence):
             if _has_word(clause, _SCOPE_WORDS):
                 continue
-            collect(clause)
+            collect_mutation(clause)
     return tokens
-
 
 def pack_prescreen(
     repo: Path,
@@ -522,7 +600,8 @@ def pack_prescreen(
                 break
             tok_posix = _posix(tok)
             for rel in names:
-                if tok_posix and (tok_posix == rel or rel.endswith("/" + tok_posix) or tok in rel):
+                base = rel.rsplit("/", 1)[-1]
+                if tok_posix and (tok_posix == rel or tok_posix == base):
                     first_ln = (touched_map.get(rel) or [1])[0]
                     ev = f"{rel}:{first_ln}"
                     key = (tok, ev)
