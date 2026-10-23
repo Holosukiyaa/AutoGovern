@@ -1007,6 +1007,27 @@ def start(
     preview = write_scene(root, task_blob, process="active", product="pending") or preview
     task_blob["anchor_preview"] = preview
     save_task(key, task_blob)
+    # Auto-register this ticket's self-check so verify (which reads the enrolled
+    # test_argv) runs the CURRENT ticket's script, not the previous one. Only when
+    # the worktree's .ag-check/ holds exactly ONE check_*.py; zero or several leave
+    # the enrolled argv untouched (never guess). Touches only this project's
+    # test_argv field via the existing managed-store helpers.
+    discovered = sorted(
+        item.name
+        for item in (worktree / ".ag-check").glob("check_*.py")
+        if item.is_file()
+    ) if (worktree / ".ag-check").is_dir() else []
+    if len(discovered) == 1:
+        blob = load_managed()
+        wanted = str(root)
+        for row in blob["projects"]:
+            if not isinstance(row, dict):
+                continue
+            stored = str(row.get("real") or row.get("root") or "")
+            if stored and str(real_root(Path(stored))) == wanted:
+                row["test_argv"] = ["python", "-X", "utf8", ".ag-check/" + discovered[0]]
+                save_managed(blob)
+                break
     try:
         freeze_canonical(root)
         freeze_worktree(worktree)
