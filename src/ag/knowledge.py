@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .managed import real_root
+from .managed import ChainBroken, real_root
 from .store import project_dir
 
 KNOWLEDGE_NAME = "knowledge"
@@ -273,7 +273,12 @@ def append_redlines(root: Path, task: dict[str, Any]) -> int:
 
     Returns the number of redline entries appended. Never deletes history."""
     repo = real_root(root)
-    lines = [str(r) for r in (task.get("redlines") or []) if str(r or "").strip()]
+    standing = set(load_standing_redlines(repo))
+    lines = [
+        str(rule)
+        for rule in (task.get("redlines") or [])
+        if str(rule or "").strip() and str(rule).strip() not in standing
+    ]
     if not lines:
         return 0
     path = redlines_path(repo)
@@ -299,6 +304,29 @@ def load_active_redlines(root: Path) -> list[str]:
         if s.startswith("- ") and "[obsolete]" not in s:
             out.append(s[2:].strip())
     return [x for x in out if x]
+
+
+def load_standing_redlines(root: Path) -> list[str]:
+    """Read explicitly standing rules; unreadable existing sources must not disappear."""
+    path = redlines_path(real_root(root))
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    except (OSError, UnicodeError) as exc:
+        raise ChainBroken(f"standing-redlines-unreadable: {path}: {exc}") from exc
+    rules: list[str] = []
+    inside = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            inside = stripped[3:].strip().startswith("常设红线")
+            continue
+        if inside and stripped.startswith("- "):
+            rule = stripped[2:].strip()
+            if rule and "[obsolete]" not in rule and rule not in rules:
+                rules.append(rule)
+    return rules
 
 
 def archive_session(

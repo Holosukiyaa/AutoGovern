@@ -152,11 +152,7 @@ def section_lines(body: str) -> list[str]:
         if line and line not in lines:
             lines.append(line)
     return lines
-# 开票限制：票是"建机器"，不是"跑流程"。一张票的目标应是建好/修好某段具体代码；
-# "造一条业务卡带并端到端跑一遍"是运行，不是票的交付物。命中流程类措辞且未声明
-# 收窄为"只建设其中某段代码"时，预筛产出一条 warning（只提醒，不硬拦；判票归审票席位）。
 FLOW_TARGET_RE = re.compile(r"端到端|全链路|跑通流程|跑通业务|边到边|end[-\s]?to[-\s]?end|\be2e\b", re.IGNORECASE)
-NARROWING_RE = re.compile(r"只建|仅建|只补|仅补|只新增|仅新增|只改|仅改|只修|仅修|本票只|本票仅|其中.{0,12}段|那段代码|这段代码")
 
 
 def flow_target_warnings(intent_body: str) -> list[str]:
@@ -165,13 +161,27 @@ def flow_target_warnings(intent_body: str) -> list[str]:
         return []
     if not FLOW_TARGET_RE.search(text):
         return []
-    if NARROWING_RE.search(text):
-        return []
     return [
-        "票面目标疑似把『跑通业务流程』当成交付物；一张票的目标应是建好/修好该流程缺失的那段具体代码，端到端跑通是运行不是票的交付物。请考虑收窄票面为『建设其中某段代码』，把跑通验证放进 .ag-check 自检。"
+        "票面含流程或运行措辞，请区分代码产物与验证证据，核对共同输入输出、完成条件及反向边界；必要跨模块和运行验据本身不构成拒绝理由，不能仅凭关键词要求拆票。"
     ]
 
-def collect_redlines(redline_body: str, anchors: list[dict[str, Any]]) -> list[str]:
+
+def classify_redlines(root: Path, redlines: list[str]) -> dict[str, list[str]]:
+    from .knowledge import load_standing_redlines
+
+    standing = load_standing_redlines(root)
+    standing_set = set(standing)
+    explicit = list(dict.fromkeys(str(rule).strip() for rule in redlines if str(rule).strip()))
+    return {
+        "redlines": list(dict.fromkeys([*standing, *explicit])),
+        "standing_redlines": standing,
+        "ticket_redlines": [rule for rule in explicit if rule not in standing_set],
+    }
+
+
+def collect_redlines(
+    redline_body: str, anchors: list[dict[str, Any]], root: Path | None = None
+) -> list[str]:
     lines = section_lines(redline_body)
     for item in anchors:
         if not isinstance(item, dict) or str(item.get("kind") or "") != "hard":
@@ -179,7 +189,7 @@ def collect_redlines(redline_body: str, anchors: list[dict[str, Any]]) -> list[s
         text = str(item.get("text") or "").strip()
         if text and text not in lines:
             lines.append(text)
-    return lines
+    return classify_redlines(root, lines)["redlines"] if root is not None else lines
 
 
 def merge_anchors(

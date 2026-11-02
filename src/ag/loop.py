@@ -849,7 +849,7 @@ def start(
                     "[原因] <AG_HOME>/projects/<key>/ticket.md 中缺少 anchor: 意图锚点 "
                     "[下一步] 请在 <AG_HOME>/projects/<key>/ticket.md 的 ## 意图 下补充至少一条正反行为闭环 anchor: 后重试"
                 )
-            redlines = collect_redlines(redline_body, task_anchors)
+            redlines = collect_redlines(redline_body, task_anchors, root)
             baseline_prev = list(
                 dict.fromkeys(
                     list(existing.get("redlines") or [])
@@ -942,7 +942,7 @@ def start(
             "[原因] <AG_HOME>/projects/<key>/ticket.md 中缺少 anchor: 意图锚点 "
             "[下一步] 请在 <AG_HOME>/projects/<key>/ticket.md 的 ## 意图 下补充至少一条正反行为闭环 anchor: 后重试"
         )
-    redlines = collect_redlines(redline_body, task_anchors)
+    redlines = collect_redlines(redline_body, task_anchors, root)
     prev_redlines = previous_redlines(root)
     dropped = dropped_redlines(prev_redlines, redlines)
     task_guards = [str(item).strip() for item in (guards or []) if str(item).strip()]

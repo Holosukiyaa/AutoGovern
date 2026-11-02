@@ -762,7 +762,7 @@ def lift_17(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
 
 def lift_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     from .store import project_dir
-    from .ticket_doc import section_lines, split_document, tickets_dir
+    from .ticket_doc import tickets_dir
 
     repo = _repo(root)
     pdir = project_dir(repo)
@@ -855,28 +855,10 @@ def lift_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     )
     scores = dict(raw_scores)
 
-    if "redline_overlap_ratio" in digest and digest.get("redline_overlap_ratio") is not None:
-        redline_overlap_ratio = float(digest.get("redline_overlap_ratio") or 0.0)
-    elif "redline_overlap_ratio" in active_review and active_review.get("redline_overlap_ratio") is not None:
-        redline_overlap_ratio = float(active_review.get("redline_overlap_ratio") or 0.0)
-    elif "redline_overlap_ratio" in ticket_last and ticket_last.get("redline_overlap_ratio") is not None:
-        redline_overlap_ratio = float(ticket_last.get("redline_overlap_ratio") or 0.0)
-    else:
-        cur_red = set(_current_redlines(root, task))
-        prev_red: set[str] = set()
-        for fpath in reversed(archived_files):
-            if active_id and fpath.stem == active_id:
-                continue
-            try:
-                _, rbody = split_document(fpath.read_text(encoding="utf-8", errors="ignore"))
-                prev_red = set(section_lines(rbody))
-                if prev_red:
-                    break
-            except OSError:
-                continue
-        redline_overlap_ratio = (
-            round(len(cur_red & prev_red) / len(cur_red), 4) if cur_red and prev_red else 0.0
-        )
+    from .seat import ticket_redline_context
+
+    redline_context = ticket_redline_context(repo, _current_redlines(root, task), active_id)
+    redline_overlap_ratio = redline_context["redline_overlap_ratio"]
 
     summary = {
         "ticket_seq": ticket_seq,

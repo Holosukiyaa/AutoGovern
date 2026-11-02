@@ -58,13 +58,16 @@ description: >
   - **情况 A（`script-prescreen-rejected` 本地 0-Token 预筛拦截）**：
     - `## 意图` 描述太短（少于 30 字），没有用大白话讲清楚业务结果；
     - `anchor:` 少于 25 字，或只写了正向动作，缺少“当……时……，若……则……”的正反向/边界闭环（`anchor_missing_negative_or_boundary`）；
-    - `## 红线` 写了“代码要规范”“不能有 bug”等空泛套话，或者与上一张票红线高度雷同照抄。
+    - 本票红线为空（包括只有常设条款），或写了“代码要规范”“不能有 bug”等空泛套话。重复率只比较本票条款；可信常设条款始终保留全部义务，单独标记来源。
   - **情况 B（`ticket-review-rejected` 独立 `ticket` 席位打回）**：
     - 独立审核模型对 `goal_clarity`（目标清晰度）、`anchor_chain`（锚点链路完整性）、`redline_focus`（红线聚焦度）任一维度打分 `< 7`，或者提出了需要澄清的疑惑（`doubts` 非空）。
 - **[解决办法]**：
   1. 查看 `ag_start` 或 `ag_status` 返回的 `ticket_review.reasons`、`ticket_review.suggestions`、`ticket_review.doubts` 以及 `ticket_review.script_digest.hard_failures`。
   2. **无需执行 `ag_abandon`！** 在任务尚未 `confirm-map` 前，直接编辑 `<AG_HOME>/projects/<key>/ticket.md`，补齐大白话业务目标、正反向行为链路锚点和聚焦红线，解答 `doubts` 中的疑问。
   3. 直接再次运行 `ag_start`：系统会自动用新票据原地更新封存红线（`<AG_HOME>/projects/<key>/redlines.copy`）并开启新一轮无状态 `ticket` 审票，通过后再由用户执行 `confirm-map`。
+
+- **完整功能被要求拆成单段代码**：依照 [`ag-anchor` 的完整功能与验据边界](../ag-anchor/SKILL.md#完整功能与验据的边界)，说明共同输入输出、全部完成条件和反向边界；必要跨模块、分阶段施工或运行验据本身不构成拒绝。检查审票输入与提示词是否已更新，不能用删减已承诺结果、添加“只改”口令或强制指定通过来应付审核；无关目标与纯内容生产仍拒绝。
+- **常设条款重复或 `standing-redlines-unreadable`**：检查 `<AG_HOME>/projects/<key>/knowledge/redlines.md` 的明确常设区及读取权限/编码。票面标签不是可信来源；读取失败修复后重审，不删除常设义务、不关闭审核，也不将失败当成无常设条款。
 
 ---
 

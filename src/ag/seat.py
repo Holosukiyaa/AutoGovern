@@ -375,6 +375,30 @@ def _prev_ticket_redlines(repo: Path, task_id: str) -> list[str]:
     return []
 
 
+def ticket_redline_context(root: Path, redlines: list[str], task_id: str = "") -> dict[str, Any]:
+    from .ticket_doc import classify_redlines
+
+    repo = real_root(root)
+    groups = classify_redlines(repo, redlines)
+    standing = set(groups["standing_redlines"])
+    current = groups["ticket_redlines"]
+    previous = [rule for rule in _prev_ticket_redlines(repo, task_id) if rule not in standing]
+    overlap = 0.0
+    if current and previous:
+        previous_norms = {_norm_text(rule) for rule in previous if _norm_text(rule)}
+        hits = sum(
+            1
+            for rule in current
+            if _norm_text(rule)
+            and (
+                _norm_text(rule) in previous_norms
+                or any(_bigram_jaccard(rule, prior) >= 0.85 for prior in previous)
+            )
+        )
+        overlap = hits / len(current)
+    return {**groups, "redline_overlap_ratio": round(overlap, 3)}
+
+
 def ticket_prescreen(
     root: Path,
     *,
@@ -430,19 +454,9 @@ def ticket_prescreen(
     ticket_seq = max(1, len(seen_ids))
     strict_round_mode = ticket_seq >= 3
 
-    clean_redlines = [str(r).strip() for r in (redlines or []) if str(r).strip()]
-    prev_redlines = _prev_ticket_redlines(repo, tid)
-    overlap = 0.0
-    if clean_redlines and prev_redlines:
-        prev_norms = {_norm_text(x) for x in prev_redlines if _norm_text(x)}
-        hits = 0
-        for rl in clean_redlines:
-            n_rl = _norm_text(rl)
-            if not n_rl:
-                continue
-            if n_rl in prev_norms or any(_bigram_jaccard(rl, pr) >= 0.85 for pr in prev_redlines):
-                hits += 1
-        overlap = hits / len(clean_redlines)
+    redline_context = ticket_redline_context(repo, list(redlines or []), tid)
+    ticket_redlines = redline_context["ticket_redlines"]
+    overlap = redline_context["redline_overlap_ratio"]
 
     hard_failures: list[str] = []
     warnings: list[str] = []
@@ -479,21 +493,21 @@ def ticket_prescreen(
         if not any(_CLOSURE_RE.search(txt) for txt in active_texts):
             hard_failures.append("portrait:意图锚点断链（仅有单向动作，缺少反向/边界拒绝行为闭环）")
 
-    if not clean_redlines:
-        hard_failures.append("portrait:缺少红线（## 红线 为空）")
+    if not ticket_redlines:
+        hard_failures.append("portrait:缺少本票红线（## 红线 为空或只有常设条款）")
     else:
-        for rl in clean_redlines:
+        for rl in ticket_redlines:
             if len(rl) < 10 or _PLATITUDE_RE.match(rl):
                 hard_failures.append(f"portrait:{rl} (红线过宽或失焦，属空泛套话)")
 
-    if strict_round_mode and overlap >= 0.9 and clean_redlines:
+    if strict_round_mode and overlap >= 0.9 and ticket_redlines:
         warnings.append("连续第3+票红线与前序票高度重合，请严查是否偷懒照搬而未针对本票窄化")
 
     return {
         "ok": len(hard_failures) == 0,
         "ticket_seq": ticket_seq,
         "strict_round_mode": strict_round_mode,
-        "redline_overlap_ratio": round(overlap, 3),
+        **redline_context,
         "hard_failures": hard_failures,
         "warnings": warnings,
         "prev_goals": prev_goals,
@@ -650,7 +664,7 @@ def ticket_run(
             doc = t_path.read_text(encoding="utf-8")
             intent_body, red_body = split_document(doc)
             anchors = parse_anchors(intent_body)
-            redlines = collect_redlines(red_body, anchors)
+            redlines = collect_redlines(red_body, anchors, repo)
             portrait = intent_body
 
     if spec["live"]:
@@ -670,7 +684,6 @@ def ticket_run(
         redlines=redlines,
         task_id=task_id,
     )
-    clean_redlines = [str(x).strip() for x in (redlines or []) if str(x).strip()]
     packed: dict[str, Any] = {
         "schema": "ag.ticket-pack.v1",
         "thread_id": thread_id,
@@ -678,7 +691,9 @@ def ticket_run(
         "portrait": portrait,
         "intent_body": intent_body,
         "anchors": list(anchors or []),
-        "redlines": clean_redlines,
+        "redlines": prescreen["redlines"],
+        "standing_redlines": prescreen["standing_redlines"],
+        "ticket_redlines": prescreen["ticket_redlines"],
         "script_digest": prescreen,
     }
     cfg = load_config(repo)
