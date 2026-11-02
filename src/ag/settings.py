@@ -215,6 +215,31 @@ def load_settings(root: Path) -> dict[str, Any]:
     return blob
 
 
+def read_settings(root: Path) -> dict[str, Any]:
+    """Read configured facts without migration, repair, or writes."""
+    from .managed import ChainBroken
+
+    path = settings_path(root)
+    if not path.exists():
+        return {}
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ChainBroken(f"config-error: {path}: {exc}") from exc
+    if not isinstance(blob, dict) or ("critic" in blob and not isinstance(blob["critic"], dict)):
+        raise ChainBroken(f"config-error: invalid config object: {path}")
+    critic = blob.get("critic") or {}
+    for name in ("enabled", "allow_same_family"):
+        if name in critic and not isinstance(critic[name], bool):
+            raise ChainBroken(f"config-error: critic.{name} must be boolean: {path}")
+    for name in ("endpoint", "model", "api_key_env", "worker_model"):
+        if name in critic and not isinstance(critic[name], str):
+            raise ChainBroken(f"config-error: critic.{name} must be a string: {path}")
+    if "timeout" in critic and (isinstance(critic["timeout"], bool) or not isinstance(critic["timeout"], (int, float)) or critic["timeout"] <= 0):
+        raise ChainBroken(f"config-error: critic.timeout must be positive: {path}")
+    return blob
+
+
 def get_section(root: Path, name: str) -> dict[str, Any]:
     blob = load_settings(root)
     sec = blob.get(name)

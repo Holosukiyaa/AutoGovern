@@ -72,6 +72,22 @@ def archived_ticket_docs(root: Path) -> list[Path]:
     return sorted(p for p in folder.glob("*.md") if p.is_file())
 
 
+def archived_ticket_entries(root: Path) -> list[dict[str, Any]]:
+    from .history import read_records
+
+    rows = []
+    for row in read_records(root, kind="ticket"):
+        payload = row["payload"]
+        rows.append({"task_id": row["task_id"], "text": str(payload.get("text") or ""), "ref": f"{row['_source']}#{row['id']}"})
+    for path in archived_ticket_docs(root):
+        rows.append({"task_id": path.stem, "text": path.read_text(encoding="utf-8"), "ref": str(path)})
+    rows.sort(key=lambda row: next((line.removeprefix("updated: ") for line in row["text"].splitlines() if line.startswith("updated: ")), ""))
+    unique = {}
+    for row in rows:
+        unique[row["task_id"]] = row
+    return list(unique.values())
+
+
 def previous_redlines(root: Path) -> list[str]:
     path = copy_path(root)
     if not path.is_file():
@@ -97,11 +113,9 @@ def archive_ticket(root: Path, task_id: str, text: str) -> str:
     tid = str(task_id or "").strip()
     if not tid:
         return ""
-    folder = tickets_dir(root)
-    folder.mkdir(parents=True, exist_ok=True)
-    target = folder / f"{tid}.md"
-    target.write_text(text, encoding="utf-8")
-    return str(target.resolve())
+    from .history import append_fact
+
+    return append_fact(root, "ticket", tid, {"task_id": tid, "text": text})
 
 
 def require_ticket(root: Path) -> str:
@@ -282,6 +296,6 @@ def write_scene(root: Path, task: dict[str, Any], *, process: str, product: str)
     else:
         updated = "".join(lines[:cut]) + block
     path.write_text(updated, encoding="utf-8")
-    if str(task.get("id") or "").strip():
+    if str(task.get("id") or "").strip() and process in {"completed", "abandoned"}:
         archive_ticket(root, str(task.get("id") or ""), updated)
     return updated

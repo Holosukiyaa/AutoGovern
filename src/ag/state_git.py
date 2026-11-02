@@ -28,6 +28,9 @@ cleanup-audit.jsonl
 probe-audit.jsonl
 approvals.jsonl
 migration.jsonl
+history/writer.lock
+history/index.json
+history/*.tmp
 *.bak
 *.bak-*
 """

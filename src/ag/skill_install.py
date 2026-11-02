@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import shutil
+import os
 import sys
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 SKILL_NAMES: tuple[str, ...] = (
@@ -60,12 +63,20 @@ def install_skill(target: str) -> str:
         if not source.is_dir() or not (source / "SKILL.md").is_file():
             raise FileNotFoundError(f"bundled skill missing: {source / 'SKILL.md'}")
         dest = base_dest / name
+        temporary = base_dest / f".{name}.install-{uuid.uuid4().hex}"
+        shutil.copytree(source, temporary)
+        backup = None
         if dest.exists():
             backup = dest.with_name(dest.name + ".bak")
             if backup.exists():
-                shutil.rmtree(backup)
-            shutil.copytree(dest, backup)
-            shutil.rmtree(dest)
-        shutil.copytree(source, dest)
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+                backup = dest.with_name(dest.name + f".bak-{stamp}-{uuid.uuid4().hex[:6]}")
+            os.replace(dest, backup)
+        try:
+            os.replace(temporary, dest)
+        except OSError:
+            if backup is not None and not dest.exists():
+                os.replace(backup, dest)
+            raise
         installed.append(str(dest.resolve()))
     return "\n".join(installed)

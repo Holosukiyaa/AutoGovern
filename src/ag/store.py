@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .managed import ag_home, project_key, real_root
+from .managed import ChainBroken, ag_home, project_key, real_root
 
 # 通用名目录：可能是项目自己的数据（例如某个项目的应用数据就放在这里）。
 # ag 不再往项目里写它，扫描时一律跳过。全仓唯一的字面量。
@@ -60,6 +60,8 @@ def scan_llm_log(root: Path, table: str) -> dict[str, Any]:
     prefix = LLM_PREFIX[table]
     path = llm_log_path(root, table)
     rows: list[dict[str, Any]] = []
+    references: dict[str, str] = {}
+    diagnostics = []
     bad = 0
     top = 0
     text = ""
@@ -67,8 +69,8 @@ def scan_llm_log(root: Path, table: str) -> dict[str, Any]:
     if present:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            text = ""
+        except OSError as exc:
+            raise ChainBroken(f"history-source-error: {path}: {exc}") from exc
     for line in text.splitlines():
         if not line.strip():
             continue
@@ -81,17 +83,36 @@ def scan_llm_log(root: Path, table: str) -> dict[str, Any]:
             bad += 1
             continue
         rows.append(row)
+        references[str(row.get("report_id") or "")] = f"{path}#{row.get('report_id') or ''}"
         seq = _report_seq(row.get("report_id"), prefix)
         if seq > top:
             top = seq
-    return {"path": str(path), "present": present, "rows": rows, "bad_lines": bad, "top_seq": top}
+    from .history import read_records
+
+    for archived in read_records(root, kind=table):
+        row = archived["payload"]
+        if row.get("task_id") != archived["task_id"]:
+            diagnostics.append({"kind": "wrong-task", "source": archived["_source"], "expected_task_id": archived["task_id"], "task_id": row.get("task_id"), "report_id": row.get("report_id")})
+            continue
+        rows.append(row)
+        references[str(row.get("report_id") or "")] = f"{archived['_source']}#{archived['id']}"
+    unique = {}
+    for number, row in enumerate(rows):
+        identity = str(row.get("report_id") or f"unidentified-{number}")
+        if identity in unique and unique[identity] != row:
+            raise ChainBroken(f"history-identity-conflict: {table}/{identity}")
+        unique[identity] = row
+        top = max(top, _report_seq(row.get("report_id"), prefix))
+    rows = sorted(unique.values(), key=lambda row: (_report_seq(row.get("report_id"), prefix), str(row.get("ts") or "")))
+    return {"path": str(path), "present": present or bool(rows), "rows": rows, "bad_lines": bad, "top_seq": top, "refs": references, "diagnostics": diagnostics}
 
 
-def list_llm_events(root: Path, table: str, limit: int = 20) -> list[dict[str, Any]]:
-    cap = int(limit) if limit else 20
+def list_llm_events(root: Path, table: str, limit: int = 20, *, task_id: str = "", report_id: str = "", candidate: str = "") -> list[dict[str, Any]]:
+    cap = int(limit)
     if cap < 0:
         cap = 20
     rows = scan_llm_log(root, table)["rows"]
+    rows = [row for row in rows if (not task_id or row.get("task_id") == task_id) and (not report_id or row.get("report_id") == report_id) and (not candidate or row.get("candidate") == candidate)]
     return rows[-cap:] if cap > 0 else rows
 
 
@@ -130,21 +151,55 @@ def latest_timeline_path(root: Path, task_id: str = "") -> Path | None:
 
 
 def load_task_timeline(root: Path, task_id: str = "") -> dict[str, Any]:
+    from .history import read_records
+
+    archived = read_records(root, task_id=task_id)
+    if not task_id:
+        identified = [row for row in archived if row["kind"] in {"timeline", "task-step"}]
+        if identified:
+            task_id = identified[-1]["task_id"]
+            archived = [row for row in archived if row["task_id"] == task_id]
     path = latest_timeline_path(root, task_id)
-    empty: dict[str, Any] = {"task_id": str(task_id or ""), "steps": [], "path": str(path or "")}
-    if path is None or not path.is_file():
-        return empty
-    try:
-        blob = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return empty
-    if not isinstance(blob, dict):
-        return empty
-    steps = blob.get("steps")
+    blob: dict[str, Any] = {}
+    diagnostics = []
+    for row in archived:
+        if row["kind"] == "timeline":
+            if row["payload"].get("task_id") != task_id:
+                diagnostics.append({"kind": "wrong-task", "source": row["_source"], "expected_task_id": task_id, "task_id": row["payload"].get("task_id")})
+            else:
+                blob = dict(row["payload"])
+    if path is not None and path.is_file():
+        try:
+            blob = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ChainBroken(f"history-source-error: {path}: {exc}") from exc
+        if not isinstance(blob, dict):
+            raise ChainBroken(f"history-source-error: expected timeline object: {path}")
+    if blob.get("task_id") and blob["task_id"] != task_id:
+        diagnostics.append({"kind": "wrong-task", "source": str(path), "expected_task_id": task_id, "task_id": blob["task_id"]})
+        blob = {}
+    steps = blob.get("steps") or []
+    if not isinstance(steps, list) or any(not isinstance(step, dict) for step in steps):
+        raise ChainBroken(f"history-source-error: invalid timeline steps: {path}")
+    steps = list(steps)
+    for row in archived:
+        if row["kind"] == "task-step" and row["payload"] not in steps:
+            steps.append(row["payload"])
+    valid_steps = []
+    for step in steps:
+        if step.get("task_id", task_id) != task_id:
+            diagnostics.append({"kind": "wrong-task", "source": str(path or project_dir(root) / "history"), "expected_task_id": task_id, "task_id": step.get("task_id")})
+        else:
+            valid_steps.append(step)
+    steps = valid_steps
+    steps.sort(key=lambda row: str(row.get("ts") or ""))
     return {
-        "task_id": str(blob.get("task_id") or path.stem),
-        "steps": steps if isinstance(steps, list) else [],
-        "path": str(path),
+        **blob,
+        "task_id": str(task_id or blob.get("task_id") or ""),
+        "steps": steps,
+        "path": str(path or project_dir(root) / "history"),
+        "found": bool(blob or steps),
+        "diagnostics": diagnostics,
     }
 
 
@@ -160,52 +215,24 @@ def append_task_step(root: Path, task_id: str, phase: str, **fields: Any) -> Pat
     tid = str(task_id or "").strip()
     if not tid:
         return None
-    path = timeline_path(root, tid)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        blob: dict[str, Any] = {"task_id": tid, "steps": []}
-        if path.is_file():
-            try:
-                raw = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(raw, dict):
-                    blob = raw
-            except (OSError, json.JSONDecodeError):
-                pass
-        steps = blob.get("steps")
-        if not isinstance(steps, list):
-            steps = []
-        step: dict[str, Any] = {
-            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "phase": str(phase),
-        }
-        for key, value in fields.items():
-            if value is None:
-                continue
-            step[key] = value
-        steps.append(step)
-        blob["task_id"] = tid
-        blob["steps"] = steps
-        path.write_text(json.dumps(blob, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        return path
-    except OSError:
-        return None
+    from .history import append_fact
+
+    step = {"ts": datetime.now(timezone.utc).isoformat(), "phase": str(phase), "task_id": tid}
+    step.update({key: value for key, value in fields.items() if value is not None})
+    reference = append_fact(root, "task-step", tid, step)
+    return Path(reference.split("#", 1)[0])
 
 
 def append_llm_log(root: Path, table: str, row: dict[str, Any]) -> str:
     """The only writer. Append to the jsonl master and mint the next report id from it."""
     prefix = LLM_PREFIX[table]
-    try:
-        scan = scan_llm_log(root, table)
-        seq = max(int(scan["top_seq"]), len(scan["rows"])) + 1
-        report_id = f"{prefix}-{seq}"
-        row["report_id"] = report_id
-        path = Path(str(scan["path"]))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8", newline="\n") as handle:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-        return report_id
-    except OSError:
-        return ""
+    from .history import append_fact
+
+    scan = scan_llm_log(root, table)
+    if scan["bad_lines"]:
+        raise ChainBroken(f"history-source-error: malformed review events: {scan['path']}")
+    append_fact(root, table, str(row.get("task_id") or ""), row, number_prefix=prefix, floor=max(int(scan["top_seq"]), len(scan["rows"])))
+    return str(row["report_id"])
 
 
 def pending_path(root: Path) -> Path:

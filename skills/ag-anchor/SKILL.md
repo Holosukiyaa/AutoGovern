@@ -13,6 +13,14 @@ description: >
 
 意图锚点（Intent Anchors）用于把用户一句话需求背后隐含的完整业务路线显式化，而不是把它变成死板的步骤清单。`ag` 将意图锚点与红线持久化在任务状态中，AI 必须在开票前、施工中和交卷验货前始终对齐锚点。
 
+## 保持完整交付主线
+
+恢复工作先读 `python -m ag delivery <PROJECT_ROOT> --task-id <TASK_ID>`（MCP：`ag_delivery`）。以 `goal` 和 `remaining` 对齐结果，再根据 `blockers`、`advisories`、`next_action` 继续。读取、开始某步、移动注意力或验证失败都不算已完成；`progress.verified` 必须关联本票报告、候选和实际检查。
+
+完整功能可以跨必要模块并在一票内分阶段实现。普通路线调整说明原因即可，可用 `ag route <PROJECT_ROOT> --reason "原因"` 留痕；减少承诺或冲突硬边界须用 `--requires-decision` 保留待用户决定状态，不能自行缩小目标。真正独立交付的后续工作才用 `ag start --continuation-of <TASK_ID> --contribution "当前贡献"`，携带共同目标与未完成结果；不会自动把所有票连成一条主线。
+
+票面只在 `<AG_HOME>/projects/<key>/ticket.md`。向用户展示完整预览后，由用户亲自执行 `python -m ag confirm-map <PROJECT_ROOT>`；AI 不得代调 CLI 或 MCP。确认报出 `ready` 才代表权限实际恢复，已批准但冻结或解冻失败时继续排障，不开始施工。项目累计票数不提高审查强度；常设条款由可信知识库加载，不能在票面自封来源。
+
 ## 关联技能包与路径占位符约定
 
 按职责查阅对应的独立 Skill：

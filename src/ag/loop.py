@@ -93,7 +93,15 @@ def save_task(key: str, task: dict[str, Any] | None) -> None:
         if path.is_file():
             path.unlink()
         return
-    path.write_text(json.dumps(task, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(task, ensure_ascii=False, indent=2) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _hooks_dir(key: str) -> Path:
@@ -134,6 +142,8 @@ def _write_hook(key: str, enrolled: Path | None = None) -> Path:
     )
     for name in ("pre-commit", "prepare-commit-msg"):
         path = folder / name
+        if path.is_file() and path.read_text(encoding="utf-8") == body:
+            continue
         path.write_text(body, encoding="utf-8")
         try:
             os.chmod(path, 0o755)
@@ -191,7 +201,8 @@ def _write_mcp_entry() -> Path:
     folder = ag_home() / "bin"
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / MCP_ENTRY_NAME
-    path.write_text(MCP_ENTRY_BODY, encoding="utf-8")
+    if not path.is_file() or path.read_text(encoding="utf-8") != MCP_ENTRY_BODY:
+        path.write_text(MCP_ENTRY_BODY, encoding="utf-8")
     return path
 
 
@@ -336,11 +347,11 @@ def _product(test_argv: list[str], verify: dict[str, Any] | None) -> str:
         return "failed"
     if not verify or "exit" not in verify:
         return "pending"
-    if test_argv and int(verify["exit"]) != 0:
+    if int(verify["exit"]) != 0:
         return "failed"
     if _switch_block_message(verify):
         return "failed"
-    if not test_argv:
+    if bool(verify.get("undeclared", not test_argv)):
         return "undeclared"
     return "passed"
 
@@ -559,12 +570,12 @@ def _onboarding_status(
     try:
         from .critic import config_guide
 
-        guide = config_guide(root, ensure_file=False)
+        guide = config_guide(root, ensure_file=False, read_only=True)
     except Exception:
         try:
             from .critic import DEFAULT_API_KEY_ENV, config_path, config_template, load_config
 
-            cfg = load_config(root)
+            cfg = load_config(root, read_only=True)
             api_key_env = str(cfg.get("api_key_env") or DEFAULT_API_KEY_ENV)
             api_key_present = bool(os.environ.get(api_key_env, "").strip())
             enabled = bool(cfg.get("enabled"))
@@ -593,7 +604,7 @@ def _onboarding_status(
         if bool(tr.get("configured")) and str(tr.get("outcome") or "").strip().casefold() not in {"passed", "pass", "allow"}:
             next_step = "3. 开票审票未通过（ticket-review-rejected）：请根据 ticket_review.doubts 修改 <AG_HOME>/projects/<key>/ticket.md，然后再次调用 ag_start 原地重封存并重审。"
         else:
-            next_step = "3. 工作树已冻结：请将 anchor_preview（<AG_HOME>/projects/<key>/ticket.md 全文）展示给用户审阅；待用户明确回复“确认”后，调用 confirm-map 解冻工作树。"
+            next_step = "3. 展示完整 anchor_preview，请用户亲自执行 python -m ag confirm-map <PROJECT_ROOT>；AI 不得代执行。"
     elif not task.get("verified_tree"):
         next_step = "4. 工作树已解冻：请仅在 worktree 目录内修改代码，并在 worktree/.ag-check/ 下编写本票一次性自检脚本，完成后调用 ag_verify。"
     else:
@@ -630,15 +641,7 @@ def status(root: Path) -> dict[str, Any]:
             "[下一步] 请先在主仓根目录执行 ag_enroll"
         )
     key = str(item.get("key") or project_key(root))
-    try:
-        from .upgrade import ensure_upgraded
-
-        ensure_upgraded(root)
-    except Exception as exc:
-        usage_note(root, "ship", 9, "help", f"upgrade skipped: {exc.__class__.__name__}")
-    _ensure_hook_files(key, root)
-    _write_mcp_entry()
-    exclude_info = ensure_local_excludes(root)
+    exclude_info: dict[str, Any] = {}
     test_argv = [str(x) for x in (item.get("test_argv") or [])]
     task = load_task(key)
     verify = task.get("verify") if isinstance(task, dict) else None
@@ -673,7 +676,7 @@ def status(root: Path) -> dict[str, Any]:
         "product": product,
         "reminder": "process complete is not product passed",
         "worker_note": "After ag_verify cite critic.report_id and switch.report_id. No report bodies. Switch is the finish gate; critic is not.",
-        "intent_gate": "STOP: show anchor_preview to the user; the file is <AG_HOME>/projects/<key>/ticket.md at anchor_preview_path. Wait for explicit user approval, then run confirm-map.",
+        "intent_gate": "User must run confirm-map after reviewing anchor_preview; AI must not call it." if task and not task.get("intent_map_confirmed") else "Continue the confirmed goal in the active worktree.",
         "task": task,
         "ticket_review": (task or {}).get("ticket_review") if task else None,
         "portrait": (task or {}).get("portrait") if task else "",
@@ -689,56 +692,41 @@ def status(root: Path) -> dict[str, Any]:
             "min_workers": 1,
             "max_workers": 3,
             "contract": "ag.worker.task.v1 / ag.worker.result.v1",
-            "note": "Show the anchor preview to the user, run confirm-map only after user approval, then create 1-3 workers. Workers write only their isolated worktree and cannot finish or merge.",
+            "note": "Workers are optional after the user personally confirms the map. Workers cannot finish or merge.",
         },
     }
     if task:
         out["dropped_redlines"] = list(task.get("dropped_redlines") or [])
-        try:
-            from .ticket_doc import ticket_path, write_scene
-
-            preview = write_scene(root, task, process=str(process), product=str(product))
-            if preview is not None:
-                preview_path = ticket_path(root).resolve()
-                task["anchor_map_path"] = str(preview_path)
-                task["anchor_preview_path"] = str(preview_path)
-                task["anchor_preview"] = preview
-                save_task(key, task)
-                out["anchor_map_path"] = task["anchor_map_path"]
-                out["anchor_preview_path"] = task["anchor_preview_path"]
-                out["anchor_preview"] = preview
-                out["current_anchor"] = task.get("current_anchor") or ""
-                out["fixed"] = list(task.get("fixed") or [])
-                out["fixed_rules"] = list(task.get("fixed_rules") or [])
-                # feed the cumulative project redlines to whoever writes the next ticket
-                try:
-                    from .knowledge import load_active_redlines
-
-                    hist = load_active_redlines(root)
-                    out["project_redlines"] = hist
-                    task["project_redlines"] = hist
-                    save_task(key, task)
-                except Exception:
-                    out["project_redlines"] = []
-                out["intent_map_confirmed"] = bool(task.get("intent_map_confirmed"))
-                out["subagent"]["ready"] = bool(task.get("intent_map_confirmed"))
-        except Exception:
-            pass
+        out["anchor_preview"] = str(task.get("anchor_preview") or "")
+        out["anchor_preview_path"] = str(task.get("anchor_preview_path") or "")
+        out["current_anchor"] = task.get("current_anchor") or ""
+        out["fixed"] = list(task.get("fixed") or [])
+        out["fixed_rules"] = list(task.get("fixed_rules") or [])
+        out["intent_map_confirmed"] = bool(task.get("intent_map_confirmed"))
+        out["subagent"]["ready"] = bool(task.get("intent_map_confirmed")) and bool(task.get("worktree_ready"))
         if not bool(task.get("intent_map_confirmed")):
             from .anchor_brief import anchor_guidance
 
             issued = bool(task.get("anchor_template_issued"))
             out.update(anchor_guidance(issued))
-            if not issued:
-                task["anchor_template_issued"] = True
-                save_task(key, task)
     out["onboarding"] = _onboarding_status(root, task=task, exclude_info=exclude_info)
-    try:
-        from .see import run as see_run
+    from .delivery import build_delivery_snapshot
 
-        out["see"] = see_run(root)
-    except Exception:
-        pass
+    out["delivery"] = build_delivery_snapshot(root, str((task or {}).get("id") or ""))
+    out["readiness"] = out["delivery"]["readiness"]
+    out["next_action"] = out["delivery"]["next_action"]
+    if task:
+        out["onboarding"]["next_action"] = out["delivery"]["next_action"]
+        out["onboarding"]["next_step"] = {
+            "user-confirm-map": "展示完整票面，由用户亲自执行 confirm-map；AI 不得代调。",
+            "recover-thaw": "已批准尚未有成功解冻记录，核对权限后由用户重试原票 confirm-map。",
+            "revise-ticket-and-start": "按本票拒绝证据修票，再 start 原地重审。",
+            "await-user-decision": "保留完整目标和未完成项，承诺或硬边界变化等待用户决定。",
+            "implement-and-verify": "在批准工作树继续完整功能，完成本票 .ag-check 检查后 verify。",
+            "finish": "本候选有成功验据，核对完整结果后 finish。",
+            "retry-cleanup": "保留任务，排除占用后重试原 finish/abandon 清理。",
+        }.get(out["next_action"], "按 delivery.blockers 中的证据与 next_action 修复后重试。")
+        out["subagent"]["ready"] = out["readiness"] == "ready"
     try:
         from .knowledge import load_insights
 
@@ -756,6 +744,7 @@ def _run_ticket_review(
     anchors: list[dict[str, Any]],
     redlines: list[str],
     task_id: str,
+    goal_link: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
         from .seat import attach_ticket_review
@@ -774,6 +763,7 @@ def _run_ticket_review(
         anchors=anchors,
         redlines=redlines,
         task_id=task_id,
+        goal_link=goal_link,
     )
 
 
@@ -785,6 +775,8 @@ def start(
     guards: list[str] | None = None,
     defaults: list[str] | None = None,
     fixed: list[str] | None = None,
+    continuation_of: str = "",
+    contribution: str = "",
 ) -> dict[str, Any]:
     """Open a worktree. Tracked canonical files stay frozen until finish or abandon.
 
@@ -792,6 +784,9 @@ def start(
     user-write bit. Either mechanism is friction, not an absolute security boundary.
     """
     ensure_local_excludes(root)
+    from .upgrade import ensure_upgraded
+
+    ensure_upgraded(root)
     state = status(root)
     root = Path(state["root"])
     key = str(state["key"])
@@ -827,6 +822,13 @@ def start(
 
     existing = load_task(key)
     if existing and Path(str(existing.get("worktree") or "")).is_dir():
+        if existing.get("intent_map_confirmed"):
+            from .authorization import validate_ticket
+
+            validate_ticket(root, existing)
+            if (fixed is not None and list(fixed) != list(existing.get("fixed") or [])) or (portrait and portrait != existing.get("portrait")):
+                raise ChainBroken("await-user-decision: confirmed result changed; preserve the existing goal")
+            return status(root)
         existing_wt = Path(str(existing.get("worktree") or ""))
         if not bool(existing.get("intent_map_confirmed")) and ticket_path(root).is_file():
             document = require_ticket(root)
@@ -890,6 +892,7 @@ def start(
                 anchors=task_anchors,
                 redlines=redlines,
                 task_id=task_id,
+                goal_link=existing.get("goal_link"),
             )
             existing["ticket_review"] = ticket_review
             preview = write_scene(root, existing, process="active", product="pending") or preview
@@ -897,6 +900,10 @@ def start(
             existing["anchor_map_path"] = doc_path
             existing["anchor_preview_path"] = doc_path
             existing["anchor_preview"] = preview
+            from .authorization import bind_ticket
+            from .delivery import task_facts
+
+            bind_ticket(root, existing)
             save_task(key, existing)
             append_task_step(
                 root,
@@ -904,6 +911,7 @@ def start(
                 "re-seal",
                 ticket_review_outcome=str(ticket_review.get("outcome") or ""),
                 report_id=str(ticket_review.get("report_id") or ""),
+                task=task_facts(existing),
             )
         try:
             freeze_canonical(root)
@@ -914,7 +922,7 @@ def start(
             raise
         return status(root)
     if existing:
-        save_task(key, None)
+        raise ChainBroken("worktree-missing: task and goal retained; recover the worktree or abandon before starting another ticket")
     if not _is_canonical(root):
         raise ChainBroken(
             "start from the canonical checkout "
@@ -929,6 +937,15 @@ def start(
             "[下一步] 请先切换回具名分支（如 git switch main/master）后再调用 ag_start"
         )
     chosen = str(portrait or "")
+    goal_link = None
+    if continuation_of:
+        from .delivery import build_delivery_snapshot
+
+        previous = build_delivery_snapshot(root, continuation_of)
+        if not previous.get("found") or previous.get("active") or not previous.get("goal", {}).get("confirmed"):
+            raise ChainBroken("invalid-continuation: expected a closed, confirmed predecessor")
+        parent_link = previous.get("goal_link") or {}
+        goal_link = {"task_id": continuation_of, "common_goal": parent_link.get("common_goal") or previous["goal"], "contribution": contribution or chosen, "remaining": previous["remaining"]}
     document = require_ticket(root)
     intent_body, redline_body = split_document(document)
     caller_anchors = None if anchors is None else [dict(item) for item in anchors if isinstance(item, dict)]
@@ -980,6 +997,7 @@ def start(
         anchors=task_anchors,
         redlines=redlines,
         task_id=task_id,
+        goal_link=goal_link,
     )
     doc_path = str(ticket_path(root).resolve())
     task_blob: dict[str, Any] = {
@@ -1003,31 +1021,15 @@ def start(
         "ticket_review": ticket_review,
         "verified_tree": "",
         "verify": None,
+        "goal_link": goal_link,
     }
     preview = write_scene(root, task_blob, process="active", product="pending") or preview
     task_blob["anchor_preview"] = preview
+    from .authorization import bind_ticket
+    from .delivery import build_delivery_snapshot, task_facts
+
+    bind_ticket(root, task_blob)
     save_task(key, task_blob)
-    # Auto-register this ticket's self-check so verify (which reads the enrolled
-    # test_argv) runs the CURRENT ticket's script, not the previous one. Only when
-    # the worktree's .ag-check/ holds exactly ONE check_*.py; zero or several leave
-    # the enrolled argv untouched (never guess). Touches only this project's
-    # test_argv field via the existing managed-store helpers.
-    discovered = sorted(
-        item.name
-        for item in (worktree / ".ag-check").glob("check_*.py")
-        if item.is_file()
-    ) if (worktree / ".ag-check").is_dir() else []
-    if len(discovered) == 1:
-        blob = load_managed()
-        wanted = str(root)
-        for row in blob["projects"]:
-            if not isinstance(row, dict):
-                continue
-            stored = str(row.get("real") or row.get("root") or "")
-            if stored and str(real_root(Path(stored))) == wanted:
-                row["test_argv"] = ["python", "-X", "utf8", ".ag-check/" + discovered[0]]
-                save_managed(blob)
-                break
     try:
         freeze_canonical(root)
         freeze_worktree(worktree)
@@ -1037,7 +1039,7 @@ def start(
         raise
     usage_note(root, "ship", 2, "help", "opened")
     line = (chosen.strip().splitlines() or [""])[0][:80]
-    append_task_step(root, task_id, "start", portrait_line=line, worktree=str(worktree))
+    append_task_step(root, task_id, "start", portrait_line=line, worktree=str(worktree), task=task_facts(task_blob))
     state = status(root)
     append_task_step(root, task_id, "anchor-preview", anchor_map_path=str(state.get("anchor_map_path") or ""), audit_anchor_map_path=str((state.get("task") or {}).get("audit_anchor_map_path") or ""), anchor_preview=str(state.get("anchor_preview") or ""), audit_anchor_preview_path=str((state.get("task") or {}).get("audit_anchor_preview_path") or ""))
     return state
@@ -1095,7 +1097,7 @@ def verify(root: Path) -> dict[str, Any]:
         reason = (
             "intent-map-unconfirmed: ag_verify refused; user must confirm the anchor map first "
             "[原因] 尚未由用户确认意图锚点预览（工作树仍处于冻结态） "
-            "[下一步] 请先向用户展示 anchor_preview（<AG_HOME>/projects/<key>/ticket.md 全文），待用户明确回复“确认”后调用 confirm-map，再执行 ag_verify"
+            "[下一步] 展示 anchor_preview 全文，由用户亲自执行 confirm-map 后再执行 ag_verify；AI 不得代调"
         )
         task["verify"] = {"exit": 1, "stderr": reason, "refused": "intent-map-unconfirmed"}
         task["verified_tree"] = ""
@@ -1104,6 +1106,9 @@ def verify(root: Path) -> dict[str, Any]:
         append_task_step(root, str(task.get("id") or ""), "verify-refused", reason=reason, refused="intent-map-unconfirmed")
         raise ChainBroken(reason)
     worktree = Path(str(task.get("worktree") or ""))
+    from .authorization import require_construction
+
+    require_construction(Path(state["root"]), task)
     if not worktree.is_dir():
         raise ChainBroken(
             f"worktree missing: {worktree} "
@@ -1115,7 +1120,11 @@ def verify(root: Path) -> dict[str, Any]:
     task_id = str(task.get("id") or "")
     enrolled = Path(state["root"])
     ensure_start_step(enrolled, task_id, task.get("portrait"), worktree)
-    test_argv = [str(x) for x in (state.get("test_argv") or [])]
+    from .checks import run as run_checks, selection
+
+    chosen_checks = selection(worktree, [str(x) for x in (state.get("test_argv") or [])])
+    test_argv = chosen_checks["commands"]
+    candidate_before = tree_digest(worktree)
     untracked = [
         ln.strip()
         for ln in git(worktree, "ls-files", "-o", "--exclude-standard", check=False).splitlines()
@@ -1123,29 +1132,8 @@ def verify(root: Path) -> dict[str, Any]:
     ]
     timings: dict[str, float] = {}
     t0 = time.perf_counter()
-    record: dict[str, Any] = {
-        "exit": 0,
-        "stdout": "",
-        "stderr": "",
-        "undeclared": not test_argv,
-        "untracked": untracked[:50],
-    }
     t_tests = time.perf_counter()
-    if test_argv:
-        completed = subprocess.run(
-            test_argv,
-            cwd=str(worktree),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        record = {
-            "exit": int(completed.returncode),
-            "stdout": (completed.stdout or "")[-4000:],
-            "stderr": (completed.stderr or "")[-4000:],
-            "undeclared": False,
-            "untracked": untracked[:50],
-        }
+    record = {**run_checks(worktree, chosen_checks), "untracked": untracked[:50], "task_id": task_id, "candidate": candidate_before}
     timings["tests_s"] = round(time.perf_counter() - t_tests, 3)
     append_task_step(enrolled, task_id, "verify-tests", seconds=timings["tests_s"])
     paths = _ticket_paths(worktree, str(task.get("source_head") or ""))
@@ -1222,6 +1210,7 @@ def verify(root: Path) -> dict[str, Any]:
         probe_red=probe_red,
         critic=None,
         tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
+        verification={"task_id": task_id, "candidate": candidate_before, "check_selection": chosen_checks, **record["evidence"]},
         redlines=sealed_redlines,
         source_head=str(task.get("source_head") or ""),
     )
@@ -1269,12 +1258,17 @@ def verify(root: Path) -> dict[str, Any]:
     record["evidence"]["current_anchor"] = task.get("current_anchor") or ""
     record["evidence"]["timings"] = dict(timings)
     digest = tree_digest(worktree)
-    route_anchors = [item for item in (task.get("anchors") or []) if isinstance(item, dict) and str(item.get("kind") or "soft") not in {"blocking", "avoid"}]
-    task["current_anchor"] = str((route_anchors[-1] if route_anchors else {}).get("id") or "")
+    if digest != candidate_before or selection(worktree, [str(x) for x in (state.get("test_argv") or [])])["sha256"] != chosen_checks["sha256"]:
+        record["exit"] = 1
+        record["stderr"] += "\ncandidate-changed: code or checks changed during verification"
     task["verify"] = record
-    task["verified_tree"] = digest if record["exit"] == 0 else ""
+    task["verified_tree"] = digest if record["exit"] == 0 and not record["probe_red"] and not _switch_block_message(record) else ""
+    task["check_argv"] = test_argv
     record["evidence"]["verified_tree"] = task["verified_tree"]
     save_task(key, task)
+    from .delivery import task_facts
+
+    append_task_step(enrolled, task_id, "verify-result", verify=record, task=task_facts(task))
     if record.get("undeclared"):
         usage_note(root, "ship", 1, "help", "verify without tests")
     elif record["exit"] == 0:
@@ -1342,8 +1336,18 @@ def verify(root: Path) -> dict[str, Any]:
 
 
 def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
-    state = status(root)
-    key = str(state["key"])
+    started = time.perf_counter()
+    stages = []
+    def stage(name: str) -> None:
+        elapsed = round(time.perf_counter() - started, 3)
+        stages.append({"stage": name, "seconds": elapsed})
+        print(f"ag confirm-map: {name} ({elapsed:.3f}s)", file=sys.stderr, flush=True)
+    stage("checking-authority")
+    root = real_root(root)
+    item = lookup_project(root)
+    if not item:
+        raise ChainBroken(f"not-enrolled: {root}")
+    key = str(item.get("key") or project_key(root))
     task = load_task(key)
     if not task:
         raise ChainBroken(
@@ -1351,62 +1355,132 @@ def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
             "[原因] 当前没有进行中的票据任务 "
             "[下一步] 请先编写 <AG_HOME>/projects/<key>/ticket.md 并调用 ag_start"
         )
-    if not bool(task.get("intent_map_confirmed")):
-        tr = task.get("ticket_review") if isinstance(task.get("ticket_review"), dict) else {}
-        if bool(tr.get("configured")) and str(tr.get("outcome") or "").strip().casefold() not in {"passed", "pass", "allow"}:
-            usage_note(root, "ship", 13, "block", "confirm-map ticket review rejected")
-            append_task_step(
-                root,
-                str(task.get("id") or ""),
-                "confirm-map-refused",
-                reason=str(tr.get("reason") or "ticket-review-rejected"),
-                report_id=str(tr.get("report_id") or ""),
-            )
-            raise ChainBroken(
-                f"ticket-review-rejected: startup ticket failed review ({tr.get('reason') or tr.get('report_id') or tr.get('outcome')}); "
-                "revise <AG_HOME>/projects/<key>/ticket.md and run ag_start to re-seal before confirm-map "
-                "[原因] 开票审票（DS 首轮审票）未通过 "
-                "[下一步] 请根据 ticket_review.doubts 修改 <AG_HOME>/projects/<key>/ticket.md，再次调用 ag_start 原地重封存并重审通过后再执行 confirm-map"
-            )
-        if bool(tr.get("configured")):
-            usage_note(root, "ship", 13, "help", "ticket review passed")
-        by_text = str(by or "").strip()
-        confirmed_at = ""
-        if by_text:
-            confirmed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            task["intent_map_confirmed_by"] = by_text
-            task["intent_map_confirmed_at"] = confirmed_at
+    from .authorization import validate_ticket
+    from .delivery import build_delivery_snapshot
+    from .freeze import _tracked_files, assert_frozen
+
+    identity = validate_ticket(root, task)
+    if not _hook_ok(root, key):
+        raise ChainBroken("hook-removed: enroll to repair the canonical gate")
+    if _dirty(root):
+        raise ChainBroken("canonical-dirty: clean canonical before confirmation")
+    if git(root, "rev-parse", "HEAD") != task.get("source_head") or git(root, "symbolic-ref", "--short", "HEAD") != task.get("branch"):
+        raise ChainBroken("intent-identity-changed: canonical candidate or branch changed")
+    worktree = Path(str(task.get("worktree") or ""))
+    expected = (ag_home() / "worktrees" / key / str(task["id"])).resolve()
+    if worktree.resolve() != expected or not worktree.is_dir():
+        raise ChainBroken("intent-identity-changed: worktree identity changed or missing")
+    registered = git(root, "worktree", "list", "--porcelain")
+    if not any(block.splitlines()[0] == "worktree " + _posix(worktree.resolve()) and f"branch refs/heads/ag/{task['id']}" in block.splitlines() and (task.get("intent_map_confirmed") or f"HEAD {task['source_head']}" in block.splitlines()) for block in registered.strip().split("\n\n")):
+        raise ChainBroken("intent-identity-changed: worktree registration changed")
+    canonical_files = _tracked_files(root)
+    try:
+        assert_frozen(canonical_files)
+    except OSError as exc:
+        raise ChainBroken(f"canonical-freeze-missing: {exc}") from exc
+    worktree_files = _tracked_files(worktree)
+    if not task.get("intent_map_confirmed"):
+        task["intent_map_confirmed_at"] = datetime.now(timezone.utc).isoformat()
+        task["intent_map_confirmed_by"] = str(by or "user-cli")
         task["intent_map_confirmed"] = True
+        task["authorization_identity"] = identity
+        task["intent_identity"] = identity
+        task["worktree_ready"] = False
         save_task(key, task)
-        append_task_step(root, str(task.get("id") or ""), "intent-map-confirmed", by=by_text or None)
-        if by_text:
-            append_project_jsonl(
-                root,
-                "approvals.jsonl",
-                {
-                    "t": confirmed_at,
-                    "key": key,
-                    "task": str(task.get("id") or ""),
-                    "by": by_text,
-                },
-            )
-        worktree = Path(str(task.get("worktree") or ""))
-        thaw_worktree(worktree)
-    return status(root)
+        append_task_step(root, task["id"], "intent-map-confirmed", by=task["intent_map_confirmed_by"], intent_identity=identity)
+    stage("approval-recorded")
+    try:
+        stage("thawing-worktree")
+        thaw_worktree(worktree, files=worktree_files)
+        append_task_step(root, task["id"], "worktree-ready", intent_identity=identity)
+        task["worktree_ready"] = True
+        task.pop("thaw_error", None)
+        save_task(key, task)
+    except (OSError, ChainBroken) as exc:
+        task["worktree_ready"] = False
+        task["thaw_error"] = str(exc)
+        record_error = ""
+        try:
+            save_task(key, task)
+            append_task_step(root, task["id"], "thaw-failed", error=str(exc))
+        except (OSError, ChainBroken) as failure:
+            record_error = f"; failure record could not be saved: {failure}"
+        stage("thaw-failed")
+        raise ChainBroken(f"thaw-failed: approval retained; retry confirm-map after repairing permissions: {exc}{record_error}") from exc
+    stage("ready")
+    return {"schema": "ag.confirm-map.v2", "root": str(root), "key": key, "intent_map_confirmed": True, "readiness": "ready", "worktree": str(worktree), "task": task, "delivery": build_delivery_snapshot(root, task["id"]), "stages": stages}
 
 
 def _cleanup(root: Path, task: dict[str, Any]) -> None:
     worktree = Path(str(task.get("worktree") or ""))
     task_id = str(task.get("id") or "")
-    thaw_worktree(worktree)
-    if worktree.name:
-        side = worktree.parent / f"{worktree.name}.artifacts"
-        if side.is_dir():
-            shutil.rmtree(side, ignore_errors=True)
-    if worktree.is_dir():
-        git(root, "worktree", "remove", "--force", str(worktree), check=False)
-    if task_id:
-        git(root, "branch", "-D", f"ag/{task_id}", check=False)
+    container = (ag_home() / "worktrees" / project_key(root)).resolve()
+    expected = container / task_id
+    if not task_id or worktree.resolve() != expected or not worktree.resolve().is_relative_to(container):
+        raise ChainBroken("cleanup-pending: worktree path is outside this task's managed container")
+    side = container / f"{task_id}.artifacts"
+    if side.resolve().parent != container:
+        raise ChainBroken("cleanup-pending: artifact path escapes the managed container")
+    registration = git(root, "worktree", "list", "--porcelain")
+    registered = "worktree " + _posix(worktree.resolve()) in registration.splitlines()
+    if worktree.is_dir() and (worktree / ".git").exists():
+        thaw_worktree(worktree)
+    if registered:
+        git(root, "worktree", "remove", "--force", str(worktree))
+    elif worktree.is_dir():
+        shutil.rmtree(worktree)
+    if worktree.exists() or "worktree " + _posix(worktree.resolve()) in git(root, "worktree", "list", "--porcelain").splitlines():
+        raise ChainBroken("cleanup-pending: worktree removal incomplete")
+    if side.is_dir():
+        shutil.rmtree(side)
+    reference = f"refs/heads/ag/{task_id}"
+    if git_run(root, "show-ref", "--verify", "--quiet", reference).returncode == 0:
+        git(root, "branch", "-D", f"ag/{task_id}")
+
+
+def _close_task(root: Path, key: str, task: dict[str, Any], *, process: str, product: str, head: str = "") -> dict[str, Any]:
+    from .delivery import build_delivery_snapshot, task_facts
+    from .knowledge import archive_session
+    from .ticket_doc import write_scene
+
+    task["process"] = process
+    task["close_product"] = product
+    if head:
+        task["merged_head"] = head
+    save_task(key, task)
+    if not task.get("close_recorded"):
+        worktree = Path(str(task.get("worktree") or ""))
+        touched = _ticket_paths(worktree, str(task.get("source_head") or "")) if worktree.is_dir() else []
+        verify_blob = task.get("verify") if isinstance(task.get("verify"), dict) else None
+        try:
+            write_scene(root, task, process=process, product=product)
+            archive_session(root, task, verify=verify_blob, touched=touched, check_exit=(verify_blob or {}).get("exit"), process=process, product=product)
+            append_task_step(root, task["id"], "finish" if process == "completed" else "abandon", head=head, product=product, task=task_facts(task), switch_report_id=_switch_report_id(verify_blob))
+            task["close_recorded"] = True
+            task.pop("archive_error", None)
+            save_task(key, task)
+        except Exception as exc:
+            task["archive_error"] = str(exc)
+            save_task(key, task)
+            raise ChainBroken(f"history-close-pending: task and worktree retained; retry {process}: {exc}") from exc
+    try:
+        _cleanup(root, task)
+    except Exception as exc:
+        task["cleanup_error"] = str(exc)
+        save_task(key, task)
+        append_task_step(root, task["id"], "cleanup-pending", error=str(exc), task=task_facts(task))
+        raise ChainBroken(f"cleanup-pending: task retained; retry finish/abandon: {exc}") from exc
+    task.pop("cleanup_error", None)
+    append_task_step(root, task["id"], "cleanup-complete", task=task_facts(task))
+    blob = load_managed()
+    for row in blob["projects"]:
+        if isinstance(row, dict) and str(row.get("key") or "") == key:
+            row["last_product"] = product
+            row["last_process"] = process
+            break
+    save_managed(blob)
+    save_task(key, None)
+    return build_delivery_snapshot(root, task["id"])
 
 
 def finish(root: Path) -> dict[str, Any]:
@@ -1420,6 +1494,12 @@ def finish(root: Path) -> dict[str, Any]:
             "[原因] 当前没有进行中的票据任务 "
             "[下一步] 请先调用 ag_start"
         )
+    if task.get("process") == "completed" and task.get("merged_head"):
+        if git(root, "rev-parse", "HEAD") != task["merged_head"]:
+            raise ChainBroken("cleanup-pending: canonical moved since merge; inspect before retry")
+        thaw_canonical(root)
+        delivery = _close_task(root, key, task, process="completed", product=task.get("close_product") or "undeclared", head=task["merged_head"])
+        return {"schema": "ag.finish.v1", "root": str(root), "head": task["merged_head"], "process": "completed", "product": task.get("close_product"), "delivery": delivery, "recovered": True}
 
     def _no(reason: str, lane: int = 6, detail: str = "") -> None:
         usage_note(root, "ship", lane, "block", detail or reason)
@@ -1430,10 +1510,13 @@ def finish(root: Path) -> dict[str, Any]:
         _no(
             "intent map is not confirmed; user approval is required "
             "[原因] 用户尚未确认意图锚点 "
-            "[下一步] 请先向用户展示 anchor_preview，待用户确认后调用 confirm-map -> ag_verify -> ag_finish",
+            "[下一步] 展示 anchor_preview，由用户亲自执行 confirm-map，再 ag_verify -> ag_finish；AI 不得代调",
             8,
             "finish intent map unconfirmed",
         )
+    from .authorization import validate_ticket
+
+    validate_ticket(root, task)
     if not state["hook_ok"]:
         _no(
             "hook-removed: will not deliver "
@@ -1480,6 +1563,21 @@ def finish(root: Path) -> dict[str, Any]:
             "mismatch",
         )
     verify_blob = task.get("verify") if isinstance(task.get("verify"), dict) else None
+    if verify_blob and verify_blob.get("task_id", task["id"]) != task["id"]:
+        _no("wrong-task: verification receipt belongs to another ticket")
+    if verify_blob and verify_blob.get("check_selection"):
+        from .checks import selection
+
+        current_checks = selection(worktree, [str(argument) for argument in state.get("test_argv") or []])
+        if current_checks["sha256"] != verify_blob["check_selection"].get("sha256"):
+            _no("check-digest-mismatch: current ticket checks changed; run ag_verify again")
+    switch_receipt = (verify_blob or {}).get("switch") or {}
+    if switch_receipt.get("configured"):
+        from .store import list_llm_events
+
+        originals = list_llm_events(root, "switch_event", 0, task_id=task["id"], report_id=str(switch_receipt.get("report_id") or ""), candidate=digest)
+        if len(originals) != 1 or originals[0].get("outcome") != switch_receipt.get("outcome") or (verify_blob or {}).get("candidate") != digest:
+            _no("missing-evidence: switch receipt is not bound to this task and candidate; run ag_verify again")
     red = _probe_red_ids(verify_blob)
     if red:
         _no(
@@ -1579,38 +1677,19 @@ def _finish_after_thaw(
         "current_anchor": current_anchor,
         "reminder": "Before accepting delivery, re-read the intent map and compare each anchor with the final result; soft anchors are not auto-completion states.",
     }
-    append_task_step(root, str(task.get("id") or ""), "finish", head=head, product=product, critic_report_id=_critic_report_id(vblob), switch_report_id=_switch_report_id(vblob), anchor_progress=anchor_progress)
-    try:
-        from .knowledge import archive_session, append_redlines, distill
+    from .knowledge import append_redlines, distill
+    from .state_git import commit_state
 
+    delivery = _close_task(root, key, task, process="completed", product=product, head=head)
+    try:
         try:
             append_redlines(root, task)
         except Exception:
             pass
-        archive_session(
-            root,
-            task,
-            verify=vblob,
-            touched=_ticket_paths(worktree, str(task.get("source_head") or "")),
-            check_exit=(vblob or {}).get("exit") if isinstance(vblob, dict) else None,
-            process="completed",
-            product=product,
-        )
         distill(root)
-        from .state_git import commit_state
-
         commit_state(root, f"finish {task.get('id')}: product={product}")
     except Exception as exc:
         usage_note(root, "see", 14, "help", f"knowledge archive skipped: {exc.__class__.__name__}")
-    _cleanup(root, task)
-    save_task(key, None)
-    blob = load_managed()
-    for row in blob["projects"]:
-        if isinstance(row, dict) and str(row.get("key") or "") == key:
-            row["last_product"] = product
-            row["last_process"] = "completed"
-            break
-    save_managed(blob)
     if product == "undeclared":
         usage_note(root, "ship", 1, "help", "finish undeclared")
     elif product == "passed":
@@ -1626,7 +1705,8 @@ def _finish_after_thaw(
         "critic_report_id": _critic_report_id(task.get("verify") if isinstance(task.get("verify"), dict) else None),
         "switch_report_id": _switch_report_id(task.get("verify") if isinstance(task.get("verify"), dict) else None),
         "head": head,
-        "hazards": status(root)["hazards"],
+        "hazards": [],
+        "delivery": delivery,
     }
 
 
@@ -1687,33 +1767,16 @@ def abandon(root: Path) -> dict[str, Any]:
     thaw_canonical(root)
     if not task:
         return status(root)
+    if task.get("process") == "completed":
+        raise ChainBroken("cleanup-pending: already merged; retry finish to complete cleanup")
     try:
-        _cleanup(root, task)
         from .probe import drop_newborn_for_task
 
         drop_newborn_for_task(root, task_id=str(task.get("id") or ""), by="ag-abandon")
-        try:
-            from .knowledge import archive_session
-
-            vblob = task.get("verify") if isinstance(task.get("verify"), dict) else None
-            archive_session(
-                root,
-                task,
-                verify=vblob,
-                touched=[],
-                check_exit=(vblob or {}).get("exit") if isinstance(vblob, dict) else None,
-                process="abandoned",
-                product="undeclared",
-            )
-            from .state_git import commit_state
-
-            commit_state(root, f"abandon {task.get('id')}")
-        except Exception as exc:
-            usage_note(root, "see", 14, "help", f"knowledge archive skipped: {exc.__class__.__name__}")
-        save_task(key, None)
+        delivery = _close_task(root, key, task, process="abandoned", product="undeclared")
     finally:
         thaw_canonical(root)
-    return status(root)
+    return {**status(root), "delivery": delivery}
 
 
 def unenroll(root: Path) -> dict[str, Any]:

@@ -31,6 +31,7 @@ PLANT_MAX_LINE_CHARS = 400
 KINDS = ("command", "text_in_file")
 
 TOOLS = [
+    {"name": "ag_probe_calibrate", "description": "Compare an explicit behavior command on canonical before and approved worktree after; only red-before/green-after validates the probe.", "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}, "id": {"type": "string"}, "observation": {"type": "object"}}, "required": ["root", "id", "observation"]}},
     {
         "name": "ag_probe_insert",
         "description": (
@@ -297,6 +298,7 @@ def insert(
     id: str | None = None,
     ttl_quiet_loops: int = DEFAULT_TTL,
     task_id: str = "",
+    pending_behavior: bool = False,
 ) -> dict[str, Any]:
     repo = real_root(root)
     evidence_text = str(evidence or "").strip()
@@ -322,7 +324,7 @@ def insert(
             raise ChainBroken(f"duplicate probe id {probe_id}; insert refused, store unchanged")
     row = {
         "id": probe_id,
-        "state": "armed",
+        "state": "pending-behavior" if pending_behavior else "armed",
         "quiet_count": 0,
         "ttl_quiet_loops": ttl,
         "area": areas,
@@ -337,7 +339,7 @@ def insert(
     return {
         "schema": SCHEMA,
         "id": probe_id,
-        "state": "armed",
+        "state": row["state"],
         "store": str(path),
         "quiet_count": 0,
         "ttl_quiet_loops": ttl,
@@ -451,7 +453,7 @@ def drop_newborn_for_task(root: Path, *, task_id: str, by: str = "") -> list[str
     for row in list(blob["probes"]):
         if str(row.get("task_id") or "") != tid:
             continue
-        if str(row.get("state") or "armed") != "armed":
+        if str(row.get("state") or "armed") not in {"armed", "pending-behavior"}:
             continue
         if int(row.get("quiet_count") or 0) != 0:
             continue
@@ -579,6 +581,7 @@ def plant_from_reject(root: Path, *, items: Any, tree: Path, source_head: str = 
                 area=[rel],
                 id=probe_id,
                 task_id=task_id,
+                pending_behavior=True,
             )
         except ChainBroken as exc:
             audit_note(
@@ -652,6 +655,9 @@ def list_probes(root: Path, *, full: bool = False) -> dict[str, Any]:
 
 def _eval_command(repo: Path, observation: dict[str, Any]) -> tuple[str, int, str]:
     argv = [str(item) for item in observation["argv"]]
+    environment = os.environ.copy()
+    if (repo / "src").is_dir():
+        environment["PYTHONPATH"] = str(repo / "src") + os.pathsep + str(repo)
     try:
         ran = subprocess.run(
             argv,
@@ -663,6 +669,7 @@ def _eval_command(repo: Path, observation: dict[str, Any]) -> tuple[str, int, st
             timeout=CMD_TIMEOUT_S,
             check=False,
             shell=False,
+            env=environment,
         )
     except subprocess.TimeoutExpired as exc:
         out = _tail((exc.stdout or "") + ("\n" if exc.stdout and exc.stderr else "") + (exc.stderr or "") + "\ntimeout")
@@ -715,6 +722,8 @@ def _eval(repo: Path, observation: dict[str, Any]) -> tuple[str, int, str]:
 
 def _should_run(row: dict[str, Any], paths: list[str] | None, awaken: bool) -> bool:
     state = str(row.get("state") or "armed")
+    if state == "pending-behavior":
+        return False
     area = [str(item) for item in (row.get("area") or []) if isinstance(item, str)]
     if paths:
         if not area_hits(area, paths):
@@ -743,6 +752,9 @@ def evaluate(
     results: list[dict[str, Any]] = []
     blob = _load(path)
     for row in blob["probes"]:
+        if row.get("state") == "pending-behavior" and (not path_filter or area_hits(list(row.get("area") or []), path_filter)):
+            results.append({"id": row.get("id"), "state": "pending-behavior", "verdict": "unproven", "exit": None, "tail": "Review pointer retained; supply a before/after behavior comparison", "next_action": "calibrate-probe"})
+            continue
         if not _should_run(row, path_filter, awaken):
             continue
         observation = row.get("observation") if isinstance(row.get("observation"), dict) else {}
@@ -776,6 +788,8 @@ def run(
         hit = by_id.get(str(row.get("id") or ""))
         if hit is None:
             continue
+        if hit.get("verdict") not in {"red", "green"}:
+            continue
         ttl = int(row.get("ttl_quiet_loops") or DEFAULT_TTL)
         if hit["verdict"] == "green":
             quiet = int(row.get("quiet_count") or 0) + 1
@@ -791,8 +805,47 @@ def run(
     return out
 
 
+def calibrate(root: Path, *, id: str, observation: Any) -> dict[str, Any]:
+    from .authorization import validate_ticket
+    from .loop import git, load_task, tree_digest
+    from .store import append_task_step
+
+    repo = real_root(root)
+    task = load_task(project_key(repo))
+    if not task or not task.get("intent_map_confirmed"):
+        raise ChainBroken("intent-map-unconfirmed: calibrate in an approved worktree")
+    validate_ticket(repo, task)
+    worktree = Path(task["worktree"])
+    if git(repo, "rev-parse", "HEAD") != task.get("source_head"):
+        raise ChainBroken("probe-comparison-source-changed")
+    normalized = _normalize_observation(observation)
+    if normalized["kind"] != "command":
+        raise ChainBroken("probe-behavior-command-required: text absence cannot prove a behavior repair")
+    blob = _load(store_path(repo))
+    selected = next((row for row in blob["probes"] if row.get("id") == id), None)
+    if selected is None:
+        raise ChainBroken(f"unknown probe id {id}")
+    before = _eval(repo, normalized)
+    after = _eval(worktree, normalized)
+    comparison = {"task_id": task["id"], "source_head": task["source_head"], "candidate": tree_digest(worktree), "before": {"verdict": before[0], "exit": before[1], "tail": before[2]}, "after": {"verdict": after[0], "exit": after[1], "tail": after[2]}}
+    valid = before[0] == "red" and after[0] == "green"
+    selected["comparison"] = comparison
+    if valid:
+        selected["observation"] = normalized
+        selected["state"] = "armed"
+        selected["quiet_count"] = 0
+    else:
+        selected["comparison_issue"] = "non-discriminating" if before[0] == "green" else "repair-not-proven"
+    _save(store_path(repo), blob)
+    audit_note(repo, action="calibrate", probe_id=id, area=list(selected.get("area") or []), reason="behavior-proven" if valid else selected["comparison_issue"])
+    append_task_step(repo, task["id"], "probe-calibrated", probe_id=id, valid=valid, comparison=comparison)
+    return {"schema": "ag.probe.calibration.v1", "id": id, "valid": valid, "state": selected["state"], "comparison": comparison, "next_action": "verify" if valid else "inspect-false-positive-or-repair"}
+
+
 def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     root = Path(str(args.get("root") or ""))
+    if name == "ag_probe_calibrate":
+        return calibrate(root, id=str(args.get("id") or ""), observation=args.get("observation"))
     if name == "ag_probe_insert":
         return insert(
             root,

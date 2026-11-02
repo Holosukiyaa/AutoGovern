@@ -38,10 +38,20 @@
 
 - **孤岛清单（see-16）**：结构体检算出的孤岛文件（零入口可达、零引用）过去只埋在考卷 JSON 里看不见，现在 `ag_see` 报告里直接按语言列出每个孤岛的仓内相对路径与总数。只发现、只报告，不拦票、不替你判断该不该删。
 - **复盘不再失忆**：每张票复盘的「想解决什么」过去恒为空（取主题只读 portrait，MCP 开票不传它），现在 portrait 空时自动从票档 `## 意图` 提取人话主题，且所有来源统一先清洗再落盘，顺带根治了一条考卷正文直接落盘的隐私隐患。
-- **状态目录瘦身**：`python -m ag prune` 新增「归档合并」——把 tasks/ 下每张票压缩后留下的小残渣统一收进一个 `index.jsonl`（每票一行、按 task_id 去重），再删散文件。CartridgeFlow 实测 tasks/ 从 185 个文件降到 4 个，目录不再越用越臃肿。
+- **状态目录瘦身**：早期 `tasks/index.jsonl` 汇总保持兼容；当前 `prune` 先发布可回读校验的历史分卷再回收旧散档，索引只作可重建视图。
 - **结构体检更准**：仓级版本戳 `layout_version` + 版本驱动迁移链；TS/JS 相对导入补全（`./x`、`../x` 自动补 `.ts/.tsx` 与 `index.*`）；ESM `./x.js` 找不到产物时回退同名 `.ts` 真源码——前端引用链不再断、孤岛不再误判。
 
 ---
+
+## 任务事实与连续交付
+
+`python -m ag delivery <PROJECT_ROOT> --task-id <TASK_ID>`（MCP `ag_delivery`）只读查询活动票或归档票，输出完整目标、本票贡献、已验证结果、未完成项、阻塞、建议、下一动作、授权和解冻状态，以及报告与候选的来源。不存在的票返回 `task-not-found`；失败、访问锚点或施工开始不会变成已完成。相同报告的兼容席位不重复统计，复盘保留本票所有拒绝与通过，不推断所有拒绝都是误报。
+
+完整功能可跨必要模块并在一票内分阶段完成。合理换路线可以用 `python -m ag route <PROJECT_ROOT> --reason "原因"` 留痕；减少承诺或改变硬边界加 `--requires-decision` 等待用户决定。只有真正独立交付的续作才使用 `start --continuation-of <TASK_ID> --contribution "本票贡献"`，明确携带共同目标和剩余结果。
+
+`status` 不再顺带安装、迁移、写票或运行完整体检；诊断用 `ag_see`，修复安装用 `enroll/config`。确认由用户亲自执行 `confirm-map`，AI 不得代调。命令立即在 stderr 报告阶段，重验当前票、审核、配置、Git 身份与冻结状态；实际恢复全部工作树文件写权限后才 `ready`，解冻失败保留授权并允许重试。交卷按本票实际 `.ag-check/check_*.py` 选择检查，并将脚本摘要、候选和报告绑定。
+
+历史正本采用 `history/current.jsonl` 与按月、容量分卷的 JSONL；活动票面和指针保留可读文件。`prune` 对闭票时间线、票档、会话与对应旧审核事件先写临时分卷，刷新、回读校验、原子发布，再回收来源；索引可重建。旧格式继续可读，未知格式、活动现场、`preparations/`、`audits/` 和用户备份保留，写失败明确报错。自动审核指针先保留为待行为核查线索，`probe calibrate` 用真实修复前后命令对照后才能把它作为行为探针。
 
 ## 核心交付闭环
 
@@ -80,9 +90,9 @@ python -m ag mcp
 开工（`ag_start`）前必须先准备好 `<AG_HOME>/projects/<key>/ticket.md`——票不住在项目里（首次 `enroll` 会在 ag 家里自动生成模板；旧项目里遗留的 `ticket.md` / `tickets/` / `redlines.copy` 会在 `ag_start` 时先逐份核对 SHA256、再一次性搬进新家，并留一份可读的搬家记录）。
 
 - `## 意图`：用大白话写明本票业务目标与可观察的完成态，保持原文不变。
-- `## 红线`：`ag_start` 会将 `## 红线` 及硬锚点（`anchor!:`）封存到 `<AG_HOME>/projects/<key>/redlines.copy`，并归档至 `<AG_HOME>/projects/<key>/tickets/<TASK_ID>.md`。
+- `## 红线`：`ag_start` 将 `## 红线` 及硬锚点（`anchor!:`）封存到 `<AG_HOME>/projects/<key>/redlines.copy`；闭票后票面归档到项目 `history/` 分卷，兼容旧 `tickets/<TASK_ID>.md`。
 - `## 现场`：由 `start`、`verify`、`finish` 自动刷新任务状态，不覆盖 `## 意图` 与已封存的 `## 红线`。
-- **强制人工确认门禁（`confirm-map`）**：`ag_start` 后工作树处于冻结状态。AI 必须先将 `anchor_preview`（即 `<AG_HOME>/projects/<key>/ticket.md` 全文）展示给用户，等待用户明确回复“确认”后，再执行 `confirm-map` 解冻工作树。AI 严禁自行偷偷调用 `confirm-map`。
+- **强制人工确认门禁（`confirm-map`）**：`ag_start` 后工作树冻结。AI 展示完整 `anchor_preview` 和票面地址，用户亲自执行 `confirm-map`；AI 不得代调 CLI 或 MCP。实际解冻成功才返回 `ready`。
 
 ### 锚点类型
 
@@ -104,11 +114,11 @@ anchor!: 严禁修改原有的鉴权中间件签名
 1. **前门：开票独立审票席（`ship-13`，`ticket` 席位）**
    - 每次 `ag_start` 先由本地脚本 0 Token 执行 `ticket_prescreen`（检查字数、正反完整链路词、空泛套话红线、连续票序 `ticket_seq` 与跨票重合率），写入 `script_digest`。
    - 随后启动全新、无上下文历史的独立 `ticket` 审核线程（`thread_id`），从三个维度打分（`0-10`，`>= 7` 通过）：
-     - `goal_clarity`：仅凭本票能否看懂业务目标，并用大白话独立复述 `understood_goal`（有任何疑惑即判不通过）。
+     - `goal_clarity`：仅凭本票能否看懂业务目标，并用大白话独立复述 `understood_goal`；导致完成态无法判定的关键缺口拒绝，普通问题与可选建议不单独阻塞。
      - `anchor_chain`：意图锚点是否锁住包含正向与反向/边界拒绝的完整行为链路。
      - `redline_focus`：红线是否合理且范围收缩聚焦。
    - 若已配置审核且未通过，`confirm-map` 会拒绝解冻工作树；此时直接修改 `<AG_HOME>/projects/<key>/ticket.md` 并再次运行 `ag_start` 即可原地重封存、重审。
-   - **多轮反偷懒严审（`lift-18`）**：连续第 3+ 张票（`ticket_seq >= 3`）自动开启严审模式，本地脚本硬核校验审核方是否照抄原文、跨票评语雷同或全满分敷衍放水（`lazy-review`），检出即自动触发重审。
+   - **每票独立审查（`lift-18`）**：核对当前目标、来源与证据，不因累计票数自动加严；同票重审及明确同目标续作不因目标相似就判照抄，无关旧票套话仍须核查。
 2. **后门：交卷单次守门与考卷瘦身（`see-15`，单次 `switch` 席位）**
    - `ag_verify` 先由本地脚本 0 Token 执行 `pack_prescreen`（Python/JSON 语法校验、红线文件名/反引号标识符碰撞扫描、吞异常/塞 mock 作弊扫描、`.ag-check/` 断言检查）。
    - 自动为 `git diff` 逐行预标真实源文件行号（`path:line`），并对超过 `12,000` 字符的大文件仅截取文件头 + 改动上下文窗口，只调用 **1 次 `switch`** 完成最终裁决，大幅降低 Token 消耗。
@@ -183,12 +193,12 @@ python -m ag worker-create <PROJECT_ROOT> --portrait "做成之后：..." --anch
   - `lift-15`（红线回声）：对比上一票与本票红线，提醒被删减的旧红线。
   - `lift-16`（捷径嗅探）：扫描新增代码中的吞异常、引 mock、占位符等应试假实现信号。
   - `lift-17`（可拔除建议）：检测新增子模块的跨文件引用触点数，引导单点挂载。
-  - `lift-18`（多轮审票反偷懒）：跟踪连续票序并在第 3+ 票开启反敷衍严审。
+  - `lift-18`（审票观察）：展示本票分数、条款重合线索与报告身份，票数不改变审核标准。
 - **`see`（客观观测）**：
   - `see-10` / `see-11`：重复样式症状与所有权归属透视。
   - `see-12`（强推与反向引用）：统计跨语言类型/Lint 压制符净增与反向 import。
   - `see-13`（考卷净荷与防抖）：观测实时日志体积、红线封存状态与 `.ag-check` 大文件过滤。
-  - `see-14`（票据与红线轨迹）：汇总 `<AG_HOME>/projects/<key>/tickets/` 历史票据与高频红线分布。
+  - `see-14`（票据与红线轨迹）：汇总项目 `history/` 分卷与兼容旧票档，展示高频红线分布及同票交付事实。
   - `see-15`（一前一后精简考卷）：记录单次 `switch` 与窗口裁剪节省的字符与 Token 账本。
   - `see-17`（评审跑没跑）：现算开票审 / 批改 / 开关三席各跑过多少次、通过 / 拒绝 / 没审各多少、没审的原因与次数，以及每席最近一条结论与时间。
   - `see-18`（正本对账）：把评审历史的正本 jsonl 与 `-last.json` 缓存逐字段对上，报出不一致字段、坏行数，以及旧 `ag.sqlite` 里还剩多少行镜像。

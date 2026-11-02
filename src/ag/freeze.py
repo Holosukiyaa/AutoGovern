@@ -20,22 +20,23 @@ _ACL_LIMIT = 65528
 
 def _tracked_files(root: Path) -> list[Path]:
     ran = subprocess.run(
-        ["git", "-C", str(root), "ls-files"],
+        ["git", "-C", str(root), "ls-files", "-z"],
         capture_output=True,
         text=True,
         encoding="utf-8",
         errors="replace",
         check=False,
     )
+    if ran.returncode:
+        raise OSError(f"cannot enumerate tracked files: {ran.stderr}")
     out: list[Path] = []
-    for line in (ran.stdout or "").splitlines():
-        rel = line.strip().strip('"')
+    for rel in (ran.stdout or "").split("\0"):
         if not rel:
             continue
         path = root / rel.replace("/", os.sep)
         if not path.is_file():
             continue
-        if ".git" in set(path.resolve().parts):
+        if ".git" in set(Path(rel).parts):
             continue
         out.append(path)
     return out
@@ -55,12 +56,6 @@ def _freeze_readonly_bit(root: Path) -> None:
             path.chmod(path.stat().st_mode & ~stat.S_IWRITE)
         except OSError:
             continue
-
-
-def _thaw_readonly_bit(root: Path) -> None:
-    root = Path(root)
-    for path in _tracked_files(root):
-        _force_user_write_bit(path)
 
 
 def write_guard(path: Path) -> str:
@@ -84,11 +79,7 @@ def freeze_canonical(root: Path) -> None:
 
 def thaw_canonical(root: Path) -> None:
     """Remove this module's freeze and restore the user-write bit."""
-    root = Path(root)
-    if os.name == "nt":
-        _thaw_windows(root)
-        return
-    _thaw_readonly_bit(root)
+    thaw_worktree(Path(root))
 
 
 def _freeze_windows(root: Path) -> None:
@@ -98,20 +89,6 @@ def _freeze_windows(root: Path) -> None:
         _rewrite_dacl(path, user_sid, add_deny=True)
         if write_guard(path) != "acl-deny":
             raise OSError(f"freeze did not install ACL deny-write: {path}")
-
-
-def _thaw_windows(root: Path) -> None:
-    try:
-        user_sid = _current_user_sid()
-    except OSError:
-        user_sid = None
-    for path in _tracked_files(root):
-        if user_sid is not None:
-            try:
-                _rewrite_dacl(path, user_sid, add_deny=False)
-            except OSError:
-                pass
-        _force_user_write_bit(path)
 
 
 def _deny_ace_count(path: Path) -> int:
@@ -274,7 +251,7 @@ def _file_security(path: Path):
 
 
 def _win_path(path: Path) -> str:
-    text = str(path.resolve())
+    text = os.path.abspath(path)
     if text.startswith("\\\\?\\") or len(text) < 240:
         return text
     if text.startswith("\\\\"):
@@ -396,6 +373,28 @@ def freeze_worktree(root: Path) -> None:
     _freeze_windows(Path(root)) if os.name == "nt" else _freeze_readonly_bit(Path(root))
 
 
-def thaw_worktree(root: Path) -> None:
+def thaw_worktree(root: Path, *, files: list[Path] | None = None) -> None:
     """Remove the intent-map freeze from a worktree."""
-    _thaw_windows(Path(root)) if os.name == "nt" else _thaw_readonly_bit(Path(root))
+    paths = files if files is not None else _tracked_files(Path(root))
+    user_sid = _current_user_sid() if os.name == "nt" else None
+    for path in paths:
+        if user_sid is not None:
+            _rewrite_dacl(path, user_sid, add_deny=False)
+        mode = path.stat().st_mode
+        if not mode & stat.S_IWRITE:
+            path.chmod(mode | stat.S_IWRITE)
+        if user_sid is not None and any(kind == "deny" and mask == _DENY_WRITE_MASK and ours for kind, mask, ours in _explicit_aces(path, user_sid)):
+            raise OSError(f"thaw did not remove ACL deny-write: {path}")
+        descriptor = os.open(path, os.O_WRONLY)
+        os.close(descriptor)
+
+
+def assert_frozen(paths: list[Path]) -> None:
+    user_sid = _current_user_sid() if os.name == "nt" else None
+    for path in paths:
+        if user_sid is not None:
+            frozen = any(kind == "deny" and mask == _DENY_WRITE_MASK and ours for kind, mask, ours in _explicit_aces(path, user_sid))
+        else:
+            frozen = not path.stat().st_mode & stat.S_IWRITE
+        if not frozen:
+            raise OSError(f"canonical-freeze-missing: {path}")

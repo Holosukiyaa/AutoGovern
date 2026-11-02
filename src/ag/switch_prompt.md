@@ -21,6 +21,7 @@ verdict 只能是 pass 或 reject。pass = 放行 finish。reject = 拒绝 finis
 - diff / annotated_diff / changed_files / neighbors（均带精确预标注行号）
 - script_digest（本地确定性脚本机械预审摘要）
 - this_ticket_checks（工地 `.ag-check/`，可能 truncated）
+- verification：本票候选和检查摘要绑定的实际执行结果、stdout/stderr 尾部、探针与 Worker 证据。它证明执行结果，仍须结合检查源码判断覆盖是否充分。
 - probes
 - redlines：开工时封存的红线副本。空名单表示这张票没有红线
 
@@ -38,3 +39,10 @@ verdict 只能是 pass 或 reject。pass = 放行 finish。reject = 拒绝 finis
 - 每一个 `status="fail"` 的项，其 `evidence` 必须带精确的 `path:line`（直接取自 `diff` 或 `changed_files` 预标注行号）、`portrait:某句` 或 `probe:id`。
 - 不许改文件，不许 finish，不许 git commit，没有工地。
 - 不恢复 `tests/` 当货灯。
+# 证据分流
+
+`script_digest.redline_collisions` 表示红线禁止修改的文件确实出现在改动集中；仍应核对条款上下文。`redline_mentions` 只是新增代码提及了条款词或路径，合法读取不能因此判为修改。普通疑问与优化建议写清建议性质，只有具体违规或关键验据缺失才拒绝。探针 `pending-behavior` / `unproven` 仅是待核查线索；行为回归需真实的修复前失败、修复后通过对照。明确违规、真实红灯和关键缺证仍必须拒绝，不能以线索分流为由放行。
+
+审核授权链时须定位实际入口及其调用的权威校验，不能只因只读展示使用已记录状态就认定绕过授权。若实际入口仅信任展示缓存而没有必要的实时门禁，仍须引用该入口和缺失检查拒绝。归档完成态可由同票原始回执和合入提交树核对；当前施工、确认与交卷仍须检验各自现场，不能以归档或展示结果代替。
+
+“缺少关键证据”须指出具体未验证的输入、输出或拒绝边界，并核对 `verification`、检查源码和实际入口。字段名称、只读文件读取和接口接线本身不能证明全量诊断被调用；引用真实调用链及副作用判断。无法验证的关键边界仍拒绝，可选的更进一步优化列为建议。

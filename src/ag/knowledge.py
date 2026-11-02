@@ -40,7 +40,7 @@ _README = """# knowledge/ — 跨会话项目总账（Dreaming 第一块砖）
 它属于哪个项目：见同级目录 project.txt 里记录的项目根绝对地址。
 
 规则（append-only）：
-- 每张票一份 sessions/<task_id>.json，只追加、不改写、不删除历史条目。
+- 新会话结论追加到项目 history/ 的校验分卷；兼容读取旧 sessions/<task_id>.json。
 - 只存结论与索引（outcome / report_id / 红名单 / 文件清单 / exit），不存考卷正文、diff 原文、自检源码、密钥明文。
 - 单向指向：知识库指向项目，项目不反向依赖它。
 
@@ -96,9 +96,14 @@ def build_session_record(
 ) -> dict[str, Any]:
     """组装一张票的归档记录。只取结论与索引，缺项记 None 并标 incomplete。"""
     anchors = [a for a in (task.get("anchors") or []) if isinstance(a, dict)]
+    if isinstance(verify, dict) and verify.get("task_id", task.get("id")) != task.get("id"):
+        verify = None
     anchor_ids = [str(a.get("id") or "") for a in anchors if str(a.get("id") or "").strip()]
     switch_outcome, switch_rid = _seat_outcome(verify, "switch")
     critic_outcome, critic_rid = _seat_outcome(verify, "critic")
+    merged = bool(switch_rid and critic_rid == switch_rid)
+    if merged:
+        critic_outcome, critic_rid = "", ""
     probe_red = []
     if isinstance(verify, dict):
         probe_red = [str(x) for x in (verify.get("probe_red") or []) if str(x or "").strip()]
@@ -113,6 +118,9 @@ def build_session_record(
         "switch_report_id": switch_rid or None,
         "critic_outcome": critic_outcome or None,
         "critic_report_id": critic_rid or None,
+        "critic_merged_into": "switch" if merged else None,
+        "candidate": (verify or {}).get("candidate") or None,
+        "check_argv": (verify or {}).get("check_argv") or [],
         "probe_red": probe_red,
         "process": str(process or ""),
         "product": str(product or ""),
@@ -133,17 +141,6 @@ _REDLINES_NAME = "redlines.md"
 
 def redlines_path(root: Path) -> Path:
     return knowledge_dir(real_root(root)) / _REDLINES_NAME
-
-
-def _seat_items(root: Path, seat: str) -> list[dict[str, Any]]:
-    """Read a seat's -last.json report items (name/status/comment). Never raises."""
-    try:
-        path = project_dir(real_root(root)) / f"{seat}-last.json"
-        blob = json.loads(path.read_text(encoding="utf-8"))
-        items = blob.get("items")
-        return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
-    except (OSError, ValueError):
-        return []
 
 
 def _intent_excerpt(task: dict[str, Any]) -> str:
@@ -221,14 +218,16 @@ def _sanitize(text: str) -> str:
     return s
 
 
-def build_review(root: Path, task: dict[str, Any], verify: dict[str, Any] | None) -> dict[str, Any]:
+def build_review(root: Path, task: dict[str, Any], verify: dict[str, Any] | None, *, events: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Distill a ticket's retrospective: what it tried, what it found, what went right/wrong.
 
     Conclusions and indexes only — never exam text, diff source, or secrets."""
-    anchors = [a for a in (task.get("anchors") or []) if isinstance(a, dict)]
-    switch_items = _seat_items(root, "switch")
-    critic_items = _seat_items(root, "critic")
-    items = switch_items + critic_items
+    from .delivery import task_reviews
+
+    task_id = str(task.get("id") or "")
+    events = task_reviews(root, task_id) if events is None else events
+    events = [row for row in events if row.get("task_id") == task_id and row["seat"] in {"switch", "critic"}]
+    items = [item for row in events for item in row.get("items") or [] if isinstance(item, dict)]
 
     went_well = [str(i.get("name") or "") for i in items if str(i.get("status") or "").casefold() == "pass" and str(i.get("name") or "").strip()]
     wrong_items = [i for i in items if str(i.get("status") or "").casefold() == "fail"]
@@ -239,25 +238,16 @@ def build_review(root: Path, task: dict[str, Any], verify: dict[str, Any] | None
         if comment:
             found.append(f"{i.get('name') or '?'}: {comment[:160]}")
 
-    # lesson: was this a real defect or a false-positive that needed the human gate?
-    product = ""
-    if isinstance(verify, dict):
-        product = str(verify.get("product") or "")
-    approved = False
-    try:
-        appr = project_dir(real_root(root)) / "approvals.jsonl"
-        if appr.is_file():
-            for line in appr.read_text(encoding="utf-8").splitlines():
-                if str(task.get("id") or "") in line:
-                    approved = True
-    except OSError:
-        pass
-    if wrong_items and approved:
-        lesson = "审核打回但最终经人工闸门放行——驳回多为误报（机械碰撞/旧代码体检悖论），非真缺陷。"
-    elif wrong_items:
-        lesson = "审核打回并修复后通过——发现的是真缺陷，已逐条修复。"
+    rejected = [row for row in events if row.get("outcome") == "rejected"]
+    passed = [row for row in events if row.get("outcome") == "passed"]
+    if not events:
+        lesson = "本票未完成终审，不能判定一次通过或修复成功。"
+    elif rejected:
+        lesson = f"本票记录 {len(rejected)} 次拒绝、{len(passed)} 次通过；是否误报或真实修复须另有行为证据。"
+    elif passed:
+        lesson = "本票终审通过，未记录拒绝；结论只来自本票原始事件。"
     else:
-        lesson = "一次通过，无驳回。"
+        lesson = "本票有审核尝试但尚无通过结论。"
 
     return {
         "problem_wanted": _theme_label(task),
@@ -265,6 +255,9 @@ def build_review(root: Path, task: dict[str, Any], verify: dict[str, Any] | None
         "went_well": went_well,
         "went_wrong": went_wrong,
         "lesson": lesson,
+        "reports": [{"report_id": row["report_id"], "outcome": row.get("outcome"), "candidate": row.get("candidate"), "source": row["ref"]} for row in events],
+        "rejections": len(rejected),
+        "passes": len(passed),
     }
 
 
@@ -349,19 +342,23 @@ def archive_session(
         process=process,
         product=product,
     )
-    # attach the four-section retrospective (problem wanted/found, went well/wrong+lesson)
-    try:
-        record["review"] = build_review(repo, task, verify)
-    except Exception:
-        record["review"] = {"problem_wanted": "", "problem_found": [], "went_well": [], "went_wrong": [], "lesson": ""}
+    record["review"] = build_review(repo, task, verify)
     base = knowledge_dir(repo)
     readme = base / README_NAME
     if not readme.is_file():
         _atomic_write(readme, _README)
+    from .delivery import task_reviews
+    from .history import append_fact
+
     task_id = record.get("task_id") or "unknown"
-    target = base / SESSIONS_NAME / f"{task_id}.json"
-    _atomic_write(target, json.dumps(record, ensure_ascii=False, indent=2) + "\n")
-    return str(target)
+    events = task_reviews(repo, task_id)
+    for seat in ("switch", "critic"):
+        report_id = record.get(seat + "_report_id")
+        if report_id and not any(row["report_id"] == report_id and row.get("task_id") == task_id for row in events):
+            record[seat + "_report_id"] = None
+            record[seat + "_outcome"] = None
+            record["incomplete"] = True
+    return append_fact(repo, "session", task_id, record)
 
 INSIGHTS_NAME = "insights.json"
 
@@ -394,10 +391,8 @@ def load_insights(root: Path) -> dict[str, Any]:
     return blob if isinstance(blob, dict) else _empty_insights()
 
 
-def _iter_sessions(base: Path) -> list[dict[str, Any]]:
+def _iter_sessions(base: Path, root: Path | None = None) -> list[dict[str, Any]]:
     folder = base / SESSIONS_NAME
-    if not folder.is_dir():
-        return []
     out: list[dict[str, Any]] = []
     for path in sorted(folder.glob("*.json")):
         try:
@@ -406,7 +401,42 @@ def _iter_sessions(base: Path) -> list[dict[str, Any]]:
             continue
         if isinstance(blob, dict):
             out.append(blob)
-    return out
+    if root is not None:
+        from .history import read_records
+
+        out.extend(row["payload"] for row in read_records(root, kind="session"))
+    unique = {}
+    for row in sorted(out, key=lambda row: str(row.get("archived_at") or "")):
+        unique[str(row.get("task_id") or "")] = row
+    sessions = list(unique.values())
+    if root is not None:
+        from .delivery import task_reviews
+
+        for index, stored in enumerate(sessions):
+            session = dict(stored)
+            task_id = str(session.get("task_id") or "")
+            events = task_reviews(root, task_id)
+            reports = {row["report_id"]: row for row in events}
+            diagnostics = []
+            for seat in ("switch", "critic"):
+                report_id = session.get(seat + "_report_id")
+                original = reports.get(str(report_id or ""))
+                if original and original["seat"] in {"switch", "critic"} and (not session.get("candidate") or original.get("candidate") == session["candidate"]):
+                    session[seat + "_outcome"] = original.get("outcome")
+                else:
+                    if report_id:
+                        diagnostics.append({"kind": "unbound-review", "report_id": report_id, "task_id": task_id})
+                    session[seat + "_report_id"] = None
+                    session[seat + "_outcome"] = None
+            if session.get("critic_report_id") and session["critic_report_id"] == session.get("switch_report_id"):
+                session["critic_report_id"] = None
+                session["critic_outcome"] = None
+                session["critic_merged_into"] = "switch"
+            stored_review = session.get("review") if isinstance(session.get("review"), dict) else {}
+            session["review"] = build_review(root, {"id": task_id, "portrait": session.get("intent_first_line") or stored_review.get("problem_wanted")}, None, events=events)
+            session["review_diagnostics"] = diagnostics
+            sessions[index] = session
+    return sessions
 
 
 def distill(root: Path) -> dict[str, Any]:
@@ -417,7 +447,7 @@ def distill(root: Path) -> dict[str, Any]:
     """
     repo = real_root(root)
     base = knowledge_dir(repo)
-    sessions = _iter_sessions(base)
+    sessions = _iter_sessions(base, repo)
 
     file_tickets: dict[str, list[dict[str, Any]]] = {}
     for rec in sessions:
@@ -453,6 +483,8 @@ def distill(root: Path) -> dict[str, Any]:
     focus: dict[str, dict[str, Any]] = {}
     for rec in sessions:
         for seat in ("switch", "critic"):
+            if seat == "critic" and rec.get("critic_report_id") == rec.get("switch_report_id"):
+                continue
             if str(rec.get(seat + "_outcome") or "") == "rejected":
                 for f in (rec.get("touched_files") or []):
                     k = seat + ":" + str(f)
@@ -469,7 +501,7 @@ def distill(root: Path) -> dict[str, Any]:
     reviewed = [r for r in sessions if isinstance(r.get("review"), dict)]
     gate_passes = sum(1 for r in reviewed if "人工闸门" in str(r["review"].get("lesson") or ""))
     real_defects = sum(1 for r in reviewed if "真缺陷" in str(r["review"].get("lesson") or ""))
-    clean_passes = sum(1 for r in reviewed if "一次通过" in str(r["review"].get("lesson") or ""))
+    clean_passes = sum(1 for r in reviewed if int(r["review"].get("passes") or 0) > 0 and int(r["review"].get("rejections") or 0) == 0)
     theme_hits: dict[str, int] = {}
     for r in reviewed:
         for name in (r["review"].get("went_wrong") or []):
@@ -499,17 +531,17 @@ def distill(root: Path) -> dict[str, Any]:
 
 
 def dream(root: Path) -> dict[str, Any]:
-    """Manual distill command. Never raises — returns empty structure on any failure."""
+    """Manual distill command. Source failures remain explicit in the returned view."""
     try:
         return distill(root)
-    except Exception:
-        return _empty_insights()
+    except (OSError, ValueError, TypeError, ChainBroken) as exc:
+        return {**_empty_insights(), "incomplete": True, "error": str(exc), "next_action": "repair-history-source"}
 
 
 def retro(root: Path, limit: int = 8) -> dict[str, Any]:
     """Human-readable retrospective of recent tickets: what each tried/found/did right/wrong."""
     repo = real_root(root)
-    sessions = _iter_sessions(knowledge_dir(repo))
+    sessions = _iter_sessions(knowledge_dir(repo), repo)
     recent = sessions[-limit:][::-1]
     rows = []
     for rec in recent:
@@ -522,6 +554,10 @@ def retro(root: Path, limit: int = 8) -> dict[str, Any]:
             "went_well": list(rev.get("went_well") or []),
             "went_wrong": list(rev.get("went_wrong") or []),
             "lesson": str(rev.get("lesson") or ""),
+            "reports": list(rev.get("reports") or []),
+            "rejections": int(rev.get("rejections") or 0),
+            "passes": int(rev.get("passes") or 0),
+            "diagnostics": list(rec.get("review_diagnostics") or []),
         })
     return {
         "schema": "ag.knowledge.retro.v1",

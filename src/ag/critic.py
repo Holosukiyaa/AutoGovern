@@ -29,6 +29,10 @@ MAX_CHECK_FILE_BYTES = 64_000
 _HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _BACKTICK_TOKEN_RE = re.compile(r"`([^`\n]+)`")
 _MUTATION_WORDS = (
+    "严禁修改",
+    "禁止修改",
+    "不得修改",
+    "不许修改",
     "严禁改",
     "严禁动",
     "严禁删",
@@ -387,6 +391,8 @@ def _slim_file_entry(
     repo: Path,
     rel: str,
     touched_lines: list[int] | None = None,
+    *,
+    focus_text: str = "",
 ) -> dict[str, Any]:
     path = repo / rel
     if not path.is_file():
@@ -409,6 +415,18 @@ def _slim_file_entry(
         }
     total_lines = len(lines)
     keep: set[int] = set(range(1, min(40, total_lines) + 1))
+    focused = []
+    if path.suffix == ".py" and focus_text:
+        try:
+            parsed = ast.parse(text)
+        except SyntaxError:
+            parsed = None
+        for node in parsed.body if parsed is not None else []:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and re.search(r"(?<![A-Za-z0-9_])" + re.escape(node.name) + r"(?![A-Za-z0-9_])", focus_text):
+                start = min([node.lineno] + [decorator.lineno for decorator in node.decorator_list])
+                end = int(node.end_lineno or node.lineno)
+                keep.update(range(start, end + 1))
+                focused.append({"name": node.name, "start": start, "end": end})
     for ln in (touched_lines or [1]):
         try:
             center = int(ln)
@@ -428,14 +446,18 @@ def _slim_file_entry(
     if sorted_keep and sorted_keep[-1] < total_lines:
         rendered.append("  ... [unchanged lines omitted by script] ...")
     windowed = "\n".join(rendered)
-    cap = MAX_INLINE_FILE_CHARS * 2
+    cap = MAX_FILE_CHARS if focused else MAX_INLINE_FILE_CHARS * 2
+    clipped = len(windowed) > cap
     if len(windowed) > cap:
         windowed = windowed[:cap]
+    omitted = [symbol["name"] for symbol in focused if "\n".join(f"{lineno}: {lines[lineno - 1]}" for lineno in range(symbol["start"], symbol["end"] + 1)) not in windowed]
     return {
         "path": rel,
         "content": windowed,
         "slimmed": True,
-        "truncated": True,
+        "truncated": clipped or len(keep) < total_lines,
+        "focused_symbols": focused,
+        "omitted_symbols": omitted,
         "original_chars": len(text),
         "slimmed_chars": len(windowed),
     }
@@ -589,6 +611,7 @@ def pack_prescreen(
     added_lines = _added_diff_lines(diff_text)
 
     redline_collisions: list[dict[str, str]] = []
+    redline_mentions: list[dict[str, str]] = []
     seen_collisions: set[tuple[str, str]] = set()
     for rl in (redlines or []):
         rl_text = str(rl or "").strip()
@@ -620,10 +643,10 @@ def pack_prescreen(
                     key = (tok, ev)
                     if key not in seen_collisions:
                         seen_collisions.add(key)
-                        redline_collisions.append(
-                            {"token": tok, "evidence": ev, "redline": rl_text[:80]}
+                        redline_mentions.append(
+                            {"token": tok, "evidence": ev, "redline": rl_text[:80], "line": content.strip()[:160], "status": "needs-behavior-evidence"}
                         )
-                    if len(redline_collisions) >= 15:
+                    if len(redline_mentions) >= 15:
                         break
 
     shortcut_signals: list[dict[str, str]] = []
@@ -672,6 +695,7 @@ def pack_prescreen(
     return {
         "syntax_errors": syntax_errors,
         "redline_collisions": redline_collisions,
+        "redline_mentions": redline_mentions,
         "shortcut_signals": shortcut_signals,
         "check_quality": {
             "file_count": check_file_count,
@@ -810,9 +834,11 @@ def pack(
     store = real_root(root)
     repo = real_root(Path(tree)) if tree is not None else store
     exam_text = _read_exam(exam, exam_file)
+    effective_redlines = _sealed_redlines(store) if redlines is None else redlines
+    focus_text = "\n".join([exam_text, *effective_redlines])
     diff_text, names = _changed_names(repo, str(base or "").strip(), str(head or "").strip())
     annotated_diff, touched_map = annotate_diff_with_lines(diff_text)
-    changed = [_slim_file_entry(repo, rel, touched_map.get(rel, [])) for rel in names]
+    changed = [_slim_file_entry(repo, rel, touched_map.get(rel, []), focus_text=focus_text) for rel in names]
     hops = neighbors(repo, changed)
     probe_run = (
         evaluate_probes(store, paths=names or None, awaken=False, tree=repo) if names else {"results": []}
@@ -821,7 +847,6 @@ def pack(
     if not isinstance(results, list):
         results = []
     checks = _ticket_checks(repo)
-    effective_redlines = _sealed_redlines(store) if redlines is None else redlines
     script_digest = pack_prescreen(
         repo,
         names,
@@ -858,6 +883,7 @@ def pack(
             "raw_file_chars": raw_chars,
             "slimmed_file_chars": slimmed_chars,
             "saved_chars": max(0, raw_chars - slimmed_chars),
+            "omitted_symbols": [{"path": item["path"], "name": name} for item in changed for name in item.get("omitted_symbols") or []],
         },
     }
 
@@ -952,7 +978,7 @@ def _apply_config_blob(cfg: dict[str, Any], path: Path) -> dict[str, Any] | None
     return None
 
 
-def load_config(root: Path | None = None) -> dict[str, Any]:
+def load_config(root: Path | None = None, *, read_only: bool = False) -> dict[str, Any]:
     """Merge global critic.json, project critic.json, and AG_CRITIC_* env. Missing file is not an error."""
     g_path = global_config_path()
     p_path = config_path(root) if root is not None else None
@@ -981,7 +1007,7 @@ def load_config(root: Path | None = None) -> dict[str, Any]:
         # single door: project-level seat config lives in config.json -> critic section
         from . import settings as _settings
 
-        sec = _settings.get_section(root, "critic")
+        sec = (_settings.read_settings(root).get("critic") or {}) if read_only else _settings.get_section(root, "critic")
         if sec:
             for k in ("enabled", "endpoint", "model", "api_key_env", "timeout", "worker_model", "allow_same_family"):
                 if k in sec:
@@ -1023,7 +1049,7 @@ def _configured(cfg: dict[str, Any]) -> bool:
     return bool(cfg.get("enabled") and str(cfg.get("endpoint") or "").strip() and str(cfg.get("model") or "").strip())
 
 
-def config_guide(root: Path | None = None, *, ensure_file: bool = False) -> dict[str, Any]:
+def config_guide(root: Path | None = None, *, ensure_file: bool = False, read_only: bool = False) -> dict[str, Any]:
     target_root = real_root(root) if root is not None else None
     has_project_root = target_root is not None and target_root.is_dir()
     if ensure_file:
@@ -1033,7 +1059,7 @@ def config_guide(root: Path | None = None, *, ensure_file: bool = False) -> dict
             ensure_global_config_file()
     g_path = global_config_path()
     p_path = config_path(target_root) if (has_project_root and target_root is not None) else None
-    cfg = load_config(target_root if has_project_root else None)
+    cfg = load_config(target_root if has_project_root else None, read_only=read_only)
     api_key_env = str(cfg.get("api_key_env") or DEFAULT_API_KEY_ENV).strip() or DEFAULT_API_KEY_ENV
     api_key_present = bool(os.environ.get(api_key_env, "").strip())
     same_fam = bool(

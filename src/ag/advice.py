@@ -762,7 +762,7 @@ def lift_17(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
 
 def lift_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     from .store import project_dir
-    from .ticket_doc import tickets_dir
+    from .ticket_doc import archived_ticket_entries, tickets_dir
 
     repo = _repo(root)
     pdir = project_dir(repo)
@@ -775,7 +775,7 @@ def lift_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
         if tdir.is_dir()
         else []
     )
-    archived_ids = {p.stem for p in archived_files}
+    archived_ids = {entry["task_id"] for entry in archived_ticket_entries(repo)}
     tasks_dir = pdir / "tasks"
     timeline_files = [p for p in tasks_dir.glob("*.json") if p.is_file()] if tasks_dir.is_dir() else []
     timeline_ids = {p.stem for p in timeline_files}
@@ -808,6 +808,8 @@ def lift_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(ticket_last, dict):
         ticket_last = {}
     active_review = task.get("ticket_review") if isinstance(task.get("ticket_review"), dict) else {}
+    if ticket_last.get("report_id") != active_review.get("report_id") or ticket_last.get("task_id") != active_id:
+        ticket_last = {}
     pack_blob = ticket_last.get("pack") if isinstance(ticket_last.get("pack"), dict) else {}
     digest = (
         pack_blob.get("script_digest")
@@ -835,7 +837,7 @@ def lift_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     if base_seq == 0 and active_ticket_path(repo).is_file():
         base_seq = 1
     ticket_seq = base_seq
-    strict_round_mode = bool(ticket_seq >= 3)
+    strict_round_mode = False
 
     last_thread_id = str(
         active_review.get("thread_id")
@@ -1117,29 +1119,20 @@ def see_13(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
 
 
 def see_14(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    from .ticket_doc import section_lines, split_document, ticket_path, tickets_dir
+    from .delivery import build_delivery_snapshot
+    from .ticket_doc import archived_ticket_entries, section_lines, split_document, ticket_path
 
     repo = _repo(root)
-    tdir = tickets_dir(repo)
-    ticket_files: list[Path] = []
-    if tdir.is_dir():
-        ticket_files = sorted(
-            (p for p in tdir.glob("*.md") if p.is_file()),
-            key=lambda p: (p.stat().st_mtime, p.name),
-            reverse=True,
-        )
+    ticket_entries = list(reversed(archived_ticket_entries(repo)))
     recent: list[str] = []
     freq: dict[str, int] = {}
     seen_ids: set[str] = set()
 
-    for path in ticket_files:
-        tid = path.stem
+    for entry in ticket_entries:
+        tid = entry["task_id"]
         seen_ids.add(tid)
         recent.append(tid)
-        try:
-            _, red_body = split_document(path.read_text(encoding="utf-8", errors="ignore"))
-        except OSError:
-            continue
+        _, red_body = split_document(entry["text"])
         for line in section_lines(red_body):
             freq[line] = freq.get(line, 0) + 1
 
@@ -1166,6 +1159,7 @@ def see_14(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
         "ticket_count": len(seen_ids),
         "recent_tickets": recent[:8],
         "top_redlines": top_redlines,
+        "delivery": build_delivery_snapshot(repo),
     }
     _write_json(plug_dir(root, "see", 14) / "trajectory.json", {"t": time.time(), **summary})
     return summary
@@ -1181,6 +1175,12 @@ def see_15(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
         ticket_last = {}
     switch_last = _read_json(pdir / "switch-last.json", {})
     if not isinstance(switch_last, dict):
+        switch_last = {}
+    active = _task(root) or {}
+    if ticket_last.get("task_id") != active.get("id") or ticket_last.get("report_id") != (active.get("ticket_review") or {}).get("report_id"):
+        ticket_last = {}
+    expected_switch = ((active.get("verify") or {}).get("switch") or {}).get("report_id")
+    if switch_last.get("task_id") != active.get("id") or switch_last.get("report_id") != expected_switch:
         switch_last = {}
 
     ticket_pack = ticket_last.get("pack") if isinstance(ticket_last.get("pack"), dict) else {}

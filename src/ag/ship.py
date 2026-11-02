@@ -13,7 +13,7 @@ MAY_REFUSE_FINISH = True
 TOOLS = [
     {
         "name": "ag_status",
-        "description": "Hook, dirty, open task, process vs product. Root must be enrolled.",
+        "description": "Read-only hook, canonical dirty state, and task-bound delivery facts. Diagnostics are explicit via ag_see.",
         "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}}, "required": ["root"]},
     },
     {
@@ -56,6 +56,8 @@ TOOLS = [
                 "fixed": {"type": "array", "items": {"type": "string"}},
                 "guards": {"type": "array", "items": {"type": "string"}},
                 "defaults": {"type": "array", "items": {"type": "string"}},
+                "continuation_of": {"type": "string"},
+                "contribution": {"type": "string"},
             },
             "required": ["root"],
         },
@@ -63,9 +65,8 @@ TOOLS = [
     {
         "name": "ag_confirm_map",
         "description": (
-            "Record the user's approval of the current intent map and thaw the worktree. "
-            "Pass by=user-message@<utc> only after the user approves in the conversation; omit by when the user "
-            "pressed it themselves. Refused when the ticket review did not pass. The gate itself is unchanged."
+            "Human-only confirmation. The user must execute confirm-map themselves; AI must never call it. "
+            "Checks current review and intent identity, then returns ready only after actual thaw."
         ),
         "inputSchema": {
             "type": "object",
@@ -98,11 +99,24 @@ TOOLS = [
     },
 ]
 
+TOOLS.extend([
+    {"name": "ag_delivery", "description": "Read-only task facts for active or archived task_id; no installation, diagnosis, migration or authorization.", "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["root"]}},
+    {"name": "ag_route", "description": "Record a route adjustment with its reason. Commitment or hard-boundary changes wait for a user decision; this never grants approval.", "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}, "reason": {"type": "string"}, "requires_decision": {"type": "boolean"}}, "required": ["root", "reason"]}},
+])
+
 
 def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     root = Path(str(args.get("root") or "")).expanduser()
     if name == "ag_status":
         return status(root)
+    if name == "ag_delivery":
+        from .delivery import build_delivery_snapshot
+
+        return build_delivery_snapshot(root, str(args.get("task_id") or ""))
+    if name == "ag_route":
+        from .delivery import record_route
+
+        return record_route(root, str(args.get("reason") or ""), requires_decision=bool(args.get("requires_decision")))
     if name == "ag_enroll":
         raw = args.get("test_argv")
         test_argv = [str(x) for x in raw] if isinstance(raw, list) else None
@@ -123,6 +137,8 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
             guards=guards,
             defaults=defaults,
             fixed=fixed,
+            continuation_of=str(args.get("continuation_of") or ""),
+            contribution=str(args.get("contribution") or ""),
         )
     if name == "ag_confirm_map":
         return confirm_map(root, by=str(args.get("by") or ""))

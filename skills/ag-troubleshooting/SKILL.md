@@ -10,6 +10,22 @@ description: >
 
 # `ag-troubleshooting`：常见报错码与排障手册
 
+先用 `python -m ag delivery <PROJECT_ROOT> --task-id <TASK_ID>`（MCP `ag_delivery`）查同票事实，再看 `blockers` 的证据和下一动作。普通建议在 `advisories`；历史拒绝保留原结论，不借全项目 last 成功补齐。`status` 是只读查询，完整体检显式调用 `ag_see`。
+
+| 状态或错误 | 修复动作 |
+| --- | --- |
+| `task-not-found` / `wrong-task` | 核对票号及报告所属任务；不会回退另一票。 |
+| `ticket-review-rejected` | 按具体拒绝修改当前票，重新 `start` 审核；三维阈值不变，累计票数不加严。 |
+| `intent-identity-changed` / `await-user-decision` | 保留原目标和未完成项，由用户决定承诺或边界变化；重新审票及用户确认前不施工。 |
+| `config-error` | 修复当前配置，不能通过默认配置吞掉损坏来源。 |
+| `approved-but-frozen` / `thaw-failed` | 已批准仍未就绪，修复文件权限或占用后由用户亲自重试 `confirm-map`；AI 不得代调。 |
+| `check-digest-mismatch` | 当前票脚本改变，重新 `verify`；检查自动选择本票 `.ag-check/check_*.py`。 |
+| `pending-behavior` / `unproven` 探针 | 保留线索，用 `probe calibrate` 提供实际修复前失败、修复后通过的命令观察；无法区分则待查，不当成已证实回归。真实红灯仍阻塞。 |
+| `history-source-error` / 归档写失败 | 原件保留，修复来源或磁盘后重试 `prune`；索引可重建，不手工删分卷。 |
+| `history-close-pending` / `cleanup-pending` | 活动指针保留，排除文件占用后重试原 `finish` 或 `abandon`；已合入的票用 `finish` 恢复清理。 |
+
+确认路径会把检查、授权、解冻和就绪阶段写到 stderr，stdout 保持 JSON。只有 `ready` 代表实际可写；不要因看到“已批准”就开始施工。活动票在 `<AG_HOME>/projects/<key>/ticket.md`，历史事实在 `history/`，旧散档只在核对身份并可靠发布分卷后回收，准备、审计和备份材料保留。
+
 当你在执行 `ag_enroll`、`ag_start`、`confirm-map`、`ag_verify` 或 `ag_finish` 遇到报错或拦截时，可按本技能包对照 **`[现象/报错]` → `[原因]` → `[解决办法]`** 快速排障。
 
 > 💡 **快速自检提示**：绝大多数状态下，直接运行 `<PYTHON_EXECUTABLE> -m ag status <PROJECT_ROOT>`（或 `python -m ag status <PROJECT_ROOT>`）并查看返回 JSON 中的 `onboarding`、`hazards` 与 `last_error`，就能直接看到针对当前卡点的中文修复路牌。
@@ -53,14 +69,14 @@ description: >
 ## 3. `script-prescreen-rejected` / `ticket-review-rejected`（开票审票未通过）
 
 - **[现象/报错]**：
-  - `ag_start` 返回 `ticket_review.outcome: "rejected"`，且执行 `confirm-map` 时被拦截报错：`intent-map-ticket-rejected: ticket review rejected ...`。
+  - `ag_start` 返回 `ticket_review.outcome: "rejected"`，且执行 `confirm-map` 时被拦截报错：`ticket-review-rejected`。
 - **[原因]**：
   - **情况 A（`script-prescreen-rejected` 本地 0-Token 预筛拦截）**：
-    - `## 意图` 描述太短（少于 30 字），没有用大白话讲清楚业务结果；
-    - `anchor:` 少于 25 字，或只写了正向动作，缺少“当……时……，若……则……”的正反向/边界闭环（`anchor_missing_negative_or_boundary`）；
+    - 意图合并描述少于 20 字，没有用大白话讲清业务结果；
+    - `anchor:` 少于 18 字，或只写正向动作，缺少反向或边界拒绝闭环；
     - 本票红线为空（包括只有常设条款），或写了“代码要规范”“不能有 bug”等空泛套话。重复率只比较本票条款；可信常设条款始终保留全部义务，单独标记来源。
   - **情况 B（`ticket-review-rejected` 独立 `ticket` 席位打回）**：
-    - 独立审核模型对 `goal_clarity`（目标清晰度）、`anchor_chain`（锚点链路完整性）、`redline_focus`（红线聚焦度）任一维度打分 `< 7`，或者提出了需要澄清的疑惑（`doubts` 非空）。
+    - 独立审核模型对 `goal_clarity`（目标清晰度）、`anchor_chain`（锚点链路完整性）、`redline_focus`（红线聚焦度）任一维度打分 `< 7` 或判 `fail`，并有实际违规或关键缺口。`doubts` 中标明非阻塞的普通建议不单独拒绝，先查看 `advisories`。
 - **[解决办法]**：
   1. 查看 `ag_start` 或 `ag_status` 返回的 `ticket_review.reasons`、`ticket_review.suggestions`、`ticket_review.doubts` 以及 `ticket_review.script_digest.hard_failures`。
   2. **无需执行 `ag_abandon`！** 在任务尚未 `confirm-map` 前，直接编辑 `<AG_HOME>/projects/<key>/ticket.md`，补齐大白话业务目标、正反向行为链路锚点和聚焦红线，解答 `doubts` 中的疑问。
@@ -110,8 +126,8 @@ description: >
     - **原因**：`<WORKTREE>` 中修改的 Python 文件存在语法错误（`ast.parse` 编译失败），被本地 0-Token 预筛直接熔断短路，未调用远程大模型。
     - **办法**：查看 `verify.switch.findings` 中指出的具体 `file` 和 `line`，在 `<WORKTREE>` 中修复语法错误后重跑 `ag_verify`。
   - **子情况 6.2：`outcome: "rejected"`（代码终审不通过）**
-    - **原因**：`switch` 终审发现代码未实现 `<AG_HOME>/projects/<key>/ticket.md` 的意图、触碰了 `## 红线`、存在未处理的边界漏洞，或工作树里的一次性自检脚本没有真正检验核心逻辑。同时，`switch` 会根据发现的问题自动种入回归探针（记录在 `planted_probes` 中）。
-    - **办法**：仔细阅读 `verify.switch.summary` 与 `verify.switch.findings`（含精确 `file`、`line` 和 `message`），在 `<WORKTREE>` 中修复代码并完善 `.ag-check/` 脚本，确保新种入的探针也能跑绿，然后重新运行 `ag_verify`。
+    - **原因**：`switch` 终审发现代码未实现票面意图、触碰红线、存在边界漏洞，或本票自检未检验核心逻辑。自动种入的问题指针记录在 `probes_planted` 中，初始为待核查线索。
+    - **办法**：阅读 `verify.switch.summary` 与 `items` 的精确证据，修复代码并完善 `.ag-check/`。待核查指针需用修复前后行为对照校准；已验证探针的真实红灯仍须修复，再运行 `ag_verify`。
   - **子情况 6.3：`outcome: "unavailable"`（审核服务不可用）**
     - 查看 `verify.switch.reason`：
       - `not-configured`：尚未配置独立审核席位（未配置时默认不拦截 `finish`；若需启用，运行 `python -m ag config <PROJECT_ROOT>` 查看配置指南并填写 `critic.json`）。

@@ -12,6 +12,14 @@ description: >
 
 本技能包详细介绍如何通过标准 JSON 配置文件与环境变量配置 `ag` 的独立审核模型（`ticket` 开票审 + `switch` 交卷守门）、如何让 AI 自动诊断配置状态，以及如何在各类 AI 客户端中挂载 `ag` MCP 服务与安装全套自带 Skill。
 
+## 当前接口与职责
+
+日常恢复用 `python -m ag delivery <PROJECT_ROOT> --task-id <TASK_ID>` 或 MCP `ag_delivery` 查看目标、已验证进展、未完成项、阻塞、建议和下一动作。该查询与 `status` 不安装、不迁移、不解冻；完整体检用 `ag_see`，需要生成或修复配置时显式运行 `config/enroll`。
+
+项目配置正本为 `<AG_HOME>/projects/<key>/config.json` 的 `critic` 区，旧 `critic.json` 保持兼容；全局席位仍可从 `<AG_HOME>/critic.json` 读取。`confirm-map` 只读配置并重验审核身份：配置损坏报 `config-error`，审核配置变化报 `intent-identity-changed`，修复并重审后由用户重新确认。API Key 只检查环境变量是否存在，始终不索要、不打印明文。
+
+票面位于 `<AG_HOME>/projects/<key>/ticket.md`，完整展示后用户必须亲自执行 `python -m ag confirm-map <PROJECT_ROOT>`，AI 不得代调 CLI/MCP。进程会即时输出确认阶段，真实解冻成功才 `ready`。新 MCP 同时暴露 `ag_delivery`、`ag_route`；更新软件后重启宿主中的旧 MCP 进程以加载新工具。用 `python -m ag install-skill --target codex` 或 `grok` 同步四套自带技能；安装保留旧版备份。
+
 - **返回项目总入口**：[`AGENTS.md`](../../AGENTS.md)
 - **查看 6 步使用流程**：[`skills/ag-guide/SKILL.md`](../ag-guide/SKILL.md)
 - **意图锚点与写票规范**：[`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)

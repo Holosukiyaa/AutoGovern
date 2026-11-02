@@ -152,6 +152,7 @@ def attach_verify(
     probe_red: list[str],
     critic: dict[str, Any] | None = None,
     tests_failed: bool = False,
+    verification: dict[str, Any] | None = None,
     redlines: list[str] | None = None,
     source_head: str = "",
 ) -> dict[str, Any]:
@@ -166,6 +167,7 @@ def attach_verify(
         probe_red=probe_red,
         critic=critic,
         tests_failed=tests_failed,
+        verification=verification,
         redlines=redlines,
         source_head=source_head,
     )

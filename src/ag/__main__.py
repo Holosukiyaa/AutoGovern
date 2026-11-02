@@ -16,9 +16,13 @@ from .skill_install import install_skill
 
 
 def _probe_main(args: argparse.Namespace) -> int:
-    from .probe import drop, insert, list_probes, run
+    from .probe import calibrate, drop, insert, list_probes, run
 
     root = Path(args.root)
+    if args.probe_cmd == "calibrate":
+        result = calibrate(root, id=args.id, observation=args.observation)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result["valid"] else 1
     if args.probe_cmd == "insert":
         print(
             json.dumps(
@@ -69,12 +73,21 @@ def main(argv: list[str] | None = None) -> int:
     enroll_p.add_argument("--test", nargs=argparse.REMAINDER, dest="test_argv")
     enroll_p.add_argument("--note", default="")
     sub.add_parser("status", help="hook / dirty / process vs product").add_argument("root")
+    delivery_p = sub.add_parser("delivery", help="read active or archived task facts without side effects")
+    delivery_p.add_argument("root")
+    delivery_p.add_argument("--task-id", default="")
+    route_p = sub.add_parser("route", help="record why the implementation route changes")
+    route_p.add_argument("root")
+    route_p.add_argument("--reason", required=True)
+    route_p.add_argument("--requires-decision", action="store_true")
     start_p = sub.add_parser(
         "start",
         help="open a worktree; tracked canonical files stay frozen until finish or abandon",
     )
     start_p.add_argument("root")
     start_p.add_argument("--portrait", default="")
+    start_p.add_argument("--continuation-of", default="")
+    start_p.add_argument("--contribution", default="")
     start_p.add_argument("--fixed", action="append", default=[], help="locked done-state line; repeatable; not rewritten before confirm-map")
     start_p.add_argument("--anchor", action="append", default=[], help="attention anchor for what is still unsettled; repeatable")
     start_p.add_argument("--guard", action="append", default=[], help="guard rule shown beside the route; repeatable")
@@ -149,6 +162,10 @@ def main(argv: list[str] | None = None) -> int:
     plug_p.add_argument("code", nargs="?")
     probe_p = sub.add_parser("probe", help="out-of-tree observation probes (see lane)")
     probe_sub = probe_p.add_subparsers(dest="probe_cmd", required=True)
+    calibrate_p = probe_sub.add_parser("calibrate", help="compare a behavior command against canonical before and approved worktree after")
+    calibrate_p.add_argument("root")
+    calibrate_p.add_argument("id")
+    calibrate_p.add_argument("--observation", required=True)
     insert_p = probe_sub.add_parser(
         "insert",
         help="insert a probe; duplicate id is refused and the store is left unchanged",
@@ -347,8 +364,9 @@ def main(argv: list[str] | None = None) -> int:
             worktree = Path(str((state.get("task") or {}).get("worktree") or ""))
             if not worktree.is_dir():
                 raise ChainBroken("no active AG worktree; ag_start first")
-            if not bool(state.get("intent_map_confirmed")):
-                raise ChainBroken("intent map is not confirmed; user approval required")
+            from .authorization import require_construction
+
+            require_construction(Path(args.root), state.get("task") or {})
             from .worker import artifacts_dir
 
             worker_root = artifacts_dir(worktree) / "workers"
@@ -386,6 +404,9 @@ def main(argv: list[str] | None = None) -> int:
             worktree = Path(str((state.get("task") or {}).get("worktree") or ""))
             if not worktree.is_dir():
                 raise ChainBroken("no active AG worktree; ag_start first")
+            from .authorization import require_construction
+
+            require_construction(Path(args.root), state.get("task") or {})
             print(
                 json.dumps(
                     run_task(
@@ -463,6 +484,17 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(confirm_map(Path(args.root), by=str(args.by or "")), ensure_ascii=False, indent=2))
             return 0
         root = Path(args.root)
+        if args.cmd == "delivery":
+            from .delivery import build_delivery_snapshot
+
+            result = build_delivery_snapshot(root, args.task_id)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 1 if result.get("error") else 0
+        if args.cmd == "route":
+            from .delivery import record_route
+
+            print(json.dumps(record_route(root, args.reason, requires_decision=args.requires_decision), ensure_ascii=False, indent=2))
+            return 0
         if args.cmd == "enroll":
             print(json.dumps(enroll(root, test_argv=args.test_argv, note=args.note), ensure_ascii=False, indent=2))
             return 0
@@ -487,7 +519,9 @@ def main(argv: list[str] | None = None) -> int:
                         anchors=anchors,
                         guards=args.guard,
                         defaults=args.default,
-                        fixed=args.fixed,
+                        fixed=args.fixed or None,
+                        continuation_of=args.continuation_of,
+                        contribution=args.contribution,
                     ),
                     ensure_ascii=False,
                     indent=2,

@@ -18,9 +18,11 @@ INSTRUCTIONS = (
     "File-changing work: ag_status → ag_start → write ONLY in worktree.path → ag_verify → ag_finish. "
     "ag_start reads the ticket from <AG_HOME>/projects/<key>/ticket.md and refuses when that file is missing; "
     "the ticket never lives in the project tree. "
-    "ag_confirm_map records the user's own approval of that map: pass by=user-message@<utc> only after the user "
-    "says so in the conversation, and omit by when the user pressed it themselves. "
-    "ag_verify runs the enrolled test command if any, then probes, critic, then the switch. "
+    "The user must personally execute confirm-map after reviewing the full preview; AI must never call ag_confirm_map. "
+    "ag_delivery is a read-only task query shared with CLI delivery, including archived tasks. "
+    "Keep the complete goal and remaining outcomes; internal phases do not require new tickets. "
+    "Explicit continuation_of carries the common goal, contribution and remaining outcomes to an independently delivered successor. "
+    "ag_verify selects this ticket's actual .ag-check scripts plus declared project checks, then probes and one switch review. "
     "The switch prompt is filled with the red lines sealed at start. "
     "process complete is not product passed. "
     "Unconfigured switch does not refuse finish. No enrolled tests and switch allow → product undeclared. "
@@ -34,8 +36,8 @@ INSTRUCTIONS = (
     "Insert a probe only via ag_probe_insert with already-seen evidence; ag_critic_pack is an exam pack, not a worker ticket. "
     "ag_critic_run does one read-only chat on that pack (no tools). "
     "Path-hit probe red, enrolled tests failing, or a configured switch that is not passed refuse finish. "
-    "Critic is a layer before the switch: rejected or configured unavailable does not refuse this ticket's finish. "
-    "ag_verify attaches critic then switch; cite switch.report_id (sw-). "
+    "The critic compatibility field mirrors the switch receipt and must not be counted twice. "
+    "Cite task_id, switch.report_id (sw-), candidate and actual check evidence. General suggestions are advisories; concrete violations and missing critical evidence remain blockers. "
 )
 TOOLS = lane_tools() + catalog.TOOLS
 

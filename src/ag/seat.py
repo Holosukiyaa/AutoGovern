@@ -185,6 +185,10 @@ def append_log(
             row["thinking"] = str(thinking)[:20000]
         if timings:
             row["timings"] = timings
+        if isinstance(pack, dict):
+            for name in ("candidate", "review_identity", "review_config_identity"):
+                if pack.get(name):
+                    row[name] = pack[name]
         return append_llm_log(root, str(spec["table"]), row)
     except OSError:
         return ""
@@ -310,6 +314,10 @@ def seat_result(
         "store": "",
         "configured": bool(configured),
     }
+    blob["task_id"] = str(task_id)
+    for name in ("candidate", "review_identity", "review_config_identity"):
+        if pack.get(name):
+            blob[name] = pack[name]
     if resolved_thread_id:
         blob["thread_id"] = resolved_thread_id
     if model:
@@ -336,11 +344,6 @@ def seat_result(
         thinking=thinking,
         timings=merged_timings if merged_timings else None,
     )
-    tail = last_llm_event(root, str(spec["table"]))
-    if isinstance(tail, dict):
-        for key in ("report_id", "ts", "outcome", "reason"):
-            if tail.get(key) not in (None, ""):
-                blob[key] = tail[key]
     try:
         _write_report(kind, root, blob)
     except OSError:
@@ -349,18 +352,18 @@ def seat_result(
 
 
 def _prev_ticket_redlines(repo: Path, task_id: str) -> list[str]:
-    from .ticket_doc import archived_ticket_docs, previous_redlines, section_lines, split_document
+    from .ticket_doc import archived_ticket_entries, previous_redlines, section_lines, split_document
 
     tid = str(task_id or "").strip()
     candidates = [
-        p
-        for p in archived_ticket_docs(repo)
-        if p.stem.strip() and (not tid or p.stem.strip() != tid)
+        entry
+        for entry in archived_ticket_entries(repo)
+        if entry["task_id"] and (not tid or entry["task_id"] != tid)
     ]
     if candidates:
-        latest = max(candidates, key=lambda p: p.stat().st_mtime)
+        latest = candidates[-1]
         try:
-            _, red_body = split_document(latest.read_text(encoding="utf-8"))
+            _, red_body = split_document(latest["text"])
             lines = section_lines(red_body)
             if lines:
                 return lines
@@ -368,7 +371,7 @@ def _prev_ticket_redlines(repo: Path, task_id: str) -> list[str]:
             # 这份存档读不出来就当它不存在：上一票的红线回显只是提示，不阻断。
             pass
     # Only fall back to the sealed copy when this ticket was not already archived under its own id.
-    if not (tid and any(p.stem.strip() == tid for p in archived_ticket_docs(repo))):
+    if not (tid and any(entry["task_id"] == tid for entry in archived_ticket_entries(repo))):
         copied = previous_redlines(repo)
         if copied:
             return copied
@@ -407,18 +410,19 @@ def ticket_prescreen(
     anchors: list[dict[str, Any]] | None = None,
     redlines: list[str] | None = None,
     task_id: str = "",
+    goal_link: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Deterministic 0-token local script pre-screening for startup ticket review."""
-    from .ticket_doc import archived_ticket_docs
+    from .ticket_doc import archived_ticket_entries
 
     repo = real_root(root)
     tid = str(task_id or "").strip()
     seen_ids: set[str] = set()
     if tid:
         seen_ids.add(tid)
-    for p in archived_ticket_docs(repo):
-        if p.stem.strip():
-            seen_ids.add(p.stem.strip())
+    for entry in archived_ticket_entries(repo):
+        if entry["task_id"]:
+            seen_ids.add(entry["task_id"])
     p_tasks = project_dir(repo) / "tasks"
     if p_tasks.is_dir():
         for p in p_tasks.glob("*.json"):
@@ -437,7 +441,7 @@ def ticket_prescreen(
         ev_tid = str(ev.get("task_id") or "").strip()
         if ev_tid:
             seen_ids.add(ev_tid)
-        if str(ev.get("reason") or "") == "script-prescreen-rejected":
+        if ev_tid in {tid, str((goal_link or {}).get("task_id") or "")} or str(ev.get("reason") or "") == "script-prescreen-rejected":
             continue
         if str(ev.get("outcome") or "").strip().casefold() not in {"passed", "pass", "allow"}:
             continue
@@ -452,7 +456,7 @@ def ticket_prescreen(
     prev_summaries = prev_summaries[-3:]
 
     ticket_seq = max(1, len(seen_ids))
-    strict_round_mode = ticket_seq >= 3
+    strict_round_mode = False
 
     redline_context = ticket_redline_context(repo, list(redlines or []), tid)
     ticket_redlines = redline_context["ticket_redlines"]
@@ -500,8 +504,8 @@ def ticket_prescreen(
             if len(rl) < 10 or _PLATITUDE_RE.match(rl):
                 hard_failures.append(f"portrait:{rl} (红线过宽或失焦，属空泛套话)")
 
-    if strict_round_mode and overlap >= 0.9 and ticket_redlines:
-        warnings.append("连续第3+票红线与前序票高度重合，请严查是否偷懒照搬而未针对本票窄化")
+    if overlap >= 0.9 and ticket_redlines:
+        warnings.append("本票条款与前票相似；结合目标和条款来源检查必要性，重复本身不是违规证据")
 
     return {
         "ok": len(hard_failures) == 0,
@@ -651,6 +655,7 @@ def ticket_run(
     anchors: list[dict[str, Any]] | None = None,
     redlines: list[str] | None = None,
     task_id: str = "",
+    goal_link: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run deterministic ticket_prescreen then stateless 1-shot DS 3D semantic review."""
     spec = _spec("ticket")
@@ -683,6 +688,7 @@ def ticket_run(
         anchors=anchors,
         redlines=redlines,
         task_id=task_id,
+        goal_link=goal_link,
     )
     packed: dict[str, Any] = {
         "schema": "ag.ticket-pack.v1",
@@ -695,8 +701,13 @@ def ticket_run(
         "standing_redlines": prescreen["standing_redlines"],
         "ticket_redlines": prescreen["ticket_redlines"],
         "script_digest": prescreen,
+        "goal_link": goal_link,
     }
     cfg = load_config(repo)
+    from .authorization import config_identity, review_identity
+
+    packed["review_identity"] = review_identity(intent_body, portrait, list(anchors or []), list(redlines or []), goal_link)
+    packed["review_config_identity"] = config_identity(cfg)
     configured = bool(cfg.get("error") or _configured(cfg))
     exam_text = str(portrait or intent_body or "")
     # feed the cumulative project redlines into the ticket review exam, so the writer
@@ -1028,6 +1039,7 @@ def attach_ticket_review(
     anchors: list[dict[str, Any]] | None = None,
     redlines: list[str] | None = None,
     task_id: str = "",
+    goal_link: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Run startup ticket review (0-token script prescreen + stateless DS 3D seat) and return task metadata."""
@@ -1039,6 +1051,7 @@ def attach_ticket_review(
             anchors=anchors,
             redlines=redlines,
             task_id=task_id,
+            goal_link=goal_link,
         )
         prescreen_failed = str(raw.get("reason") or "") == "script-prescreen-rejected"
         blob: dict[str, Any] = {
@@ -1056,6 +1069,9 @@ def attach_ticket_review(
             "summary": str(raw.get("summary") or ""),
             "script_digest": dict(raw.get("script_digest") or {}),
             "retried_lazy": bool(raw.get("retried_lazy")),
+            "task_id": task_id,
+            "review_identity": raw.get("review_identity") or "",
+            "review_config_identity": raw.get("review_config_identity") or "",
         }
         if raw.get("model"):
             blob["model"] = raw["model"]
@@ -1105,6 +1121,7 @@ def seat_run(
     probe_red: list[str] | None = None,
     critic: dict[str, Any] | None = None,
     redlines: list[str] | None = None,
+    verification: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if kind == "ticket":
         return ticket_run(
@@ -1140,6 +1157,19 @@ def seat_run(
     packed["redlines"] = [str(item).strip() for item in (redlines or []) if str(item).strip()]
     thread_id = f"{SEATS[kind]['table'][:2]}-{task_id or 'run'}-{uuid.uuid4().hex[:8]}"
     packed["thread_id"] = thread_id
+    packed["task_id"] = task_id
+    if task_id:
+        from .delivery import build_delivery_snapshot
+
+        view = build_delivery_snapshot(root, task_id)
+        packed["delivery_context"] = {"goal": view.get("goal"), "goal_link": view.get("goal_link"), "contribution": view.get("contribution"), "remaining": view.get("remaining"), "route_changes": (view.get("progress") or {}).get("route_changes") or []}
+    from .loop import git
+
+    packed["candidate"] = git(Path(tree) if tree is not None else root, "write-tree")
+    if verification is not None:
+        if verification.get("task_id") != task_id or verification.get("candidate") != packed["candidate"]:
+            raise ChainBroken("wrong-task-or-candidate: current verification evidence is not bound to the review")
+        packed["verification"] = verification
     cfg = load_config(root)
     configured = bool(cfg.get("error") or _configured(cfg))
     extra: dict[str, Any] = {
@@ -1314,6 +1344,7 @@ def attach_verify(
     critic: dict[str, Any] | None = None,
     redlines: list[str] | None = None,
     source_head: str = "",
+    verification: dict[str, Any] | None = None,
 ) -> dict[str, Any] | tuple[dict[str, Any], list[Any]]:
     sealed = [str(item).strip() for item in (redlines or []) if str(item).strip()]
     cfg = load_config(enrolled)
@@ -1342,6 +1373,7 @@ def attach_verify(
                 probe_red=probe_red,
                 critic=critic,
                 redlines=sealed,
+                verification=verification,
             )
             logged = True
             blob = {
@@ -1351,6 +1383,8 @@ def attach_verify(
                 "prompt_version": str(raw.get("prompt_version") or ""),
                 "configured": True,
                 "report_id": str(raw.get("report_id") or ""),
+                "task_id": task_id,
+                "candidate": raw.get("candidate") or "",
             }
             if raw.get("thread_id"):
                 blob["thread_id"] = str(raw["thread_id"])
