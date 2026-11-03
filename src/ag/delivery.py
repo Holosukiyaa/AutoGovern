@@ -41,7 +41,7 @@ def task_reviews(root: Path, task_id: str, *, diagnostics: list[dict[str, Any]] 
             if not identity:
                 continue
             if identity in seen:
-                if any(seen[identity].get(name) != event.get(name) for name in ("task_id", "outcome", "candidate")):
+                if any(seen[identity].get(name) != event.get(name) for name in ("task_id", "outcome", "candidate", "product_tree")):
                     raise ChainBroken(f"history-identity-conflict: compatible report {identity}")
                 continue
             seen[identity] = event
@@ -66,7 +66,8 @@ def _candidate_current(root: Path, task: dict[str, Any], verify: dict[str, Any])
     tree = Path(str(task.get("worktree") or ""))
     if not candidate or not tree.is_dir():
         return False
-    diff = subprocess.run(["git", "-C", str(tree), "diff", "--quiet", candidate, "--"], capture_output=True)
+    product = str(verify.get("product_tree") or candidate)
+    diff = subprocess.run(["git", "-C", str(tree), "diff", "--quiet", product, "--"], capture_output=True)
     if diff.returncode not in {0, 1}:
         raise ChainBroken("history-source-error: verification candidate is unavailable")
     if diff.returncode:
@@ -189,6 +190,8 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
             if any(row.get("task_id") != requested for row in foreign):
                 diagnostics.append({"kind": "wrong-task", "source": "verify.switch", "report_id": switch["report_id"]})
     evidence_bound = bool(candidate and report and report.get("candidate") == candidate and report.get("task_id") == requested and report.get("outcome") == switch.get("outcome"))
+    if verify.get("product_tree"):
+        evidence_bound = evidence_bound and bool(report and report.get("product_tree") == verify["product_tree"])
     for current_review in (review, report or {}):
         for item in current_review.get("items") or []:
             if isinstance(item, dict) and str(item.get("status") or "").casefold() in {"warn", "warning", "advice", "suggestion"}:
@@ -203,7 +206,7 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
             merged = subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", merged_head + "^{tree}"], capture_output=True, text=True)
             if merged.returncode:
                 raise ChainBroken("history-source-error: completed candidate commit is unavailable")
-            candidate_current = merged.stdout.strip() == candidate
+            candidate_current = merged.stdout.strip() == str(verify.get("product_tree") or candidate)
 
     verified_ok = bool(verify and verify.get("exit") == 0 and not verify.get("undeclared") and not verify.get("probe_red") and switch.get("outcome") in PASS and evidence_bound and candidate_current)
     if verified_ok:

@@ -400,8 +400,8 @@ def _process(task: dict[str, Any] | None) -> str:
 
 
 def tree_digest(worktree: Path) -> str:
-    # Hash the real candidate, including ignored one-shot checks, without
-    # staging anything in the user's index or committing .ag-check at finish.
+    if git(worktree, "ls-files", "--", ".ag-check"):
+        raise ChainBroken("tracked-ticket-checks: keep .ag-check outside the product index")
     with tempfile.TemporaryDirectory(prefix="ag-tree-") as temporary:
         environment = os.environ.copy()
         environment["GIT_INDEX_FILE"] = str(Path(temporary) / "index")
@@ -409,8 +409,37 @@ def tree_digest(worktree: Path) -> str:
         if current_index.is_file():
             shutil.copyfile(current_index, environment["GIT_INDEX_FILE"])
         git(worktree, "add", "-A", env=environment)
-        git(worktree, "add", "-f", "--", ".ag-check", env=environment)
+        if (worktree / ".ag-check").is_dir():
+            git(worktree, "add", "-f", "--", ".ag-check", env=environment)
         return git(worktree, "write-tree", env=environment)
+
+
+def product_tree(worktree: Path, candidate: str, *, write: bool = False) -> str:
+    """Project the verified snapshot onto product files without changing an index."""
+    listing = subprocess.run(
+        ["git", "-C", str(worktree), "ls-tree", "-z", candidate],
+        capture_output=True, check=False,
+    )
+    if listing.returncode:
+        raise ChainBroken("candidate-product-tree-unavailable")
+    entries = []
+    for entry in listing.stdout.split(b"\0"):
+        if not entry:
+            continue
+        metadata, name = entry.split(b"\t", 1)
+        if name == b".ag-check":
+            continue
+        fields = metadata.split(b" ")
+        entries.append(fields[0].lstrip(b"0") + b" " + name + b"\0" + bytes.fromhex(fields[-1].decode("ascii")))
+    command = ["git", "-C", str(worktree), "hash-object", "-t", "tree"]
+    if write:
+        command.append("-w")
+    hashed = subprocess.run(command + ["--stdin"], input=b"".join(entries), capture_output=True, check=False)
+    if hashed.returncode:
+        raise ChainBroken("candidate-product-tree-unavailable")
+    return hashed.stdout.decode("ascii").strip()
+
+
 def _sh() -> str | None:
     found = shutil.which("sh")
     if found:
@@ -1170,6 +1199,7 @@ def verify(root: Path) -> dict[str, Any]:
     chosen_checks = selection(worktree, [str(x) for x in (state.get("test_argv") or [])])
     test_argv = chosen_checks["commands"]
     candidate_before = tree_digest(worktree)
+    product_before = product_tree(worktree, candidate_before, write=True)
     untracked = [
         ln.strip()
         for ln in git(worktree, "ls-files", "-o", "--exclude-standard", check=False).splitlines()
@@ -1178,7 +1208,7 @@ def verify(root: Path) -> dict[str, Any]:
     timings: dict[str, float] = {}
     t0 = time.perf_counter()
     t_tests = time.perf_counter()
-    record = {**run_checks(worktree, chosen_checks), "untracked": untracked[:50], "task_id": task_id, "candidate": candidate_before}
+    record = {**run_checks(worktree, chosen_checks), "untracked": untracked[:50], "task_id": task_id, "candidate": candidate_before, "product_tree": product_before}
     timings["tests_s"] = round(time.perf_counter() - t_tests, 3)
     append_task_step(enrolled, task_id, "verify-tests", seconds=timings["tests_s"])
     paths = _ticket_paths(worktree, str(task.get("source_head") or ""))
@@ -1240,6 +1270,7 @@ def verify(root: Path) -> dict[str, Any]:
     append_task_step(enrolled, task_id, "verify-probes", probe_red=list(record["probe_red"]), seconds=timings["probes_s"])
     if record["exit"] != 0:
         record["candidate"] = tree_digest(worktree)
+        record["product_tree"] = product_tree(worktree, record["candidate"], write=True)
     portrait = str(task.get("portrait") or "").strip()
     anchor_exam = _anchor_exam(task)
     if anchor_exam:
@@ -1268,7 +1299,7 @@ def verify(root: Path) -> dict[str, Any]:
         probe_red=probe_red,
         critic=None,
         tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
-        verification={"task_id": task_id, "candidate": candidate_before, "check_selection": chosen_checks, **record["evidence"]},
+        verification={"task_id": task_id, "candidate": candidate_before, "product_tree": product_before, "check_selection": chosen_checks, **record["evidence"]},
         redlines=sealed_redlines,
         source_head=str(task.get("source_head") or ""),
     )
@@ -1653,6 +1684,9 @@ def finish(root: Path) -> dict[str, Any]:
     verify_blob = task.get("verify") if isinstance(task.get("verify"), dict) else None
     if verify_blob and verify_blob.get("task_id", task["id"]) != task["id"]:
         _no("wrong-task: verification receipt belongs to another ticket")
+    expected_product = product_tree(worktree, digest)
+    if verify_blob and verify_blob.get("product_tree", expected_product) != expected_product:
+        _no("wrong-product-tree: product does not match the verified candidate; run ag_verify again")
     if verify_blob and verify_blob.get("check_selection"):
         from .checks import selection
 
@@ -1666,6 +1700,8 @@ def finish(root: Path) -> dict[str, Any]:
         originals = list_llm_events(root, "switch_event", 0, task_id=task["id"], report_id=str(switch_receipt.get("report_id") or ""), candidate=digest)
         if len(originals) != 1 or originals[0].get("outcome") != switch_receipt.get("outcome") or (verify_blob or {}).get("candidate") != digest:
             _no("missing-evidence: switch receipt is not bound to this task and candidate; run ag_verify again")
+        if (verify_blob or {}).get("product_tree") and originals[0].get("product_tree") != expected_product:
+            _no("missing-evidence: product tree is not bound to the original switch receipt; run ag_verify again")
     red = _probe_red_ids(verify_blob)
     if red:
         _no(
@@ -1721,7 +1757,12 @@ def _finish_after_thaw(
     task: dict[str, Any],
     worktree: Path,
 ) -> dict[str, Any]:
+    expected_product = product_tree(worktree, task["verified_tree"])
     git(worktree, "add", "-A")
+    if git(worktree, "ls-files", "--", ".ag-check"):
+        raise ChainBroken("tracked-ticket-checks: temporary checks must not enter the product commit")
+    if git(worktree, "write-tree") != expected_product:
+        raise ChainBroken("candidate-changed: staged product differs from the verified candidate")
     if git(worktree, "status", "--porcelain", check=False):
         first_line = (str(task.get("portrait") or "").strip().splitlines() or [""])[0][:70]
         title = first_line or f"ag {task.get('id')}"
@@ -1740,6 +1781,8 @@ def _finish_after_thaw(
                 token_path.unlink()
             except OSError:
                 pass
+    if git(worktree, "rev-parse", "HEAD^{tree}") != expected_product:
+        raise ChainBroken("candidate-changed: committed product differs from the verified candidate")
     try:
         git(root, "merge", "--ff-only", f"ag/{task.get('id')}")
     except ChainBroken:

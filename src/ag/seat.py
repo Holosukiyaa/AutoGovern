@@ -186,7 +186,7 @@ def append_log(
         if timings:
             row["timings"] = timings
         if isinstance(pack, dict):
-            for name in ("candidate", "review_identity", "review_config_identity"):
+            for name in ("candidate", "product_tree", "review_identity", "review_config_identity"):
                 if pack.get(name):
                     row[name] = pack[name]
         return append_llm_log(root, str(spec["table"]), row)
@@ -315,7 +315,7 @@ def seat_result(
         "configured": bool(configured),
     }
     blob["task_id"] = str(task_id)
-    for name in ("candidate", "review_identity", "review_config_identity"):
+    for name in ("candidate", "product_tree", "review_identity", "review_config_identity"):
         if pack.get(name):
             blob[name] = pack[name]
     if resolved_thread_id:
@@ -1163,12 +1163,22 @@ def seat_run(
 
         view = build_delivery_snapshot(root, task_id)
         packed["delivery_context"] = {"goal": view.get("goal"), "goal_link": view.get("goal_link"), "contribution": view.get("contribution"), "remaining": view.get("remaining"), "route_changes": (view.get("progress") or {}).get("route_changes") or []}
-    from .loop import git
+    from .loop import product_tree, tree_digest
 
-    packed["candidate"] = git(Path(tree) if tree is not None else root, "write-tree")
+    candidate_root = Path(tree) if tree is not None else root
+    packed["candidate"] = tree_digest(candidate_root)
+    packed["product_tree"] = product_tree(candidate_root, packed["candidate"])
     if verification is not None:
-        if verification.get("task_id") != task_id or verification.get("candidate") != packed["candidate"]:
+        if (verification.get("task_id") != task_id or verification.get("candidate") != packed["candidate"]
+                or verification.get("product_tree", packed["product_tree"]) != packed["product_tree"]):
             raise ChainBroken("wrong-task-or-candidate: current verification evidence is not bound to the review")
+        if verification.get("check_selection"):
+            from .checks import selection
+            from .managed import lookup_project
+
+            enrolled = (lookup_project(root) or {}).get("test_argv") or []
+            if selection(candidate_root, list(enrolled))["sha256"] != verification["check_selection"].get("sha256"):
+                raise ChainBroken("check-digest-mismatch: current checks are not bound to the verification")
         packed["verification"] = verification
     cfg = load_config(root)
     configured = bool(cfg.get("error") or _configured(cfg))
@@ -1385,6 +1395,7 @@ def attach_verify(
                 "report_id": str(raw.get("report_id") or ""),
                 "task_id": task_id,
                 "candidate": raw.get("candidate") or "",
+                "product_tree": raw.get("product_tree") or "",
             }
             if raw.get("thread_id"):
                 blob["thread_id"] = str(raw["thread_id"])

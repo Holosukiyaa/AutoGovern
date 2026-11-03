@@ -45,6 +45,8 @@ While a task is open, AG freezes tracked files on the canonical checkout. Window
 
 Do **not** store long-lived tests in this repo. Worker checks belong in worktree `.ag-check/` (gitignored, discarded at finish). Old `tests/` is a standing answer key for the next AI; it is forbidden here.
 
+Verification and review bind the same snapshot of product files and `.ag-check`. Receipts also record a `product_tree` without temporary checks to match the final commit. Snapshot calculation leaves the real index unchanged; staged or tracked `.ag-check` files are refused and never enter the product commit.
+
 `ag_verify` runs an enrolled command only if one was set (other products may enroll a tiny smoke). This repo enrolls **no** test command. Then path-hit probes, and finally a single **switch** review call. A **configured** switch that is not passed (`rejected` / void unavailable, `sw-` id) refuses finish. Unconfigured or not-run switch does not. No enrolled tests and switch allow → `product` stays `undeclared`. Probe red still refuses finish.
 
 ```powershell
