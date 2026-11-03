@@ -50,11 +50,11 @@ python -m ag config <PROJECT_ROOT>
 
 该命令会输出结构化的 JSON 配置指南，包含：
 - `global_config_path`：当前环境的全局配置文件路径（`<AG_HOME>/critic.json`）
-- `project_config_path`：当前项目的专属配置文件路径（`<AG_HOME>/projects/<PROJECT_KEY>/critic.json`）
+- `project_config_path`：当前项目的专属配置文件路径（`<AG_HOME>/projects/<PROJECT_KEY>/config.json`）
 - `active_config_path`：当前实际生效的配置文件路径
 - `reviewer_ready`：独立审核席位是否已就绪（布尔值）
 - `api_key_env` 与 `api_key_present`：所需 API Key 环境变量名及当前是否已设置（仅返回 `true/false` 布尔值，**绝不读取或回显密钥明文**）
-- `template` 与 `fields`：可直接复制保存的标准 `critic.json` 模板与每个字段的中文说明
+- `template` 与 `fields`：可直接复制保存的`critic` 配置段模板与每个字段的中文说明
 - `mcp_example`：基于当前 Python 解释器的 MCP 挂载配置示例
 
 ---
@@ -72,7 +72,7 @@ python -m ag config <PROJECT_ROOT>
    - `AG_WORKER_MODEL`（当前施工主力 AI 的模型标识，用于异构模型家族校验）
    - `AG_CRITIC_ALLOW_SAME_FAMILY`（是否允许审核模型与施工模型同家族，`1` / `true` 允许）
 2. **项目级配置文件（次高优先级）**：
-   - 路径：`<AG_HOME>/projects/<PROJECT_KEY>/critic.json`
+   - 路径：`<AG_HOME>/projects/<PROJECT_KEY>/config.json`
    - 适用场景：为某个特定仓库单独指定审核模型或开关状态。
 3. **全局配置文件（默认推荐）**：
    - 路径：`<AG_HOME>/critic.json`（即 `~/.ag/critic.json`）
@@ -80,9 +80,9 @@ python -m ag config <PROJECT_ROOT>
 
 ---
 
-## 四、标准 `critic.json` 配置文件格式与字段说明
+## 四、审核配置格式与字段说明
 
-在 `<AG_HOME>/critic.json`（或项目级 `<AG_HOME>/projects/<PROJECT_KEY>/critic.json`）中写入以下标准 JSON：
+全局 `<AG_HOME>/critic.json` 可直接写入 `template`；项目 `<AG_HOME>/projects/<PROJECT_KEY>/config.json` 应把同样字段放入顶层 `critic` 对象：
 
 ```json
 {

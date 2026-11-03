@@ -7,6 +7,8 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+CHECK_TIMEOUT_S = 300
 from typing import Any
 
 
@@ -26,16 +28,25 @@ def run(worktree: Path, chosen: dict[str, Any]) -> dict[str, Any]:
     commands = chosen["commands"]
     outputs = []
     errors = []
+    timeout_s = float(os.environ.get("AG_CHECK_TIMEOUT", CHECK_TIMEOUT_S))
+    if timeout_s <= 0:
+        raise ValueError("AG_CHECK_TIMEOUT must be positive")
     exits = []
     environment = os.environ.copy()
+    # Bytecode caches are rebuildable process residue, not a source/check edit.
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
     if (worktree / "src" / "ag" / "__init__.py").is_file():
         environment["PYTHONPATH"] = str(worktree / "src") + os.pathsep + environment.get("PYTHONPATH", "")
     for command in commands:
         try:
-            completed = subprocess.run(command, cwd=str(worktree), capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, env=environment)
+            completed = subprocess.run(command, cwd=str(worktree), capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, env=environment, timeout=timeout_s)
             exits.append(completed.returncode)
             outputs.append(completed.stdout or "")
             errors.append(completed.stderr or "")
+        except subprocess.TimeoutExpired as exc:
+            exits.append(124)
+            outputs.append((exc.stdout.decode("utf-8", errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout) or "")
+            errors.append(f"check timed out after {timeout_s:g}s; inspect and repair the check before retry")
         except OSError as exc:
             exits.append(1)
             errors.append(str(exc))

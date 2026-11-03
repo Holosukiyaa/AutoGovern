@@ -46,7 +46,7 @@ description: >
 - **[原因]**：
   - `ag` 要求主仓检出区（`<PROJECT_ROOT>`）在开工前、施工期间和合入时必须保持 Git 状态完全干净。
   - 若 `<PROJECT_ROOT>` 下有未提交的跟踪文件修改，或存在未被忽略的未跟踪杂物文件，护栏会立即熔断拒绝，防止脏代码混入或破坏 `--ff-only` 快进合入。
-  - （注：`.data/` 与 `.ag-check/` 会由 `ag` 自动写入 `<PROJECT_ROOT>/.git/info/exclude`，不会触发此报错。）
+  - （注：`.ag-check/` 会由 `ag` 自动写入 `<PROJECT_ROOT>/.git/info/exclude`，不会触发此报错。）
 - **[解决办法]**：
   1. 在 `<PROJECT_ROOT>` 下运行 `git status --porcelain` 查看具体是哪些文件脏了。
   2. **若当前没有活动任务（`process: idle`）**：将 `<PROJECT_ROOT>` 下的改动正式 `git commit`、暂存 `git stash`，或清理多余未跟踪文件后再重试。
@@ -130,10 +130,10 @@ description: >
     - **办法**：阅读 `verify.switch.summary` 与 `items` 的精确证据，修复代码并完善 `.ag-check/`。待核查指针需用修复前后行为对照校准；已验证探针的真实红灯仍须修复，再运行 `ag_verify`。
   - **子情况 6.3：`outcome: "unavailable"`（审核服务不可用）**
     - 查看 `verify.switch.reason`：
-      - `not-configured`：尚未配置独立审核席位（未配置时默认不拦截 `finish`；若需启用，运行 `python -m ag config <PROJECT_ROOT>` 查看配置指南并填写 `critic.json`）。
-      - `missing_api_key:<ENV_NAME>`：已启用 `critic.json`，但当前环境中未找到 `<ENV_NAME>` 环境变量。请设置对应环境变量后重跑 `ag_verify`（详见 [`skills/ag-config/SKILL.md`](../ag-config/SKILL.md)）。
-      - `same_family:<FAMILY>`：`critic.json` 中的审核 `model` 与施工 `worker_model` 属于同一模型家族。请更换异构审核模型，或在 `critic.json` 中显式设置 `"allow_same_family": true`。
-      - `void:...`（如网络超时、HTTP 报错或返回非 JSON）：远程大模型接口调用异常。因已启用审核席位，为遵循 fail-closed 原则，`void` 状态的 `switch` 会拒绝 `finish`。请检查网络、`endpoint` 地址或适当调大 `critic.json` 中的 `"timeout"`（如 `120`），然后重跑 `ag_verify`。
+      - `not-configured`：尚未配置独立审核席位（未配置时默认不拦截 `finish`；若需启用，运行 `python -m ag config <PROJECT_ROOT>` 查看配置指南并填写 `config.json` 的 `critic` 段）。
+      - `missing_api_key:<ENV_NAME>`：已在 `config.json` 启用审核，但当前环境中未找到 `<ENV_NAME>` 环境变量。请设置对应环境变量后重跑 `ag_verify`（详见 [`skills/ag-config/SKILL.md`](../ag-config/SKILL.md)）。
+      - `same_family:<FAMILY>`：`config.json` 的 `critic` 段中的审核 `model` 与施工 `worker_model` 属于同一模型家族。请更换异构审核模型，或在 `critic` 段中显式设置 `"allow_same_family": true`。
+      - `void:...`（如网络超时、HTTP 报错或返回非 JSON）：远程大模型接口调用异常。因已启用审核席位，为遵循 fail-closed 原则，`void` 状态的 `switch` 会拒绝 `finish`。请检查网络、`endpoint` 地址或适当调大 `critic` 段中的 `"timeout"`（如 `120`），然后重跑 `ag_verify`。
 
 ---
 

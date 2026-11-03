@@ -219,7 +219,7 @@ def main(argv: list[str] | None = None) -> int:
         help="one read-only critic chat; does not refuse finish",
         description=(
             "One read-only critic chat; does not refuse finish. "
-            "Config file: AG_HOME/projects/<key>/critic.json "
+            "Config file: AG_HOME/projects/<key>/config.json (critic section) "
             "(enabled, endpoint, model, api_key_env, timeout, worker_model, allow_same_family). "
             "Env overrides: AG_CRITIC_ENABLED, AG_CRITIC_ENDPOINT, AG_CRITIC_MODEL, "
             "AG_CRITIC_API_KEY_ENV, AG_CRITIC_TIMEOUT, AG_CRITIC_WORKER_MODEL, "

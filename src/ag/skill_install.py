@@ -58,6 +58,9 @@ def install_skill(target: str) -> str:
         if child.is_dir() and child.name not in names and (child / "SKILL.md").is_file():
             names.append(child.name)
     installed: list[str] = []
+    # Discovery scans this directory. Backups belong beside it, not in it.
+    backup_root = base_dest.parent / "ag-skill-backups"
+    backup_root.mkdir(parents=True, exist_ok=True)
     for name in names:
         source = skills_root / name
         if not source.is_dir() or not (source / "SKILL.md").is_file():
@@ -66,13 +69,16 @@ def install_skill(target: str) -> str:
         temporary = base_dest / f".{name}.install-{uuid.uuid4().hex}"
         shutil.copytree(source, temporary)
         backup = None
-        if dest.exists():
-            backup = dest.with_name(dest.name + ".bak")
-            if backup.exists():
-                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-                backup = dest.with_name(dest.name + f".bak-{stamp}-{uuid.uuid4().hex[:6]}")
-            os.replace(dest, backup)
         try:
+            if dest.exists():
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+                backup = backup_root / f"{name}-{stamp}-{uuid.uuid4().hex[:6]}"
+                os.replace(dest, backup)
+            # Migrate the legacy .bak form as well; do not leave a second valid skill.
+            legacy_backup = dest.with_name(dest.name + ".bak")
+            if legacy_backup.exists():
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+                os.replace(legacy_backup, backup_root / f"{name}-legacy-{stamp}-{uuid.uuid4().hex[:6]}")
             os.replace(temporary, dest)
         except OSError:
             if backup is not None and not dest.exists():

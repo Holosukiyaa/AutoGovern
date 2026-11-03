@@ -132,4 +132,5 @@ anchor: 在哪个交互或数据链路上收敛什么行为：当输入或状态
   - 严禁静默篡改或删除已锁定的锚点。
 - **Worker 协同与验货**：
   - 如需拆分任务，仅使用 `python -m ag worker-create <PROJECT_ROOT> ...` 创建（最多 3 个 Worker），并将 `anchor_preview`、`<AG_HOME>/projects/<key>/ticket.md` 与对应锚点传入 Worker 提示词。
+  - Worker 守卫仅防误操作，不是安全沙箱，不能用来运行不可信代码。
   - 完工后必须运行 `ag_verify` 接受机器与 `switch` 终审，严禁口头自证通过。

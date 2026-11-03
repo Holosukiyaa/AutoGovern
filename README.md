@@ -24,7 +24,7 @@
 继 v0.3（交付护栏 + 独立审核底座）之后，v0.4 让 ag「越用越懂你的项目」，并把状态目录管得不膨胀、可回溯。
 
 - **结构体检**：通用内核发现孤岛文件、假装配依赖、反向引用；多语言适配器表（Python / TS / Go / Rust / Java），仓里有什么语言就自动用哪套规则；只出事实不拦截。
-- **一根配置 `config.json`**：项目所有开关汇到一份根配置——审核席位、体检适配器、防膨胀闸、48 条策略清单（带中文名 / 开关 / 可否关）；`python -m ag config-show <PROJECT_ROOT>` 一键看人读版。
+- **一根配置 `config.json`**：项目所有开关汇到一份根配置——审核席位、体检适配器、防膨胀闸、49 条策略清单（带中文名 / 开关 / 可否关）；`python -m ag config-show <PROJECT_ROOT>` 一键看人读版。
 - **跨会话复盘**：每张票归档「想解决什么 / 发现什么 / 做对 / 做错 + 教训」四段；项目红线册随票累积、开票自动喂给 AI；`python -m ag retro <PROJECT_ROOT>` 出人读复盘报告。新会话的 AI 不再从零开始。
 - **防膨胀闸**：席位过程日志跑完即清、usage 计数滚动截断、`python -m ag prune <PROJECT_ROOT>` 压旧残留留索引——留结论、砍流水。
 - **项目状态版本化**：`<AG_HOME>/projects/<key>` 是本地 git 仓，只跟踪结论与配置，误删可恢复。
@@ -32,9 +32,9 @@
 
 ---
 
-## v0.5 新能力
+## v0.6 新能力
 
-在 v0.4「越用越懂你的项目」之上，v0.5 把「发现问题的眼睛」擦亮，并把状态目录管得更清爽。
+在 v0.4「越用越懂你的项目」之上，v0.5 擦亮发现问题的眼睛并治理状态目录；v0.6 进一步修复交付、历史迁移和故障恢复缺陷。
 
 - **孤岛清单（see-16）**：结构体检算出的孤岛文件（零入口可达、零引用）过去只埋在考卷 JSON 里看不见，现在 `ag_see` 报告里直接按语言列出每个孤岛的仓内相对路径与总数。只发现、只报告，不拦票、不替你判断该不该删。
 - **复盘不再失忆**：每张票复盘的「想解决什么」过去恒为空（取主题只读 portrait，MCP 开票不传它），现在 portrait 空时自动从票档 `## 意图` 提取人话主题，且所有来源统一先清洗再落盘，顺带根治了一条考卷正文直接落盘的隐私隐患。
@@ -68,7 +68,7 @@ ag_status → ag_start → confirm-map → 仅在 <WORKTREE> 内施工 → ag_ve
 ### 快速开始命令
 
 ```powershell
-# 1. 登记目标仓库（自动将 .data/ 与 .ag-check/ 写入本地 .git/info/exclude 并生成初始票据模板）
+# 1. 登记目标仓库（自动将 .ag-check/ 写入本地 .git/info/exclude 并生成初始票据模板）
 python -m ag enroll <PROJECT_ROOT>
 
 # 2. 查看配置向导与就绪诊断（AI 可据此引导用户完成配置）
@@ -80,8 +80,8 @@ python -m ag mcp
 
 审计与状态存储在 `<AG_HOME>/projects/<PROJECT_KEY>/`（默认 `<AG_HOME>` 为 `~/.ag`），整个目录是一个本地 git 仓——只跟踪结论与配置（票文、红线册、复盘、config.json），不跟踪流水日志；每次 `finish`/`abandon` 自动提交一次，误删可 `git` 恢复：
 - 结论流水：`<seat>.jsonl`（append-only 事件日志，0-Token 脚本预筛与 DS 审核结论的唯一正本）
-- 任务步进链：`<AG_HOME>/projects/<PROJECT_KEY>/tasks/<TASK_ID>.json`（可通过 `ag_status.timeline_path` 或 `python -m ag critic-log <PROJECT_ROOT>` 查看）
-- 一根配置：`config.json`（审核席位 / 体检适配器 / 防膨胀闸 / 48 条策略开关，一眼看清开了什么）
+- 任务事实链：`history/current.jsonl` 与历史分卷；`tasks/<TASK_ID>.json` 仅为可迁移的旧格式。
+- 一根配置：`config.json`（审核席位 / 体检适配器 / 防膨胀闸 / 49 条策略开关，一眼看清开了什么）
 
 ---
 
@@ -125,7 +125,7 @@ anchor!: 严禁修改原有的鉴权中间件签名
 
 ---
 
-## 标准配置文件格式（`critic.json`）
+## 审核配置（项目 `config.json` 的 `critic` 段）
 
 通过以下命令生成或查看当前配置状态与标准模板（AI 会自动读取其中的 `config_guide` 指导用户完成配置）：
 
@@ -133,7 +133,7 @@ anchor!: 严禁修改原有的鉴权中间件签名
 python -m ag config <PROJECT_ROOT>
 ```
 
-配置文件支持**全局级**（`<AG_HOME>/critic.json`，默认 `~/.ag/critic.json`，配置一次所有项目通用）与**项目级**（`<AG_HOME>/projects/<PROJECT_KEY>/critic.json`，覆盖全局配置）。API Key 存放在系统环境变量中，**切勿将密钥明文写入 `critic.json`**：
+配置支持**全局级** `<AG_HOME>/critic.json` 与**项目级** `<AG_HOME>/projects/<PROJECT_KEY>/config.json` 的 `critic` 段；项目级覆盖全局。旧项目级 `critic.json` 仅作兼容读取。API Key 存放在环境变量中，切勿写入 JSON：
 
 ```json
 {
@@ -170,6 +170,7 @@ python -m ag install-skill --target grok
 python -m ag worker-create <PROJECT_ROOT> --portrait "做成之后：..." --anchor "保持原有鉴权行为不变" --hard-anchor "严禁运行 ag finish" --write-allow src/auth --write-allow src/core
 ```
 
+- Worker 命令守卫只用于防误操作；它不是文件系统沙箱，不能约束不可信进程或替代真实验收。
 - 档案生成在 `<AG_HOME>/worktrees/<PROJECT_KEY>/<TASK_ID>.artifacts/workers/<WORKER_ID>/` 下（包含 `task.json` 与 `TASK.md`）。
 - Worker 完成后写入符合 `ag.worker.result.v1` 契约的 `result.json`，可通过以下命令校验：
   ```powershell

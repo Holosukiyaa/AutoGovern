@@ -11,7 +11,6 @@ from .managed import ChainBroken, ag_home, project_key, real_root
 # 通用名目录：可能是项目自己的数据（例如某个项目的应用数据就放在这里）。
 # ag 不再往项目里写它，扫描时一律跳过。全仓唯一的字面量。
 FOREIGN_DIR_NAME = ".data"
-PENDING_NAME = "pending_repairs.json"
 LLM_PREFIX = {"critic_event": "cr", "switch_event": "sw", "ticket_event": "tr"}
 LLM_JSONL = {"critic_event": "critic.jsonl", "switch_event": "switch.jsonl", "ticket_event": "ticket.jsonl"}
 
@@ -233,56 +232,3 @@ def append_llm_log(root: Path, table: str, row: dict[str, Any]) -> str:
         raise ChainBroken(f"history-source-error: malformed review events: {scan['path']}")
     append_fact(root, table, str(row.get("task_id") or ""), row, number_prefix=prefix, floor=max(int(scan["top_seq"]), len(scan["rows"])))
     return str(row["report_id"])
-
-
-def pending_path(root: Path) -> Path:
-    return ag_home() / "projects" / project_key(real_root(root)) / PENDING_NAME
-
-
-def load_pending(root: Path) -> list[dict[str, Any]]:
-    path = pending_path(root)
-    if not path.is_file():
-        return []
-    try:
-        blob = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
-    if not isinstance(blob, list):
-        return []
-    return [item for item in blob if isinstance(item, dict)]
-
-
-def save_pending(root: Path, items: list[dict[str, Any]]) -> None:
-    path = pending_path(root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(items, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def enqueue_repair(root: Path, item: dict[str, Any]) -> None:
-    rows = load_pending(root)
-    rows.append(item)
-    save_pending(root, rows)
-
-
-def pop_pending(root: Path) -> dict[str, Any] | None:
-    rows = load_pending(root)
-    if not rows:
-        return None
-    head = rows.pop(0)
-    save_pending(root, rows)
-    return head
-
-
-def pending_summary(root: Path) -> dict[str, Any]:
-    rows = load_pending(root)
-    out: dict[str, Any] = {"count": len(rows)}
-    if not rows:
-        return out
-    head = rows[0]
-    line = str(head.get("repair_portrait") or "").splitlines()
-    first = (line[0] if line else "")[:80]
-    out["head"] = {
-        "heal_report_id": str(head.get("heal_report_id") or ""),
-        "portrait_line": first,
-    }
-    return out

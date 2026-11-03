@@ -287,7 +287,10 @@ def migrate_closed(root: Path, active_id: str = "") -> dict[str, Any]:
             if not _migration_source(path, base):
                 raise ValueError("linked or unavailable ticket source")
             raw = path.read_bytes()
-            text = raw.decode("utf-8")
+            # Keep `raw` for the immutable source comparison below. Only the
+            # derived ticket text uses Path.read_text()'s universal-newline
+            # semantics, so LF, CRLF and CR have the same history identity.
+            text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
             if f"task: {path.stem}" not in text.splitlines():
                 raise ValueError("ambiguous ticket identity")
             records.append(record("ticket", path.stem, {"task_id": path.stem, "text": text}))

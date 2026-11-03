@@ -9,6 +9,7 @@ import time
 import shutil
 import subprocess
 import sys
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +25,11 @@ from .see import note as usage_note
 
 SRC = Path(__file__).resolve().parents[1]
 PREV_UNSET = "__unset__"
+PREVIOUS_HOOK_TIMEOUT_S = 120
+CLOSE_PHASE_MERGED = "merged"
+CLOSE_PHASE_ARCHIVE_PENDING = "archive_pending"
+CLOSE_PHASE_CLEANUP_PENDING = "cleanup_pending"
+CLOSE_PHASE_CLOSED = "closed"
 CANARY_MSG = "ag-canary-do-not-keep"
 
 
@@ -108,19 +114,48 @@ def _hooks_dir(key: str) -> Path:
     return ag_home() / "hooks" / key
 
 
-def _hook_src(enrolled: Path | None = None) -> Path:
+def _hook_src(enrolled: Path | None = None, verified_executor_src: str = "") -> Path:
     if enrolled is not None:
+        # Self-governance delivery must execute the exact candidate that was
+        # verified, not whatever source happens to be in the canonical checkout.
+        key = git(enrolled, "config", "--local", "--get", "ag.key", check=False) or project_key(enrolled)
+        task = load_task(key) or {}
+        pinned = verified_executor_src or str(task.get("verified_executor_src") or "")
+        if pinned and (Path(pinned) / "ag" / "__init__.py").is_file():
+            return Path(pinned)
         candidate = Path(enrolled) / "src"
         if (candidate / "ag").is_dir():
             return candidate
     return SRC
 
 
-def _write_hook(key: str, enrolled: Path | None = None) -> Path:
+def _pin_verified_executor(root: Path, key: str, task: dict[str, Any], worktree: Path) -> Path | None:
+    """Snapshot a verified AG source tree for the real delivery hook."""
+    if not (worktree / "src" / "ag" / "__init__.py").is_file():
+        return None
+    source = worktree / "src" / "ag"
+    target = ag_home() / "executors" / key / str(task["id"]) / "src"
+    temporary = target.with_name(target.name + ".installing")
+    if temporary.exists():
+        shutil.rmtree(temporary)
+    temporary.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        source,
+        temporary / "ag",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "*.pyo"),
+    )
+    if temporary.exists():
+        shutil.rmtree(target) if target.exists() else None
+        os.replace(temporary, target)
+    task["verified_executor_src"] = str(target)
+    return target
+
+
+def _write_hook(key: str, enrolled: Path | None = None, verified_executor_src: str = "") -> Path:
     folder = _hooks_dir(key)
     folder.mkdir(parents=True, exist_ok=True)
     home = _posix(ag_home())
-    src = _posix(_hook_src(enrolled))
+    src = _posix(_hook_src(enrolled, verified_executor_src))
     exe = _posix(Path(sys.executable))
     body = (
         "#!/bin/sh\n"
@@ -365,10 +400,17 @@ def _process(task: dict[str, Any] | None) -> str:
 
 
 def tree_digest(worktree: Path) -> str:
-    git(worktree, "add", "-A")
-    return git(worktree, "write-tree")
-
-
+    # Hash the real candidate, including ignored one-shot checks, without
+    # staging anything in the user's index or committing .ag-check at finish.
+    with tempfile.TemporaryDirectory(prefix="ag-tree-") as temporary:
+        environment = os.environ.copy()
+        environment["GIT_INDEX_FILE"] = str(Path(temporary) / "index")
+        current_index = _resolve_git_path(worktree, git(worktree, "rev-parse", "--git-path", "index"))
+        if current_index.is_file():
+            shutil.copyfile(current_index, environment["GIT_INDEX_FILE"])
+        git(worktree, "add", "-A", env=environment)
+        git(worktree, "add", "-f", "--", ".ag-check", env=environment)
+        return git(worktree, "write-tree", env=environment)
 def _sh() -> str | None:
     found = shutil.which("sh")
     if found:
@@ -398,10 +440,13 @@ def _run_previous_pre_commit(worktree: Path) -> int:
         sys.stderr.write("ag: previous pre-commit needs sh; refusing deliver\n")
         return 1
     try:
-        completed = subprocess.run(command, cwd=str(worktree), check=False)
+        completed = subprocess.run(command, cwd=str(worktree), check=False, timeout=PREVIOUS_HOOK_TIMEOUT_S)
     except OSError as exc:
         sys.stderr.write(f"ag: previous pre-commit could not run: {exc}\n")
         return 1
+    except subprocess.TimeoutExpired:
+        sys.stderr.write(f"ag: previous pre-commit timed out after {PREVIOUS_HOOK_TIMEOUT_S}s; refusing deliver\n")
+        return 124
     return int(completed.returncode)
 
 
@@ -598,7 +643,7 @@ def _onboarding_status(
     if not ticket_ready:
         next_step = "1. 请在 <AG_HOME>/projects/<key>/ticket.md 中编写 ## 意图、正反完整链路 anchor: 与聚焦 ## 红线，然后调用 ag_start。"
     elif task is None:
-        next_step = "2. <AG_HOME>/projects/<key>/ticket.md 已就绪；请先核对内容，再调用 ag_start 创建隔离工作树并运行开票审票（如需启用 DS 独立审核，请按 onboarding.config_guide 指引配置 critic.json）。"
+        next_step = "2. <AG_HOME>/projects/<key>/ticket.md 已就绪；请先核对内容，再调用 ag_start 创建隔离工作树并运行开票审票（如需启用 DS 独立审核，请按 onboarding.config_guide 指引配置 config.json 的 critic 段）。"
     elif not bool(task.get("intent_map_confirmed")):
         tr = task.get("ticket_review") if isinstance(task.get("ticket_review"), dict) else {}
         if bool(tr.get("configured")) and str(tr.get("outcome") or "").strip().casefold() not in {"passed", "pass", "allow"}:
@@ -1193,12 +1238,25 @@ def verify(root: Path) -> dict[str, Any]:
     }
     timings["probes_s"] = round(time.perf_counter() - t_tests - timings["tests_s"], 3)
     append_task_step(enrolled, task_id, "verify-probes", probe_red=list(record["probe_red"]), seconds=timings["probes_s"])
+    if record["exit"] != 0:
+        record["candidate"] = tree_digest(worktree)
     portrait = str(task.get("portrait") or "").strip()
     anchor_exam = _anchor_exam(task)
     if anchor_exam:
         portrait = f"{portrait}\n\n{anchor_exam}" if portrait else anchor_exam
     probe_red = list(record["probe_red"])
     sealed_redlines = [str(item) for item in (task.get("redlines") or [])]
+    if record["exit"] != 0:
+        # Failing local checks are already actionable evidence. Do not spend an
+        # independent review on a candidate that cannot pass its own checks.
+        task["verify"] = record
+        task["verified_tree"] = ""
+        save_task(key, task)
+        append_task_step(enrolled, task_id, "verify-refused", reason="checks-failed")
+        usage_note(root, "ship", 6, "block", f"exit {record['exit']}")
+        out = status(root)
+        out.update({"verify": record, "verified_tree": "", "next_action": "fix-and-verify"})
+        return out
     from .switch import attach_verify as attach_switch
 
     t_switch = time.perf_counter()
@@ -1263,8 +1321,17 @@ def verify(root: Path) -> dict[str, Any]:
         record["stderr"] += "\ncandidate-changed: code or checks changed during verification"
     task["verify"] = record
     task["verified_tree"] = digest if record["exit"] == 0 and not record["probe_red"] and not _switch_block_message(record) else ""
+    # A check or review result is evidence, not proof that every soft anchor is
+    # complete. Keep the current route until the user-facing goal is delivered.
     task["check_argv"] = test_argv
     record["evidence"]["verified_tree"] = task["verified_tree"]
+    if task["verified_tree"]:
+        pinned = _pin_verified_executor(enrolled, key, task, worktree)
+        _write_hook(key, enrolled, str(pinned or ""))
+    else:
+        task.pop("verified_executor_src", None)
+        _write_hook(key, enrolled)
+    record["executor"] = {"source": task.get("verified_executor_src") or str(_hook_src(enrolled)), "candidate": digest}
     save_task(key, task)
     from .delivery import task_facts
 
@@ -1436,6 +1503,21 @@ def _cleanup(root: Path, task: dict[str, Any]) -> None:
     reference = f"refs/heads/ag/{task_id}"
     if git_run(root, "show-ref", "--verify", "--quiet", reference).returncode == 0:
         git(root, "branch", "-D", f"ag/{task_id}")
+    executor_container = (ag_home() / "executors" / project_key(root)).resolve()
+    executor = executor_container / task_id
+    if executor.resolve().parent != executor_container:
+        raise ChainBroken("cleanup-pending: executor path escapes the managed container")
+    # A verified source snapshot is needed only while this ticket can commit.
+    # Historical receipts retain its identity; they do not need another AG copy.
+    if executor.is_symlink() or (executor.exists() and not executor.is_dir()):
+        raise ChainBroken("cleanup-pending: executor path is not a managed directory")
+    if executor.is_dir():
+        shutil.rmtree(executor)
+    for folder in (executor_container, container):
+        try:
+            folder.rmdir()
+        except OSError:
+            pass
 
 
 def _close_task(root: Path, key: str, task: dict[str, Any], *, process: str, product: str, head: str = "") -> dict[str, Any]:
@@ -1447,6 +1529,9 @@ def _close_task(root: Path, key: str, task: dict[str, Any], *, process: str, pro
     task["close_product"] = product
     if head:
         task["merged_head"] = head
+    task["close_phase"] = task.get("close_phase") or (CLOSE_PHASE_MERGED if process == "completed" else CLOSE_PHASE_ARCHIVE_PENDING)
+    save_task(key, task)
+    task["close_phase"] = CLOSE_PHASE_ARCHIVE_PENDING
     save_task(key, task)
     if not task.get("close_recorded"):
         worktree = Path(str(task.get("worktree") or ""))
@@ -1463,6 +1548,8 @@ def _close_task(root: Path, key: str, task: dict[str, Any], *, process: str, pro
             task["archive_error"] = str(exc)
             save_task(key, task)
             raise ChainBroken(f"history-close-pending: task and worktree retained; retry {process}: {exc}") from exc
+    task["close_phase"] = CLOSE_PHASE_CLEANUP_PENDING
+    save_task(key, task)
     try:
         _cleanup(root, task)
     except Exception as exc:
@@ -1471,6 +1558,7 @@ def _close_task(root: Path, key: str, task: dict[str, Any], *, process: str, pro
         append_task_step(root, task["id"], "cleanup-pending", error=str(exc), task=task_facts(task))
         raise ChainBroken(f"cleanup-pending: task retained; retry finish/abandon: {exc}") from exc
     task.pop("cleanup_error", None)
+    task["close_phase"] = CLOSE_PHASE_CLOSED
     append_task_step(root, task["id"], "cleanup-complete", task=task_facts(task))
     blob = load_managed()
     for row in blob["projects"]:

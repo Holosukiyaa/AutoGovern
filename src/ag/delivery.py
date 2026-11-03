@@ -21,7 +21,7 @@ def intent_identity(task: dict[str, Any], text: str, sealed_redlines: str) -> st
 
 
 def task_facts(task: dict[str, Any]) -> dict[str, Any]:
-    names = ("id", "branch", "source_head", "worktree", "portrait", "anchors", "fixed", "fixed_rules", "redlines", "anchor_preview", "intent_identity", "intent_map_confirmed", "authorization_identity", "worktree_ready", "thaw_error", "ticket_review", "verify", "verified_tree", "goal_link", "check_argv", "process", "cleanup_error", "archive_error", "merged_head")
+    names = ("id", "branch", "source_head", "worktree", "portrait", "anchors", "fixed", "fixed_rules", "redlines", "anchor_preview", "intent_identity", "intent_map_confirmed", "authorization_identity", "worktree_ready", "thaw_error", "ticket_review", "verify", "verified_tree", "goal_link", "check_argv", "verified_executor_src", "process", "cleanup_error", "archive_error", "merged_head")
     return {name: task[name] for name in names if name in task}
 
 
@@ -90,6 +90,15 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
     base = project_dir(root)
     active = _read_object(base / "task.json")
     requested = str(task_id or active.get("id") or "").strip()
+    if not requested:
+        # Select the most recently opened task, not the one whose old cleanup or
+        # imported archive happened to be touched last.
+        candidates = [
+            row for row in read_records(root, kind="task-step")
+            if row["payload"].get("phase") == "start" and str(row.get("task_id") or "").strip()
+        ]
+        candidates.sort(key=lambda row: str(row["payload"].get("ts") or ""))
+        requested = str(candidates[-1]["task_id"] if candidates else "").strip()
     if requested and not re.fullmatch(r"[A-Za-z0-9_-]+", requested):
         return {"schema": "ag.delivery.v1", "root": str(root), "task_id": requested, "found": False, "error": "task-not-found", "readiness": "task-not-found", "next_action": "check-task-id"}
     if not requested:
@@ -117,7 +126,9 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
         candidate_task = step.get("task")
         if isinstance(candidate_task, dict):
             if candidate_task.get("id") == requested:
-                task = dict(candidate_task)
+                # Later cleanup/status steps are deliberately small snapshots;
+                # they must not erase the richer finish and verification facts.
+                task = {**task, **candidate_task}
             else:
                 diagnostics.append({"kind": "wrong-task", "source": timeline["path"], "phase": step.get("phase")})
     is_active = active.get("id") == requested
@@ -193,6 +204,7 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
             if merged.returncode:
                 raise ChainBroken("history-source-error: completed candidate commit is unavailable")
             candidate_current = merged.stdout.strip() == candidate
+
     verified_ok = bool(verify and verify.get("exit") == 0 and not verify.get("undeclared") and not verify.get("probe_red") and switch.get("outcome") in PASS and evidence_bound and candidate_current)
     if verified_ok:
         verified = [{"result": outcome, "report_id": switch.get("report_id"), "candidate": candidate, "checks": verify.get("check_argv") or [], "source": report["ref"]} for outcome in fixed]

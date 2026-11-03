@@ -72,7 +72,7 @@ description: >
 
 **执行效果**：
 - 在 `<AG_HOME>/projects/<PROJECT_KEY>/` 下初始化项目治理数据库与目录。
-- 自动将 `.data/` 与 `.ag-check/` 写入 `<PROJECT_ROOT>/.git/info/exclude`（不会污染项目本身的 `.gitignore`）。
+- 自动将 `.ag-check/` 写入 `<PROJECT_ROOT>/.git/info/exclude`（不会污染项目本身的 `.gitignore`）。
 - 若 `<AG_HOME>/projects/<key>/ticket.md` 尚不存在，自动生成一份带中文说明的初始票据模板。
 - 安装 Git `pre-commit` 钩子，防止在任务进行中意外向主仓直接提交。
 

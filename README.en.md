@@ -15,7 +15,7 @@ Only `ship` may set `product` or refuse `finish`. `lift` and `see` provide advic
 After v0.3 (delivery guardrails + stateless review foundation), v0.4 makes ag learn your project over time, and keeps the state dir lean and recallable.
 
 - **Structural checkup**: a language-agnostic kernel finds island files, phantom (declared-but-unused) dependencies, and reverse references; a multi-language adapter table (Python / TS / Go / Rust / Java) auto-selects per language actually present. Read-only facts, never blocks.
-- **One root `config.json`**: all project switches in one file — review seat, checkup adapters, anti-bloat gate, and a 48-strategy listing (name / on-off / pluggable). `python -m ag config-show <PROJECT_ROOT>` prints a human-readable view.
+- **One root `config.json`**: all project switches in one file — review seat, checkup adapters, anti-bloat gate, and a 49-strategy listing (name / on-off / pluggable). `python -m ag config-show <PROJECT_ROOT>` prints a human-readable view.
 - **Cross-session retrospective**: each ticket archives what it tried / found / did right / did wrong + lesson; a cumulative project redlines book is fed to the AI on every `ag_start`; `python -m ag retro <PROJECT_ROOT>` prints a human-readable report. A fresh session no longer starts from zero.
 - **Anti-bloat gate**: seat process logs are dropped once the conclusion lands, the usage ledger rolls to a bounded window, and `python -m ag prune <PROJECT_ROOT>` compacts old residue to index lines — keep conclusions, cut process noise.
 - **Versioned project state**: `<AG_HOME>/projects/<key>` is a local git repo tracking conclusions and config only, so accidental deletes are recoverable.
@@ -96,6 +96,8 @@ Create a vendor-neutral worker dossier inside the active AG worktree:
 python -m ag worker-create <PROJECT_ROOT> --portrait "Done looks like ..." --anchor "keep auth behavior unchanged" --hard-anchor "do not run ag finish" --write-allow src/auth --write-allow src/core
 ```
 
+Worker command guards are best-effort accident prevention, not a filesystem sandbox or a security boundary for untrusted processes.
+
 The dossier contains `task.json` and `TASK.md` under `<AG_HOME>/worktrees/<PROJECT_KEY>/<TASK_ID>.artifacts/workers/<WORKER_ID>/`. The worker writes `result.json` with schema `ag.worker.result.v1`, including `status`, `changed_files`, `anchor_receipt`, `evidence`, and `open_questions`. Read and validate it with:
 
 ```powershell
@@ -119,7 +121,7 @@ Configured critic and switch chats stream their incremental reasoning/content in
 
 ---
 
-## Critic Config (`critic.json`)
+## Critic Config (`config.json` → `critic`)
 
 Inspect dynamically resolved config paths, readiness status (`reviewer_ready`, `api_key_present`), and the standard JSON template via CLI or `ag_status.onboarding.config_guide`:
 
@@ -127,7 +129,7 @@ Inspect dynamically resolved config paths, readiness status (`reviewer_ready`, `
 python -m ag config <PROJECT_ROOT>
 ```
 
-Configuration lives in `<AG_HOME>/critic.json` (global default, `~/.ag/critic.json`) or `<AG_HOME>/projects/<PROJECT_KEY>/critic.json` (per-project override). The API key stays in the environment variable named by `api_key_env` and is never written to `critic.json`:
+Configuration lives in `<AG_HOME>/critic.json` (global) or the `critic` section of `<AG_HOME>/projects/<PROJECT_KEY>/config.json` (project override). Legacy per-project `critic.json` remains readable for migration. The API key stays in the environment variable named by `api_key_env`:
 
 ```json
 {

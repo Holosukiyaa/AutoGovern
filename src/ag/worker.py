@@ -1,4 +1,4 @@
-"""Generic subagent file contracts. Adapters are optional and vendor-neutral."""
+"""Worker file contracts and best-effort command guards, not a sandbox."""
 from __future__ import annotations
 
 import json

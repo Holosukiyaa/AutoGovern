@@ -9,3 +9,9 @@ dist/
 src/ag.egg-info/
 docs/
 .data/
+# Legacy in-repo regression scratch directories. New tests must use the system temp dir.
+ag-lifecycle-*/
+ag-boundary-*/
+ag-executor-*/
+*.pyo
+*.egg-info/

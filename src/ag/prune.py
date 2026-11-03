@@ -15,12 +15,6 @@ def _active_task_id(root: Path) -> str:
     return str((load_task(project_key(real_root(root))) or {}).get("id") or "")
 
 
-def _merge_compacted_tasks(tasks_dir: Path, root: Path, active_id: str, freed: list[int], exclude: set[str] | None = None) -> list[str]:
-    result = migrate_closed(root, active_id)
-    freed.append(result["freed_bytes"])
-    return [name for name in result["removed"] if name.startswith("tasks/")]
-
-
 def prune(root: Path) -> dict[str, Any]:
     root = real_root(root)
     base = project_dir(root)

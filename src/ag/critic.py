@@ -893,7 +893,7 @@ def global_config_path() -> Path:
 
 
 def config_path(root: Path) -> Path:
-    return ag_home() / "projects" / project_key(real_root(root)) / CONFIG_NAME
+    return ag_home() / "projects" / project_key(real_root(root)) / "config.json"
 
 
 def config_template() -> dict[str, Any]:
@@ -930,12 +930,19 @@ def ensure_global_config_file() -> Path:
     return _write_config_template(global_config_path())
 
 
+def legacy_config_path(root: Path) -> Path:
+    return ag_home() / "projects" / project_key(real_root(root)) / CONFIG_NAME
+
+
 def ensure_config_file(root: Path) -> Path:
-    """Return critic.json. Create the template only when the file is absent."""
+    """Create the project config.json with a nested critic template."""
+    from .settings import load_settings
+
     root = real_root(root)
     if not root.is_dir():
         raise ChainBroken(f"config root is not a directory: {root}")
-    return _write_config_template(config_path(root))
+    load_settings(root)
+    return config_path(root)
 
 
 def report_path(root: Path) -> Path:
@@ -1013,9 +1020,9 @@ def load_config(root: Path | None = None, *, read_only: bool = False) -> dict[st
                 if k in sec:
                     cfg[k] = sec[k]
             cfg["path"] = str(_settings.settings_path(root))
-        elif p_path is not None and p_path.is_file():
+        elif legacy_config_path(root).is_file():
             # legacy fallback: old projects that only have critic.json still work
-            err = _apply_config_blob(cfg, p_path)
+            err = _apply_config_blob(cfg, legacy_config_path(root))
             if err is not None:
                 return err
     elif p_path is not None and p_path.is_file():

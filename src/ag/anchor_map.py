@@ -1,4 +1,4 @@
-﻿"""Unicode intent-anchor maps. No SVG."""
+"""Unicode intent-anchor maps. No SVG."""
 from __future__ import annotations
 
 from typing import Any

@@ -21,7 +21,7 @@
 `ag` 将使用说明、配置引导、问题排障与意图写票拆分为 `skills/` 下的 **4 套独立自带 Skill**（执行 `python -m ag install-skill --target codex|grok` 可一键全量安装）：
 
 - 📘 **使用指南 Skill（项目是干什么的 & 6 步完整工作流）**：[`skills/ag-guide/SKILL.md`](skills/ag-guide/SKILL.md)
-- ⚙️ **配置引导 Skill（标准 `critic.json` 配置文件格式、环境变量与 AI 引导配置）**：[`skills/ag-config/SKILL.md`](skills/ag-config/SKILL.md)
+- ⚙️ **配置引导 Skill（`config.json` 的 `critic` 段、全局兼容配置、环境变量与 AI 引导配置）**：[`skills/ag-config/SKILL.md`](skills/ag-config/SKILL.md)
 - 🛠️ **问题排障 Skill（常见报错码、原因分析与一步修复方案）**：[`skills/ag-troubleshooting/SKILL.md`](skills/ag-troubleshooting/SKILL.md)
 - 🎯 **意图锚点 Skill（写票规范、正反完整行为链路 `anchor:` 与窄化红线）**：[`skills/ag-anchor/SKILL.md`](skills/ag-anchor/SKILL.md)
 - 📄 **架构与命令速查**：[`README.md`](README.md)
