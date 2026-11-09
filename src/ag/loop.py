@@ -394,6 +394,8 @@ def _product(test_argv: list[str], verify: dict[str, Any] | None) -> str:
 def _process(task: dict[str, Any] | None) -> str:
     if not task:
         return "idle"
+    if task.get("resume_preparation") and (task.get("verify") or {}).get("intent_identity") != task.get("intent_identity"):
+        return "active"
     if task.get("verified_tree"):
         return "verified"
     return "active"
@@ -904,6 +906,15 @@ def start(
                 raise ChainBroken("await-user-decision: confirmed result changed; preserve the existing goal")
             return status(root)
         existing_wt = Path(str(existing.get("worktree") or ""))
+        if existing.get("resume_preparation"):
+            from .decisions import _preparation, _steps, pending_decisions
+
+            preparation = _preparation(root, existing)
+            if any(step.get("phase") == "decision-reviewed" and step.get("resume_id") == preparation["resume_id"] for step in _steps(root, existing["id"])):
+                raise ChainBroken("resume-already-reviewed: use ag resume to retry review or user confirm-map to approve")
+            if set(preparation["change_ids"]) != {row["change_id"] for row in pending_decisions(root, existing["id"])}:
+                raise ChainBroken("await-user-decision: resume does not cover all pending changes")
+            freeze_worktree(existing_wt)
         if not bool(existing.get("intent_map_confirmed")) and ticket_path(root).is_file():
             document = require_ticket(root)
             intent_body, redline_body = split_document(document)
@@ -979,6 +990,10 @@ def start(
 
             bind_ticket(root, existing)
             save_task(key, existing)
+            if existing.get("resume_preparation"):
+                from .decisions import record_resume_review
+
+                record_resume_review(root, existing)
             append_task_step(
                 root,
                 task_id,
@@ -991,8 +1006,9 @@ def start(
             freeze_canonical(root)
             freeze_worktree(existing_wt)
         except Exception:
-            thaw_worktree(existing_wt)
-            thaw_canonical(root)
+            if not existing.get("resume_preparation"):
+                thaw_worktree(existing_wt)
+                thaw_canonical(root)
             raise
         return status(root)
     if existing:
@@ -1208,7 +1224,7 @@ def verify(root: Path) -> dict[str, Any]:
     timings: dict[str, float] = {}
     t0 = time.perf_counter()
     t_tests = time.perf_counter()
-    record = {**run_checks(worktree, chosen_checks), "untracked": untracked[:50], "task_id": task_id, "candidate": candidate_before, "product_tree": product_before}
+    record = {**run_checks(worktree, chosen_checks), "untracked": untracked[:50], "task_id": task_id, "candidate": candidate_before, "product_tree": product_before, "intent_identity": task.get("intent_identity")}
     timings["tests_s"] = round(time.perf_counter() - t_tests, 3)
     append_task_step(enrolled, task_id, "verify-tests", seconds=timings["tests_s"])
     paths = _ticket_paths(worktree, str(task.get("source_head") or ""))
@@ -1453,11 +1469,13 @@ def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
             "[原因] 当前没有进行中的票据任务 "
             "[下一步] 请先编写 <AG_HOME>/projects/<key>/ticket.md 并调用 ag_start"
         )
-    from .authorization import validate_ticket
+    from .authorization import validate_confirmation
+    from .decisions import confirmation_preparation, resolve_after_thaw
     from .delivery import build_delivery_snapshot
     from .freeze import _tracked_files, assert_frozen
 
-    identity = validate_ticket(root, task)
+    identity = validate_confirmation(root, task)
+    preparation = confirmation_preparation(root, task)
     if not _hook_ok(root, key):
         raise ChainBroken("hook-removed: enroll to repair the canonical gate")
     if _dirty(root):
@@ -1469,7 +1487,8 @@ def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
     if worktree.resolve() != expected or not worktree.is_dir():
         raise ChainBroken("intent-identity-changed: worktree identity changed or missing")
     registered = git(root, "worktree", "list", "--porcelain")
-    if not any(block.splitlines()[0] == "worktree " + _posix(worktree.resolve()) and f"branch refs/heads/ag/{task['id']}" in block.splitlines() and (task.get("intent_map_confirmed") or f"HEAD {task['source_head']}" in block.splitlines()) for block in registered.strip().split("\n\n")):
+    expected_head = preparation["worktree_head"] if preparation else task["source_head"]
+    if not any(block.splitlines()[0] == "worktree " + _posix(worktree.resolve()) and f"branch refs/heads/ag/{task['id']}" in block.splitlines() and ((task.get("intent_map_confirmed") and not preparation) or f"HEAD {expected_head}" in block.splitlines()) for block in registered.strip().split("\n\n")):
         raise ChainBroken("intent-identity-changed: worktree registration changed")
     canonical_files = _tracked_files(root)
     try:
@@ -1485,12 +1504,17 @@ def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
         task["intent_identity"] = identity
         task["worktree_ready"] = False
         save_task(key, task)
-        append_task_step(root, task["id"], "intent-map-confirmed", by=task["intent_map_confirmed_by"], intent_identity=identity)
+    from .decisions import _steps
+
+    resume_id = preparation["resume_id"] if preparation else None
+    if not any(step.get("phase") == "intent-map-confirmed" and step.get("intent_identity") == identity and step.get("resume_id") == resume_id for step in _steps(root, task["id"])):
+        append_task_step(root, task["id"], "intent-map-confirmed", by=task.get("intent_map_confirmed_by") or "user-cli", intent_identity=identity, resume_id=resume_id)
     stage("approval-recorded")
     try:
         stage("thawing-worktree")
         thaw_worktree(worktree, files=worktree_files)
-        append_task_step(root, task["id"], "worktree-ready", intent_identity=identity)
+        append_task_step(root, task["id"], "worktree-ready", intent_identity=identity, resume_id=resume_id)
+        resolve_after_thaw(root, task, preparation)
         task["worktree_ready"] = True
         task.pop("thaw_error", None)
         save_task(key, task)
@@ -1684,6 +1708,8 @@ def finish(root: Path) -> dict[str, Any]:
     verify_blob = task.get("verify") if isinstance(task.get("verify"), dict) else None
     if verify_blob and verify_blob.get("task_id", task["id"]) != task["id"]:
         _no("wrong-task: verification receipt belongs to another ticket")
+    if task.get("resume_preparation") and (verify_blob or {}).get("intent_identity") != task.get("intent_identity"):
+        _no("intent-identity-changed: old verification does not cover the resumed boundary; run ag_verify again")
     expected_product = product_tree(worktree, digest)
     if verify_blob and verify_blob.get("product_tree", expected_product) != expected_product:
         _no("wrong-product-tree: product does not match the verified candidate; run ag_verify again")

@@ -17,6 +17,12 @@ description: >
 
 完整功能可在一票内分阶段完成，合理换路线可用 `ag route <PROJECT_ROOT> --reason "原因"` 记录；减少承诺或触碰硬边界加 `--requires-decision` 等待用户决定。真正独立交付才用 `start --continuation-of <TASK_ID> --contribution "贡献"`。`status` 只读，完整诊断通过 `ag_see` 显式执行，安装修复通过 `enroll/config`。
 
+待决恢复保留原票、工作树、候选和失败验据：用户明确决定后，从 `delivery.pending_decisions` 取得并核对全部 `change_id`，按决定更新必要票面，然后执行 `python -m ag resume <PROJECT_ROOT> --change-id <CHANGE_ID> --decision "用户的明确决定"`；多项待决重复传 `--change-id`。MCP 对应 `ag_resume(root="<PROJECT_ROOT>", change_ids=["<CHANGE_ID>"], decision="用户的明确决定")`。这只准备决定、重新封存并独立重审，不授予施工权；每次恢复均须重审通过、展示完整新预览，再由用户本人执行 `confirm-map`，实际返回 `ready` 后才能继续。错票、未知或重复身份、已决重放、遗漏其它未决事项均拒绝；普通 route 或 `requires_decision=false` 不算批准。历史不会被删除或覆盖，不用放弃原票来解锁。审核失败或解冻失败时依返回阶段修复，不能跳过确认。
+
+重审失败或不可用，修复原因后用同组 ids 和决定再次 `resume`；确认前允许重复准备并重新审票，确认后已解决 ids 的重放仍拒绝。
+
+恢复要求 `ticket_review.configured=true` 且独立审票通过；未配置、不可用或拒绝时保持阻塞，不沿用普通初次开票的免审核路径。检查返回的审核与 delivery 状态，不能以收到准备记录或命令正常返回认定可施工。`thaw-failed` 表示个人确认已保留，由用户修复权限或占用后重试 `confirm-map`，不再调用 `resume`。
+
 确认命令由用户亲自执行，AI 不得代调。阶段写到 stderr，只有实际解冻后才返回 `ready`；`approved-but-frozen`、`thaw-failed` 仍不可施工，修复权限后用户可重试原票确认。交卷时自动选择本工作树 `.ag-check/check_*.py`，不会沿用上一票的脚本名；项目常规检查照常运行。`critic` 兼容字段指向同一 `switch` 报告时只计一次审核。
 
 新事实存入按时间和容量分卷的 JSONL 历史，不逐票增加散档。`ag prune` 先刷新、回读校验并原子发布历史，随后回收已结束且身份明确的旧件；活动票、准备资料、审计资料和用户备份保留。索引可重建，旧格式仍能读；写失败保留来源并明确报错。

@@ -15,8 +15,8 @@ description: >
 | 状态或错误 | 修复动作 |
 | --- | --- |
 | `task-not-found` / `wrong-task` | 核对票号及报告所属任务；不会回退另一票。 |
-| `ticket-review-rejected` | 按具体拒绝修改当前票，重新 `start` 审核；三维阈值不变，累计票数不加严。 |
-| `intent-identity-changed` / `await-user-decision` | 保留原目标和未完成项，由用户决定承诺或边界变化；重新审票及用户确认前不施工。 |
+| `ticket-review-rejected` | 按具体拒绝修改当前票；初次开票重新 `start`，待决恢复重审则同组 ids 再次 `resume`。三维阈值不变，累计票数不加严。 |
+| `intent-identity-changed` / `await-user-decision` | 保留原票和工作树，查 `delivery.pending_decisions`；用户明确决定后用全部待决 `change_id` 走 `resume`，独立重审并由用户亲自确认，之前不施工。无待决身份时不得编造普通 route 来冒充批准。 |
 | `config-error` | 修复当前配置，不能通过默认配置吞掉损坏来源。 |
 | `approved-but-frozen` / `thaw-failed` | 已批准仍未就绪，修复文件权限或占用后由用户亲自重试 `confirm-map`；AI 不得代调。 |
 | `check-digest-mismatch` | 当前票脚本改变，重新 `verify`；检查自动选择本票 `.ag-check/check_*.py`。 |
@@ -25,6 +25,16 @@ description: >
 | `history-close-pending` / `cleanup-pending` | 活动指针保留，排除文件占用后重试原 `finish` 或 `abandon`；已合入的票用 `finish` 恢复清理。 |
 
 确认路径会把检查、授权、解冻和就绪阶段写到 stderr，stdout 保持 JSON。只有 `ready` 代表实际可写；不要因看到“已批准”就开始施工。活动票在 `<AG_HOME>/projects/<key>/ticket.md`，历史事实在 `history/`，旧散档只在核对身份并可靠发布分卷后回收，准备、审计和备份材料保留。
+
+### 待决事项已有用户决定，但仍不能施工
+
+先运行 `python -m ag delivery <PROJECT_ROOT> --task-id <TASK_ID>`，核对 `pending_decisions` 中的任务身份、`change_id` 与原因。用户已明确决定时无需重复索要同一决定；按决定更新必要票面，然后执行 `python -m ag resume <PROJECT_ROOT> --change-id <CHANGE_ID> --decision "用户的明确决定"`。多项待决重复 `--change-id`，必须列全。MCP 对应 `ag_resume(root="<PROJECT_ROOT>", change_ids=["<CHANGE_ID>"], decision="用户的明确决定")`。
+
+`resume` 保留同票、工作树、候选、失败验据与全部旧历史，每次都重新封存并独立重审；它不授予施工权。重审通过后展示完整新预览，由用户亲自执行 `confirm-map`，实际解冻成功后才能继续。错票、未知或重复身份、已决重放和只处理部分未决事项均拒绝；先重读同票快照核对原因，不能用后写 `requires_decision=false`、删除旧记录、AI 代确认或放弃重建来解锁。重审被拒绝或不可用时按实际反馈处理，不能把准备记录当成最终批准。
+
+重审被拒绝或不可用：修复票面或审核配置后，用同组 ids 和决定再次 `resume`。确认前重复准备可安全重试并重新审票；已经确认解决后则拒绝重放。解冻失败仍按 `thaw-failed` 指引由用户重试确认。
+
+恢复必须取得 `ticket_review.configured=true` 且独立审票通过的记录。未配置审核、不可用或被拒绝都保持待决和冻结；即便命令返回准备回执也不可施工，不能沿用普通初次开票的免审核路径。已记录个人确认后的 `thaw-failed` 不再调用 `resume`，由用户排除权限或占用原因后亲自重试 `confirm-map`。
 
 当你在执行 `ag_enroll`、`ag_start`、`confirm-map`、`ag_verify` 或 `ag_finish` 遇到报错或拦截时，可按本技能包对照 **`[现象/报错]` → `[原因]` → `[解决办法]`** 快速排障。
 

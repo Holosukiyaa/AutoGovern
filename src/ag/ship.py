@@ -102,6 +102,19 @@ TOOLS = [
 TOOLS.extend([
     {"name": "ag_delivery", "description": "Read-only task facts for active or archived task_id; no installation, diagnosis, migration or authorization.", "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["root"]}},
     {"name": "ag_route", "description": "Record a route adjustment with its reason. Commitment or hard-boundary changes wait for a user decision; this never grants approval.", "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}, "reason": {"type": "string"}, "requires_decision": {"type": "boolean"}}, "required": ["root", "reason"]}},
+    {
+        "name": "ag_resume",
+        "description": "Prepare the user's explicit decision for all pending change_ids in the same task. Re-seal and independently re-review; preserve history and worktree. Never grants construction authority: requires configured=true independent review passage and then the user's personal confirm-map; unconfigured/unavailable/rejected review remains blocked. Retry failed review with resume; after thaw-failed the user retries confirm-map. Wrong, replayed or partial change identities are refused.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "root": {"type": "string"},
+                "change_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": True},
+                "decision": {"type": "string", "minLength": 1},
+            },
+            "required": ["root", "change_ids", "decision"],
+        },
+    },
 ])
 
 
@@ -117,6 +130,10 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         from .delivery import record_route
 
         return record_route(root, str(args.get("reason") or ""), requires_decision=bool(args.get("requires_decision")))
+    if name == "ag_resume":
+        from .decisions import prepare_resume
+
+        return prepare_resume(root, change_ids=args.get("change_ids"), decision=args.get("decision"))
     if name == "ag_enroll":
         raw = args.get("test_argv")
         test_argv = [str(x) for x in raw] if isinstance(raw, list) else None

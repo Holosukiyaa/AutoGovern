@@ -80,6 +80,10 @@ def main(argv: list[str] | None = None) -> int:
     route_p.add_argument("root")
     route_p.add_argument("--reason", required=True)
     route_p.add_argument("--requires-decision", action="store_true")
+    resume_p = sub.add_parser("resume", help="prepare a scoped decision, re-review, and wait for human confirm-map")
+    resume_p.add_argument("root")
+    resume_p.add_argument("--change-id", action="append", required=True, dest="change_ids", help="pending change identity from delivery; repeat for every pending change")
+    resume_p.add_argument("--decision", required=True, help="the user's explicit decision; preparation never grants construction authority")
     start_p = sub.add_parser(
         "start",
         help="open a worktree; tracked canonical files stay frozen until finish or abandon",
@@ -495,6 +499,12 @@ def main(argv: list[str] | None = None) -> int:
 
             print(json.dumps(record_route(root, args.reason, requires_decision=args.requires_decision), ensure_ascii=False, indent=2))
             return 0
+        if args.cmd == "resume":
+            from .decisions import prepare_resume
+
+            result = prepare_resume(root, change_ids=args.change_ids, decision=args.decision)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 1 if result.get("error") else 0
         if args.cmd == "enroll":
             print(json.dumps(enroll(root, test_argv=args.test_argv, note=args.note), ensure_ascii=False, indent=2))
             return 0

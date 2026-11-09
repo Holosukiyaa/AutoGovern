@@ -49,6 +49,25 @@
 
 完整功能可跨必要模块并在一票内分阶段完成。合理换路线可以用 `python -m ag route <PROJECT_ROOT> --reason "原因"` 留痕；减少承诺或改变硬边界加 `--requires-decision` 等待用户决定。只有真正独立交付的续作才使用 `start --continuation-of <TASK_ID> --contribution "本票贡献"`，明确携带共同目标和剩余结果。
 
+### 待决变更在原票恢复
+
+用户对具体待决事项作出明确决定后，先读 `delivery` 的 `pending_decisions`，逐一核对其中的 `change_id`、原因和任务身份。若需要调整票面，先按用户决定修改 `<AG_HOME>/projects/<key>/ticket.md`，保留目标及未完成项，再准备恢复：
+
+```powershell
+python -m ag delivery <PROJECT_ROOT> --task-id <TASK_ID>
+python -m ag resume <PROJECT_ROOT> --change-id <CHANGE_ID_1> --change-id <CHANGE_ID_2> --decision "用户对这些变更作出的明确决定"
+```
+
+只剩一个待决事项时只传一次 `--change-id`。必须显式列出当前全部未决身份；错票、未知身份、重复身份、已决重放或只处理部分未决事项都会拒绝。普通 `route` 文本或 `requires_decision=false` 不构成决定，也不会覆盖旧待决记录。
+
+MCP 对应 `ag_resume(root="<PROJECT_ROOT>", change_ids=["<CHANGE_ID>"], decision="用户的明确决定")`；Python API 为 `from ag.decisions import prepare_resume`，调用 `prepare_resume(root, change_ids=["<CHANGE_ID>"], decision="用户的明确决定")`。这些入口只在同一票和工作树上追加审计事实、重新封存并独立重审，每次恢复都须重审和人工确认；已有产品修改、候选、失败验据与旧待决历史保留。准备成功不授予施工权。
+
+重审通过后，AI 展示完整新 `anchor_preview` 与票面路径，再由用户本人执行 `python -m ag confirm-map <PROJECT_ROOT>`。只有确认和实际解冻成功、没有其它未决事项时才可继续施工。审核失败、不可用、票面再变更或解冻失败时保留原票并按返回阶段处理；不得删历史、放弃重建或由 AI 代调真实项目确认来解锁。
+
+重审失败或不可用时，修复票面或审核配置后，用同组 `change_id` 与明确决定再次执行 `resume` 重审。确认前重复准备允许安全重试，仍须人工确认；已经完成确认并解决的身份再次提交属于已决重放，会拒绝。
+
+恢复必须取得 `ticket_review.configured=true` 的独立通过记录；未配置审核、审核不可用或被拒绝都会保持待决和冻结，不能套用普通初次开票中“未启用审核”的确认路径。命令返回准备记录也不代表已通过审核，应检查返回的 `ticket_review` 与 `delivery`。重审失败后重试 `resume`；若已记录个人确认但发生 `thaw-failed`，则保留该确认，由用户本人修复权限或占用后重试 `confirm-map`，不要重新准备决定。
+
 `status` 不再顺带安装、迁移、写票或运行完整体检；诊断用 `ag_see`，修复安装用 `enroll/config`。确认由用户亲自执行 `confirm-map`，AI 不得代调。命令立即在 stderr 报告阶段，重验当前票、审核、配置、Git 身份与冻结状态；实际恢复全部工作树文件写权限后才 `ready`，解冻失败保留授权并允许重试。交卷按本票实际 `.ag-check/check_*.py` 选择检查，并将脚本摘要、候选和报告绑定。
 
 验货和终审使用包含当前产品代码与 `.ag-check` 的同一候选快照；回执同时记录不含临时检查的 `product_tree`，用于核对最终提交。候选计算不修改实际暂存区；误暂存或跟踪的 `.ag-check` 会被拒绝，临时检查不会进入产品提交。

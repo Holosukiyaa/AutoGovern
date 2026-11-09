@@ -21,7 +21,7 @@ def intent_identity(task: dict[str, Any], text: str, sealed_redlines: str) -> st
 
 
 def task_facts(task: dict[str, Any]) -> dict[str, Any]:
-    names = ("id", "branch", "source_head", "worktree", "portrait", "anchors", "fixed", "fixed_rules", "redlines", "anchor_preview", "intent_identity", "intent_map_confirmed", "authorization_identity", "worktree_ready", "thaw_error", "ticket_review", "verify", "verified_tree", "goal_link", "check_argv", "verified_executor_src", "process", "cleanup_error", "archive_error", "merged_head")
+    names = ("id", "branch", "source_head", "worktree", "portrait", "anchors", "fixed", "fixed_rules", "redlines", "anchor_preview", "intent_identity", "intent_map_confirmed", "authorization_identity", "worktree_ready", "thaw_error", "ticket_review", "verify", "verified_tree", "goal_link", "check_argv", "verified_executor_src", "process", "cleanup_error", "archive_error", "merged_head", "resume_preparation")
     return {name: task[name] for name in names if name in task}
 
 
@@ -155,7 +155,8 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
     fixed = list(task.get("fixed") or [])
     if not fixed and intent.strip():
         fixed = [intent.strip()]
-    goal = {"text": intent, "fixed": fixed, "sha256": digest({"intent": intent, "fixed": fixed}), "confirmed": bool(task.get("intent_map_confirmed")) or any(step.get("phase") == "intent-map-confirmed" for step in steps)}
+    current_confirmation = bool(task.get("intent_map_confirmed")) if "intent_map_confirmed" in task else any(step.get("phase") == "intent-map-confirmed" and step.get("intent_identity") == task.get("intent_identity") for step in steps)
+    goal = {"text": intent, "fixed": fixed, "sha256": digest({"intent": intent, "fixed": fixed}), "confirmed": current_confirmation}
     goal_link = task.get("goal_link") or next((step.get("goal_link") for step in reversed(steps) if step.get("goal_link")), None)
     process = str(task.get("process") or session.get("process") or "active")
     terminal = next((step for step in reversed(steps) if step.get("phase") in {"finish", "abandon"}), {})
@@ -190,6 +191,8 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
             if any(row.get("task_id") != requested for row in foreign):
                 diagnostics.append({"kind": "wrong-task", "source": "verify.switch", "report_id": switch["report_id"]})
     evidence_bound = bool(candidate and report and report.get("candidate") == candidate and report.get("task_id") == requested and report.get("outcome") == switch.get("outcome"))
+    if task.get("resume_preparation"):
+        evidence_bound = evidence_bound and verify.get("intent_identity") == task.get("intent_identity")
     if verify.get("product_tree"):
         evidence_bound = evidence_bound and bool(report and report.get("product_tree") == verify["product_tree"])
     for current_review in (review, report or {}):
@@ -239,7 +242,15 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
         current = row.get("report_id") in {review.get("report_id"), switch.get("report_id")}
         if not current and row.get("outcome") not in PASS:
             advisories.append(issue("historical-review", row["ref"], "retain-original-conclusion", outcome=row.get("outcome"), items=row.get("items") or []))
-    requires_decision = any(step.get("phase") == "delivery-change" and step.get("requires_decision") for step in steps)
+    from .decisions import pending_decisions, reviewed_preparation
+
+    pending = pending_decisions(root, requested)
+    prepared = reviewed_preparation(root, task) if pending and task.get("id") else None
+    requires_decision = bool(pending)
+    if pending:
+        blockers.append(issue("await-user-decision", [row["change_id"] for row in pending], "user-confirm-map" if prepared else "prepare-resume"))
+        if task.get("resume_preparation") and not review.get("configured"):
+            blockers.append(issue("review-unavailable", "resume requires an independent opening review", "configure-reviewer-and-resume"))
     identity_changed = False
     if is_active and text:
         live = base / "ticket.md"
@@ -252,10 +263,11 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
     if identity_changed:
         blockers.append(issue("intent-identity-changed", str(base / "ticket.md"), "await-user-decision"))
     approved = goal["confirmed"]
-    ready = approved and process == "active" and bool(task.get("worktree_ready")) and not task.get("thaw_error") and not identity_changed
+    ready = approved and process == "active" and bool(task.get("worktree_ready")) and not task.get("thaw_error") and not identity_changed and not requires_decision
     readiness = "ready" if ready else "thaw-failed" if task.get("thaw_error") else "approved-but-frozen" if approved else "await-confirmation"
     if requires_decision or identity_changed:
-        action = "await-user-decision"
+        readiness = "thaw-failed" if task.get("thaw_error") else "await-confirmation" if prepared and not identity_changed else "await-user-decision"
+        action = "recover-thaw" if task.get("thaw_error") else "user-confirm-map" if prepared and not identity_changed else "prepare-resume"
     elif task.get("cleanup_error"):
         readiness, action = "cleanup-pending", "retry-cleanup"
         blockers.append(issue("cleanup-pending", task["cleanup_error"], action))
@@ -295,6 +307,7 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
             "route_changes": [step for step in steps if step.get("phase") == "delivery-change"],
         },
         "remaining": [] if verified_ok else fixed,
+        "pending_decisions": pending,
         "blockers": blockers,
         "advisories": advisories,
         "next_action": action,
@@ -319,6 +332,7 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
 
 
 def record_route(root: Path, reason: str, *, requires_decision: bool = False) -> dict[str, Any]:
+    import uuid
     from .loop import load_task
     from .store import append_task_step
 
@@ -327,5 +341,5 @@ def record_route(root: Path, reason: str, *, requires_decision: bool = False) ->
         raise ChainBroken("task-not-found: no active task")
     if not str(reason).strip():
         raise ChainBroken("route-change-reason-required")
-    append_task_step(root, task["id"], "delivery-change", reason=str(reason).strip(), requires_decision=bool(requires_decision))
+    append_task_step(root, task["id"], "delivery-change", reason=str(reason).strip(), requires_decision=bool(requires_decision), change_id="chg_" + uuid.uuid4().hex if requires_decision else None)
     return build_delivery_snapshot(root, task["id"])
