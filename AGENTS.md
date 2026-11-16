@@ -11,7 +11,7 @@
 它通过 **主仓冻结（Canonical Freeze）+ 独立工作树（`<WORKTREE>`）隔离施工 + 启动票意图锚点与红线封存（`<AG_HOME>/projects/<key>/ticket.md`）+ 0-Token 本地脚本预筛 + 一前一后（`ticket` 开票审 + `switch` 交卷守门）无状态 DS 审核 + 一次性验证（`<WORKTREE>` 内现场生成的一次性自检脚本）**，从物理机制上解决 AI 编程的三大核心痛点：
 
 1. **防止改乱主仓与半途污染**：主分支检出区（`<PROJECT_ROOT>`）在任务期间物理只读冻结；所有修改强制发生在隔离工作树 `<WORKTREE>`，验收通过后才以 `--ff-only` 原子合入主仓。
-2. **防止目标漂移与偷删红线**：legacy `single_md` 在 `<AG_HOME>/projects/<key>/ticket.md` 锁定业务意图、正反向行为链路锚点（`anchor:`）与聚焦红线（`## 红线`）；结构化长期任务以 `long-goals.sqlite3` 记录为唯一权威，并单向生成同路径的审核快照。两种模式均封存红线到 `<AG_HOME>/projects/<key>/redlines.copy`，经用户本人 `confirm-map` 与真实解冻后才 ready；长期票确认还须携带所见 `--preview`。编辑长期票面快照或导出不能改变权威记录。
+2. **防止目标漂移与偷删红线**：默认 `single` 在 `<AG_HOME>/projects/<key>/ticket.md` 锁定业务意图、正反向行为链路锚点（`anchor:`）与聚焦红线（`## 红线`）；显式 `long` 以可直接维护的 Markdown 长票保存持续目标与来源。两种类型均须经独立审票、用户本人 `confirm-map` 与真实解冻后才 ready；长期票确认须携带所见 `--preview`。旧 SQLite 长票只读保留，显式迁移后才切换权威。
 3. **防止“自己考自己”写假测试凑分**：废除常驻 `tests/` 答案库，每张票在 `<WORKTREE>/.ag-check/` 现场编写针对本票结果的一次性自检脚本（合入即销毁），配合异构/无状态的 `ticket`（开票三维审票）与 `switch`（交卷代码终审 + 自动种回归探针 `probes`）守住交付底线。
 
 ---
@@ -71,19 +71,21 @@ python -m ag enroll <PROJECT_ROOT>
 3. 检查 `api_key_present` 布尔值，指导用户在终端或 MCP 配置中设置对应的环境变量（**安全铁律：AI 绝不向用户索要、读取或在任何日志中打印 API Key 明文**）。
 
 ### 第四步：严格执行 6 步受控交付闭环
-1. **写票**：协助用户编写 `<AG_HOME>/projects/<key>/ticket.md`（包含大白话 `## 意图`、带正反完整行为链路的 `anchor:`、窄化聚焦的 `## 红线`）。
-2. **开票与审票**：调用 `ag_start`（触发本地 0-Token 脚本预筛 + 无状态 `ticket` 席位三维审票；若被打回则修改 `<AG_HOME>/projects/<key>/ticket.md` 后重跑 `ag_start`）。
-3. **等待用户确认意图图**：向用户完整展示 `anchor_preview` 及 `anchor_preview_path`，**立即停手等待用户确认**。用户确认后由用户执行 `python -m ag confirm-map <PROJECT_ROOT>` 解冻 `<WORKTREE>`（AI 严禁替用户自调 `confirm-map`）。
+1. **写票**：默认 single 协助用户编写 `<AG_HOME>/projects/<key>/ticket.md`（包含大白话 `## 意图`、正反完整行为链路 `anchor:` 与窄化红线）；跨轮目标显式 long，通过 `long create` 创建并直接维护 Markdown 权威。
+2. **开票与审票**：调用 `ag_start`（long 显式 `ticket_type="long"` 加 `goal_id` 或 `long_file`），触发本地预筛与独立三维审票；被打回后修正相应权威 Markdown 再原地重审，保留失败历史。
+3. **等待用户确认意图图**：向用户完整展示 `anchor_preview` 及 `anchor_preview_path`，**立即停手等待用户确认**。用户确认后由用户执行 `python -m ag confirm-map <PROJECT_ROOT>` 解冻 `<WORKTREE>`；long 须携带刚展示的 `--preview <TOKEN>`（AI 严禁替用户自调 `confirm-map`）。
 4. **隔离施工与一次性自检**：仅在 `<WORKTREE>` 内修改代码（复杂任务可用 `ag worker-create` 拆分最多 3 个 Worker），并在 `<WORKTREE>/.ag-check/` 下编写针对本票结果的一次性自检脚本。
 5. **交卷验货**：调用 `ag_verify`（执行本地预筛、历史回归探针 `probes`、`.ag-check/` 验证与单次无状态 `switch` 终审）。
 6. **原子合入或放弃**：验收通过后调用 `ag_finish` 快进合入 `<PROJECT_ROOT>` 并自动清理 `<WORKTREE>` 与 `.ag-check/`；若任务无价值或需推翻重来，调用 `ag_abandon` 安全解冻主仓。
 
-## 结构化长期目标
+## 单票与 Markdown 长票
 
-长期任务以 `<AG_HOME>/projects/<key>/long-goals.sqlite3` 的增量事件为唯一权威，保留用户原话、来源、结果、适用约束、事实、计划、依赖、调查、证据和待决。`revision` 拒绝陈旧写入，`intent_revision` 对齐审过的稳定意图；普通事实或计划更新不会撤销稳定授权。
+未指定类型时使用 `single`，保留现有单票工作流；需要跨多轮持续交付时显式选择 `long`。新长票以可直接编辑的 `long.md` 为意图权威。直接打开该文件即可阅读和维护目标，不需要手写 JSON，也不需要启动 HTML 面板。
 
-CLI `long create/read/list/update/history/diff/package/export` 与 MCP `ag_long` 共用同一身份、来源和校验。`long update --expected-revision <REVISION> --operation <JSON>` 只提交一个增量操作，冲突先读 diff；`long panel <PROJECT_ROOT> <GOAL_ID> --open-browser` 用本机 Python 提供六栏面板，面板只能编辑普通事实和准备待决，不能授予施工权限。
+长票首屏先说明交什么、怎样算完成、现在到哪、当前卡点和下一步，再用 Mermaid 展示主线。适用约束、现场依据、各轮贡献、变更与待定提案放在折叠段中。每轮已开子票链接到独立原票 `.md`；尚未开票的剩余节点明确标为未开。完结原票保留当时的承诺、用户原话和来源，后续进度摘要不能覆盖原票。
 
-用 `start <PROJECT_ROOT> --goal-id <GOAL_ID> --result-id <RESULT_ID> --contribution "本轮贡献"` 开票。完整展示投影及差异后，用户亲自执行 `confirm-map <PROJECT_ROOT> --preview <task.long_goal.preview_token>`；AI 不得代调，旧预览不能确认新内容，真实解冻和授权记账成功后才返回 ready。目标或约束变化先 propose_change，再沿既有 route --requires-decision、resume、独立复审和新的人工确认恢复。
+AI 每轮先读长票大纲，再读本轮原票和真实 `delivery` 回执，恢复未完成承诺、分支原因、返回节点和回归要求；收尾时只更新所需进度段。普通进度保留有效授权，目标或约束变化须记录旧→新、决定者、原因、影响、回归点和旧证据适用范围，再经独立复审和用户本人 `confirm-map`。待定提案保持待定，不能自动变成必做承诺。子票通过也不表示父目标已完成。
 
-长期票的 Markdown 是单向考卷投影，编辑导出文件不能修改结构化权威。旧 single_md 原样兼容，不静默迁移；显式 `long import --ticket-file <FILE> --title <TITLE> --source-ref <REF>` 仅创建未授权草稿，失败不改变原历史或继承旧权限。子票结束后用 delivery --task-id 恢复父目标差距、贡献和返回点；passed 和计划完成不会自动完成父目标，结果须有当前真实 AG 验据及显式覆盖判断。工作包始终携带未完成承诺、依赖链及直接/祖先适用约束。
+文件编辑时间与业务事件时间、实际核验时间分别记录。未核验变化标为待核验；读取文件或调整排版不会刷新核验时间。外部直接编辑后先重读，陈旧 token、坏引用、格式错误和意图冲突必须明确处理；不能覆盖外部改动、静默删除未知段落或把旧证据说成当前已验证。
+
+旧 single 票保持兼容。旧 `long-goals.sqlite3` 及其历史导出仍可只读追查，显式迁移才创建新的 Markdown 权威，并标明旧数据的历史地位；转换失败保留原文与原史，不能新旧双改或继承不存在的授权。旧 HTML 面板退出默认开票和阅读指导。

@@ -90,7 +90,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     start_p.add_argument("root")
     start_p.add_argument("--portrait", default="")
-    start_p.add_argument("--goal-id", default="", help="structured long goal identity")
+    start_p.add_argument("--ticket-type", choices=("single", "long"), default=None, help="ticket type; omitted keeps single compatibility")
+    start_p.add_argument("--long-file", default="", help="authoritative editable long Markdown path")
+    start_p.add_argument("--goal-id", default="", help="long Markdown goal identity")
     start_p.add_argument("--result-id", action="append", default=[], help="long goal result included in this contribution; repeatable")
     start_p.add_argument("--continuation-of", default="")
     start_p.add_argument("--contribution", default="")
@@ -264,21 +266,22 @@ def main(argv: list[str] | None = None) -> int:
     run_s.add_argument("--head", default="", help="diff head ref; requires --base")
     sub.add_parser("switch-prompt", help="print the switch startup prompt")
     sub.add_parser("hook", help="git pre-commit helper")
-    long_p = sub.add_parser("long", help="structured long goals: create, inspect, incrementally update, and open the local panel")
+    long_p = sub.add_parser("long", help="editable long Markdown: create, inspect and update; explicit legacy conversion")
     long_sub = long_p.add_subparsers(dest="long_cmd", required=True)
-    for action in ("list", "read", "history", "diff", "package", "export", "update", "create", "import", "panel"):
+    for action in ("list", "read", "history", "diff", "package", "export", "update", "create", "import", "migrate", "migration-candidate", "legacy-read", "legacy-history", "panel"):
         lp = long_sub.add_parser(action)
         lp.add_argument("root")
         if action not in {"list", "create", "import"}:
             lp.add_argument("goal_id")
-        if action in {"history", "diff"}:
+        if action in {"history", "diff", "legacy-history"}:
             lp.add_argument("--since-revision", type=int, default=0)
         if action in {"package", "export"}:
             lp.add_argument("--result-id", action="append", default=[])
             lp.add_argument("--contribution", default="")
         if action == "update":
             lp.add_argument("--expected-revision", type=int, required=True)
-            lp.add_argument("--operation", required=True, help="one JSON incremental operation")
+            lp.add_argument("--operation", required=True, help="one JSON incremental operation; edit the Markdown file directly for prose")
+            lp.add_argument("--expected-document-sha256", default="", help="reject a write after external Markdown edits")
         if action in {"create", "import"}:
             lp.add_argument("--goal-id", default="")
             lp.add_argument("--title", required=True)
@@ -289,6 +292,8 @@ def main(argv: list[str] | None = None) -> int:
                 lp.add_argument("--constraint", action="append", default=[])
             else:
                 lp.add_argument("--ticket-file", required=True, help="explicit legacy import; existing authorization is never inherited")
+        if action == "migrate":
+            lp.add_argument("--expected-legacy-sha256", default="", help="optional byte identity of the read-only SQLite source")
         if action == "panel":
             lp.add_argument("--port", type=int, default=0)
             lp.add_argument("--open-browser", action="store_true")
@@ -300,12 +305,7 @@ def main(argv: list[str] | None = None) -> int:
             values = vars(args).copy()
             action = values.pop("long_cmd")
             if action == "panel":
-                from .long_panel import start_panel
-
-                panel = start_panel(Path(args.root), args.goal_id, port=args.port, open_browser=args.open_browser)
-                print(json.dumps({"goal_id": args.goal_id, "url": panel.url}, ensure_ascii=False), flush=True)
-                panel.serve_forever()
-                return 0
+                raise ChainBroken("long-panel-deprecated: use long read to locate and edit authoritative Markdown; legacy SQLite requires explicit long migrate, no HTML panel is started")
             values["action"] = action
             if action == "update":
                 values["operation"] = json.loads(args.operation)
@@ -586,6 +586,8 @@ def main(argv: list[str] | None = None) -> int:
                         defaults=args.default,
                         fixed=args.fixed or None,
                         goal_id=args.goal_id,
+                        ticket_type=args.ticket_type,
+                        long_file=args.long_file,
                         result_ids=args.result_id or None,
                         continuation_of=args.continuation_of,
                         contribution=args.contribution,

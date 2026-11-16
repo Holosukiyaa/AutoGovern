@@ -71,7 +71,7 @@ Critic config lives in `<AG_HOME>/critic.json` (default `~/.ag/critic.json`) or 
 
 ## Intent Anchors & Startup Ticket (`<AG_HOME>/projects/<key>/ticket.md`)
 
-Starting a task requires `<AG_HOME>/projects/<key>/ticket.md` in the ag home - the ticket never lives in the project tree - plus a locked result or at least one anchor. A legacy ticket (ticket.md / tickets/ / redlines.copy) left in the project is sha256-checked and moved into the new home once, with a readable migration record. That file is the only intent document. `ag_start` reads it and refuses when it is missing; the error names `<AG_HOME>/projects/<key>/ticket.md`. `## 意图` is kept as written. Red lines from `## 红线` and from hard anchors are written back into `## 红线` and sealed into `<AG_HOME>/projects/<key>/redlines.copy`. An empty red-line list still writes that copy. `## 现场` is rewritten at start, verify, and finish, and those writes do not replace `## 意图` or the sealed red lines. `anchor_preview` is this document and `anchor_preview_path` is its absolute path. Before any product file is written, the AI must show that document to the user and wait for explicit approval. AG freezes the worktree until `confirm-map`; `ag_status` reports `intent-map-unconfirmed` as a hazard; `ag_verify` and `ag_finish` refuse while the map is unconfirmed.
+Starting a default `single` task requires `<AG_HOME>/projects/<key>/ticket.md` in the ag home - the ticket never lives in the project tree - plus a locked result or at least one anchor. A legacy ticket (ticket.md / tickets/ / redlines.copy) left in the project is sha256-checked and moved into the new home once, with a readable migration record. That file is the single ticket intent authority. Explicit `long` tickets instead use the editable Markdown returned by `long read`; each round produces a sealed child review snapshot. `ag_start` reads it and refuses when it is missing; the error names `<AG_HOME>/projects/<key>/ticket.md`. `## 意图` is kept as written. Red lines from `## 红线` and from hard anchors are written back into `## 红线` and sealed into `<AG_HOME>/projects/<key>/redlines.copy`. An empty red-line list still writes that copy. `## 现场` is rewritten at start, verify, and finish, and those writes do not replace `## 意图` or the sealed red lines. `anchor_preview` is this document and `anchor_preview_path` is its absolute path. Before any product file is written, the AI must show that document to the user and wait for explicit approval. AG freezes the worktree until `confirm-map`; `ag_status` reports `intent-map-unconfirmed` as a hazard; `ag_verify` and `ag_finish` refuse while the map is unconfirmed.
 
 ```text
 anchor: keep the semantic workbench behavior unchanged
@@ -164,19 +164,39 @@ python -m ag install-skill --target grok
 
 ## Ticket Document and One-Front-One-Back Review (`ship-12`, `ship-13`, `lift-18`, `see-15`)
 
-The task intent is `<AG_HOME>/projects/<key>/ticket.md` in the ag home (`ship-12`). `ag_start` seals `## 红线` into `<AG_HOME>/projects/<key>/redlines.copy` and archives each ticket snapshot to `<AG_HOME>/projects/<key>/tickets/<task_id>.md`.
+The default single ticket intent is `<AG_HOME>/projects/<key>/ticket.md` in the ag home (`ship-12`). `ag_start` seals `## 红线` into `<AG_HOME>/projects/<key>/redlines.copy` and archives each ticket snapshot to `<AG_HOME>/projects/<key>/tickets/<task_id>.md`.
 
 AG uses a **0-Token deterministic script pre-screen + one-front-one-back (`ticket` at start, `switch` at verify) stateless DS review** architecture:
 - **Front gate (`ship-13`, `ticket` seat)**: `ag_start` runs `ticket_prescreen` locally and launches a fresh stateless `ticket` thread (`thread_id`) scoring `goal_clarity`, `anchor_chain`, and `redline_focus` (`0-10`, pass `>= 7`) with an independent `understood_goal`. If configured and not `passed`, `confirm-map` soft-blocks worktree thawing; editing `<AG_HOME>/projects/<key>/ticket.md` and re-running `ag_start` while unconfirmed re-seals and re-reviews in place. On round 3+ (`lift-18`, `ticket_seq >= 3`), deterministic anti-lazy checks trigger one automatic retry on rubber-stamp/copied reviews (`lazy-review`).
 - **Back gate (`see-15`, single `switch` seat)**: `ag_verify` runs `pack_prescreen` (syntax check, redline path/token collision scan, shortcut scan, `.ag-check/` assertion check) and pre-annotates `git diff` and windowed files (`> 12,000` chars slimmed to header + changed hunks) with exact `path:line` numbers. `ag_verify` calls `switch` once (mirroring `verify.critic` for compatibility and planting probes on reject), cutting token usage while preserving `path:line` evidence.
 
+## Single tickets and Markdown long tickets
 
-## Structured long goals
+Omitting the type keeps the existing `single` workflow. Choose `long` explicitly for delivery across multiple rounds. A new long ticket uses an editable `long.md` as its intent authority: open and maintain the Markdown directly, without writing JSON or starting an HTML panel.
 
-Long goals use incremental events in `<AG_HOME>/projects/<key>/long-goals.sqlite3` as their authority. `revision` protects concurrent updates; `intent_revision` tracks reviewed commitments. Ordinary fact and plan edits do not revoke stable intent authorization. Packages retain unfinished results, dependency chains, applicable constraints, sources, and return points.
+The first screen states the deliverable, completion criteria, current progress, blocker and next action, followed by a Mermaid main line. Folded sections retain applicable constraints, field evidence, round contributions, changes and pending proposals. Each opened child links to its own original `.md`; unopened work is labeled accordingly. Closed originals preserve their commitments, the user's words and sources, independently of later summaries.
 
-Use `ag long create/read/list/update/history/diff/package/export` (or MCP `ag_long` with the corresponding action). Updates carry one JSON operation and `--expected-revision`; stale writes are rejected with a diff. `ag long panel <PROJECT_ROOT> <GOAL_ID> --open-browser` serves the local six-column browser view with the existing Python installation. The panel edits ordinary facts and prepares decisions; it cannot authorize construction or call a new model.
+At the start of each round, the AI reads the outline, relevant original ticket and real `delivery` receipts to recover unfinished commitments, branch reasons, return points and regression requirements. It updates only the necessary progress sections. Ordinary progress keeps valid authorization. Goal or constraint changes retain old→new, decision maker, reason, impact, return point and the scope of older evidence, then require independent review and personal human `confirm-map`. A pending proposal stays pending; a passing child does not complete its parent.
 
-Open a contribution with `ag start <PROJECT_ROOT> --goal-id <GOAL_ID> --result-id <RESULT_ID> --contribution "..."`. Display the complete reviewed projection and `task.long_goal.preview_token`; the human personally executes `ag confirm-map <PROJECT_ROOT> --preview <TOKEN>`. Intent changes require a `propose_change` operation followed by existing route/resume, independent re-review, human confirmation, and actual thaw. An old preview cannot approve changed intent.
+Record file edits, business events and actual verification separately. Unverified changes remain unverified; reading or reformatting does not refresh verification time. Reload after an external edit. Stale tokens, invalid links, malformed documents and intent conflicts must be reported without overwriting external edits or silently dropping unknown sections.
 
-Markdown export is a one-way exam projection. Legacy single_md tickets retain their existing behavior; explicit `ag long import --ticket-file ... --title ... --source-ref ...` creates an unapproved draft and never inherits historical authority. After a child ticket closes, `ag delivery --task-id ...` restores the parent gap and return point. Passing a ticket does not complete its parent: current genuine delivery evidence and explicit semantic coverage are required.
+Existing single tickets remain compatible. Legacy `long-goals.sqlite3` data and exports remain readable history. Explicit migration creates the new Markdown authority and marks the old authority as historical; failure preserves the original text and history. Never edit both authorities or inherit authorization that was never granted. The old HTML panel is no longer the default opening or reading path.
+
+CLI entry examples (independent review and personal human confirmation still apply):
+
+```powershell
+# Omission keeps single; --ticket-type single is also explicit
+python -m ag start <PROJECT_ROOT> --portrait "This round's independent delivery"
+
+# Create the long ticket, read document_path and result IDs, then open that .md directly
+python -m ag long create <PROJECT_ROOT> --goal-id department-report --title "Department expense report" --original "Deliver a reconcilable report from the expense CSV" --source-ref "user request source" --result "Read CSV without changing it; reject invalid input" --result "Reconcile department totals with the source" --result "Deliver the report using the confirmed template"
+python -m ag long read <PROJECT_ROOT> department-report
+python -m ag start <PROJECT_ROOT> --ticket-type long --goal-id department-report --result-id <RESULT_ID> --contribution "Contribution to the parent goal"
+# An existing document can instead be selected with --long-file <LONG_MD>
+
+# Inspect legacy SQLite history, then explicitly migrate it
+python -m ag long migration-candidate <PROJECT_ROOT> <LEGACY_GOAL_ID>
+python -m ag long migrate <PROJECT_ROOT> <LEGACY_GOAL_ID> --expected-legacy-sha256 <SOURCE_SHA256>
+```
+
+CLI `long create/read/update/history/diff/package` and MCP `ag_long` share the same document, source checks and validation. MCP `ag_start` uses `ticket_type`, `goal_id`/`long_file`, `result_ids` and `contribution`. Incremental operations carry the freshly read `expected_revision` and, when needed, `expected_document_sha256`; reload and inspect the diff after conflicts. Direct Markdown prose editing does not require JSON.

@@ -116,7 +116,31 @@ def archive_ticket(root: Path, task_id: str, text: str) -> str:
         return ""
     from .history import append_fact
 
-    return append_fact(root, "ticket", tid, {"task_id": tid, "text": text})
+    original = preserve_original_ticket(root, tid, text)
+    return append_fact(root, "ticket", tid, {"task_id": tid, "text": text, "original_ticket": original})
+
+
+def preserve_original_ticket(root: Path, task_id: str, text: str, *, raw_bytes: bytes | None = None) -> dict[str, str]:
+    """Keep exact child-ticket Markdown as an immutable, content-addressed file."""
+    import hashlib
+    import os
+
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", task_id):
+        raise ChainBroken("ticket-archive-invalid-task-id")
+    raw = text.encode("utf-8") if raw_bytes is None else raw_bytes
+    sha = hashlib.sha256(raw).hexdigest()
+    folder = tickets_dir(root) / "originals"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{task_id}-{sha}.md"
+    try:
+        with path.open("xb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except FileExistsError:
+        if path.read_bytes() != raw:
+            raise ChainBroken("ticket-archive-conflict: original ticket content changed")
+    return {"task_id": task_id, "path": str(path.resolve()), "sha256": sha}
 
 
 def require_ticket(root: Path) -> str:

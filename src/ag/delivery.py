@@ -21,7 +21,7 @@ def intent_identity(task: dict[str, Any], text: str, sealed_redlines: str) -> st
 
 
 def task_facts(task: dict[str, Any]) -> dict[str, Any]:
-    names = ("id", "branch", "source_head", "worktree", "portrait", "anchors", "fixed", "fixed_rules", "redlines", "anchor_preview", "intent_identity", "intent_map_confirmed", "authorization_identity", "worktree_ready", "thaw_error", "ticket_review", "verify", "verified_tree", "goal_link", "check_argv", "verified_executor_src", "process", "cleanup_error", "archive_error", "merged_head", "resume_preparation", "long_goal")
+    names = ("id", "branch", "source_head", "worktree", "portrait", "anchors", "fixed", "fixed_rules", "redlines", "anchor_preview", "intent_identity", "intent_map_confirmed", "authorization_identity", "worktree_ready", "thaw_error", "ticket_review", "verify", "verified_tree", "goal_link", "check_argv", "verified_executor_src", "process", "cleanup_error", "archive_error", "merged_head", "resume_preparation", "long_goal", "ticket_type", "ticket_type_notice", "original_ticket", "candidate_archive", "long_view_refresh")
     return {name: task[name] for name in names if name in task}
 
 
@@ -298,17 +298,29 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
         from .long_tasks import read_goal, work_package
 
         parent = read_goal(root, long_binding["goal_id"])
-        package = work_package(root, long_binding["goal_id"], long_binding["result_ids"], contribution=long_binding["contribution"], task_id=requested)
-        long_view = {"goal_id": parent["goal_id"], "revision": parent["revision"], "intent_revision": parent["intent_revision"], "authorized_intent_revision": parent.get("authorized_intent_revision"), "binding": long_binding, "parent": parent, "work_package": package, "return_to": parent.get("return_to") or {"goal_id": parent["goal_id"], "action": "read-parent-gap"}, "grants_authority": False}
+        package_error = ""
+        try:
+            package = None if parent.get("read_only") else work_package(root, long_binding["goal_id"], long_binding["result_ids"], contribution=long_binding["contribution"], task_id=requested)
+        except ChainBroken as exc:
+            package, package_error = None, str(exc)
+        long_view = {"goal_id": parent["goal_id"], "revision": parent["revision"], "intent_revision": parent["intent_revision"], "authorized_intent_revision": parent.get("authorized_intent_revision"), "binding": long_binding, "parent": parent, "work_package": package, "package_error": package_error or None, "return_to": parent.get("return_to") or {"goal_id": parent["goal_id"], "action": "read-parent-gap"}, "grants_authority": False}
         proposal_ids = long_binding.get("proposal_ids") or []
         accepted_ids = {row["id"] for row in parent.get("decisions", []) if row.get("state") == "accepted"}
-        projected_revision = long_binding["intent_revision"] + (len(proposal_ids) if set(proposal_ids) <= accepted_ids else 0)
+        projected_revision = long_binding.get("preview_intent_revision", long_binding["intent_revision"] + len(proposal_ids)) if set(proposal_ids) <= accepted_ids else long_binding["intent_revision"]
         intent_pending = parent["intent_revision"] != projected_revision or any(row.get("state") == "pending" for row in parent.get("decisions", []))
-        if is_active and process == "active" and intent_pending:
+        if is_active and (parent.get("read_only") or package_error):
+            readiness, action = "blocked", "migrate-long-goal" if parent.get("read_only") else "repair-long-markdown"
+            blockers.append(issue("long-legacy-read-only" if parent.get("read_only") else "long-markdown-invalid", package_error or parent.get("document_path"), action))
+        elif is_active and process == "active" and intent_pending:
             readiness, action = "await-user-decision", "prepare-resume"
             blockers.append(issue("long-intent-decision-pending", parent["goal_id"], action))
         elif process in {"completed", "abandoned"}:
             action = "read-parent-gap"
+    deferred_view = task.get("long_view_refresh")
+    if deferred_view and deferred_view.get("status") == "deferred":
+        advisories.append(issue("long-view-refresh-deferred", deferred_view, "repair-long-markdown"))
+        if not is_active:
+            action = "repair-long-markdown"
     return {
         "schema": "ag.delivery.v1",
         "root": str(root),
@@ -319,6 +331,12 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
         "goal": goal,
         "goal_link": goal_link,
         "long_goal": long_view,
+        "ticket_type": task.get("ticket_type", "long" if long_binding else "single"),
+        "ticket_type_notice": task.get("ticket_type_notice"),
+        "original_ticket": task.get("original_ticket"),
+        "candidate_archive": task.get("candidate_archive"),
+        "long_view_refresh": deferred_view,
+        "closure_notice": "工地已安全关闭，长票现场索引待父文档修正。" if deferred_view and not is_active and process == "abandoned" else None,
         "return_to": (long_view or {}).get("return_to"),
         "contribution": (goal_link or {}).get("contribution") or task.get("portrait") or "",
         "progress": {

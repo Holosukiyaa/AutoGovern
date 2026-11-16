@@ -16,7 +16,7 @@ INSTRUCTIONS = (
     "ag has three lanes that must not mix: ship (交货), lift (抬正确率), see (看见). "
     "Only ship may set product or refuse finish. "
     "File-changing work: ag_status → ag_start → write ONLY in worktree.path → ag_verify → ag_finish. "
-    "ag_start reads the ticket from <AG_HOME>/projects/<key>/ticket.md and refuses when that file is missing; "
+    "ag_start defaults to ticket_type=single and reads <AG_HOME>/projects/<key>/ticket.md; explicit ticket_type=long uses goal_id or long_file to read editable Markdown authority. "
     "the ticket never lives in the project tree. "
     "The user must personally execute confirm-map after reviewing the full preview; AI must never call ag_confirm_map. "
     "ag_delivery is a read-only task query shared with CLI delivery, including archived tasks. "

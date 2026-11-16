@@ -56,6 +56,8 @@ TOOLS = [
                 "fixed": {"type": "array", "items": {"type": "string"}},
                 "guards": {"type": "array", "items": {"type": "string"}},
                 "defaults": {"type": "array", "items": {"type": "string"}},
+                "ticket_type": {"type": "string", "enum": ["single", "long"]},
+                "long_file": {"type": "string"},
                 "goal_id": {"type": "string"},
                 "result_ids": {"type": "array", "items": {"type": "string"}},
                 "continuation_of": {"type": "string"},
@@ -160,6 +162,8 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
             defaults=defaults,
             fixed=fixed,
             goal_id=str(args.get("goal_id") or ""),
+            ticket_type=args.get("ticket_type"),
+            long_file=str(args.get("long_file") or ""),
             result_ids=args.get("result_ids"),
             continuation_of=str(args.get("continuation_of") or ""),
             contribution=str(args.get("contribution") or ""),
@@ -181,13 +185,14 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
 TOOLS.append({
     "name": "ag_long",
-    "description": "Shared structured goal authority. Read/list/history/diff/package/export are read-only. Create/import make an unapproved draft; update applies one revision-checked operation. No action grants construction authority; user personally runs confirm-map with the reviewed preview token.",
+    "description": "Editable Markdown long goal authority; legacy SQLite is read-only and requires explicit migrate. Read/list/history/diff/package/export are read-only. Create/import make an unapproved draft; update applies one revision-checked operation. No action grants construction authority; user personally runs confirm-map with the reviewed preview token.",
     "inputSchema": {"type": "object", "properties": {
-        "root": {"type": "string"}, "action": {"type": "string", "enum": ["create", "import", "read", "list", "update", "history", "diff", "package", "export"]},
+        "root": {"type": "string"}, "action": {"type": "string", "enum": ["create", "import", "read", "list", "update", "history", "diff", "package", "export", "migrate", "migration-candidate", "legacy-read", "legacy-history"]},
         "goal_id": {"type": "string"}, "title": {"type": "string"}, "original": {"type": "string"},
         "source": {"type": "object"}, "source_ref": {"type": "string"}, "ticket_file": {"type": "string"},
         "results": {"type": "array", "items": {"type": "object"}}, "constraints": {"type": "array", "items": {"type": "object"}},
-        "operation": {"type": "object"}, "expected_revision": {"type": "integer"}, "since_revision": {"type": "integer"},
+        "operation": {"type": "object"}, "expected_revision": {"type": "integer"},
+        "expected_document_sha256": {"type": "string"}, "expected_legacy_sha256": {"type": "string"}, "since_revision": {"type": "integer"},
         "result_ids": {"type": "array", "items": {"type": "string"}}, "contribution": {"type": "string"}
     }, "required": ["root", "action"]}
 })
@@ -211,21 +216,41 @@ def long_call(root: Path, args: dict[str, Any]) -> Any:
             path = Path(str(args.get("ticket_file") or ""))
             if not path.is_file():
                 raise ValueError("legacy-import-missing: explicit ticket file required")
-            original = path.read_text(encoding="utf-8")
-            intent, redlines = split_document(original)
+            imported_bytes = path.read_bytes()
+            imported_text = imported_bytes.decode("utf-8-sig")
+            intent, redlines = split_document(imported_text)
             anchors = parse_anchors(intent)
             if not anchors or not intent.strip():
                 raise ValueError("legacy-import-invalid: a ticket with intent anchors is required; historical task remains unchanged")
             results = [{"text": row["text"]} for row in anchors if row.get("kind") != "hard"] or [{"text": intent.strip()}]
             constraints = [{"text": line, "scope": ["*"], "source": {"kind": "legacy-ticket-boundary", "ref": str(path.resolve()), "text": line}} for line in collect_redlines(redlines, anchors)]
-            source = {"kind": "legacy-ticket", "ref": str(args.get("source_ref") or path.resolve()), "text": original}
+            # Keep the exact legacy original as its own immutable Markdown file.
+            # Quoting only the displayed intent prevents embedded # headings from
+            # being reinterpreted as multiple authority titles.
+            from .ticket_doc import preserve_original_ticket
+            import hashlib
+            saved = preserve_original_ticket(root, "import-" + hashlib.sha256(imported_bytes).hexdigest()[:16], imported_text, raw_bytes=imported_bytes)
+            original = "\n".join("> " + line if line else ">" for line in intent.splitlines())
+            source = {"kind": "legacy-ticket", "ref": saved["path"]}
         return long_tasks.create_goal(root, str(args.get("title") or ""), original, source, results=results, constraints=constraints, goal_id=goal_id)
+    if action in {"legacy-read", "legacy-history"}:
+        from . import legacy_long_tasks
+        if action == "legacy-history":
+            return {"goal_id": goal_id, "format": "legacy-sqlite", "read_only": True, "grants_authority": False, "events": legacy_long_tasks.goal_history(root, goal_id, since_revision=int(args.get("since_revision") or 0))}
+        return {**legacy_long_tasks.read_goal(root, goal_id), "format": "legacy-sqlite", "read_only": True, "grants_authority": False}
+    if action == "migrate":
+        return long_tasks.migrate_goal(root, goal_id, expected_legacy_sha256=args.get("expected_legacy_sha256") or None)
+    if action == "migration-candidate":
+        return long_tasks.migration_candidate(root, goal_id)
     if action == "read":
         return long_tasks.read_goal(root, goal_id)
     if action == "update":
         if type(args.get("expected_revision")) is not int or not isinstance(args.get("operation"), dict):
             raise ValueError("long-update-invalid: expected_revision and one operation required")
-        return long_tasks.apply_operation(root, goal_id, args["operation"], args["expected_revision"], source=args.get("source") or {"kind": "cli-mcp", "ref": goal_id, "text": "Incremental operation through AG"})
+        operation = dict(args["operation"])
+        if args.get("expected_document_sha256"):
+            operation["expected_document_sha256"] = args["expected_document_sha256"]
+        return long_tasks.apply_operation(root, goal_id, operation, args["expected_revision"], source=args.get("source") or {"kind": "cli-mcp", "ref": goal_id, "text": "Incremental operation through AG"})
     if action == "history":
         return long_tasks.goal_history(root, goal_id, since_revision=int(args.get("since_revision") or 0))
     if action == "diff":
@@ -233,5 +258,9 @@ def long_call(root: Path, args: dict[str, Any]) -> Any:
     if action == "package":
         return long_tasks.work_package(root, goal_id, args.get("result_ids") or args.get("result_id") or None, contribution=str(args.get("contribution") or ""))
     if action == "export":
-        return {"goal_id": goal_id, "authority": "structured-record", "editable": False, "markdown": long_tasks.ticket_projection(root, goal_id, result_ids=args.get("result_ids") or args.get("result_id") or None, contribution=str(args.get("contribution") or ""))}
+        goal = long_tasks.read_goal(root, goal_id)
+        if goal.get("format") == "markdown":
+            path = Path(goal["document_path"])
+            return {"goal_id": goal_id, "authority": "markdown", "document_path": str(path), "editable": True, "markdown": path.read_text(encoding="utf-8"), "document_sha256": goal["document_sha256"]}
+        return {"goal_id": goal_id, "authority": "legacy-sqlite", "editable": False, "migration_required": True, "markdown": long_tasks.migration_candidate(root, goal_id)["markdown"]}
     raise ValueError(f"unknown long goal action: {action}")

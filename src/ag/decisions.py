@@ -62,6 +62,7 @@ def pending_decisions(root: Path, task_id: str) -> list[dict[str, Any]]:
     confirmed: set[tuple[str, str]] = set()
     ready: set[tuple[str, str]] = set()
     resolved: set[str] = set()
+    human_confirmed = False
     for step in _steps(root, task_id):
         phase = step.get("phase")
         if phase == "delivery-change" and step.get("requires_decision"):
@@ -78,8 +79,14 @@ def pending_decisions(root: Path, task_id: str) -> list[dict[str, Any]]:
             if not rid or rid in prepared or not _valid_ids(ids) or set(ids) != set(pending) or not preparation.get("decision"):
                 raise ChainBroken("history-source-error: ambiguous decision preparation")
             origin = preparation.get("previous_task")
-            if not isinstance(origin, dict) or origin.get("id") != task_id or not origin.get("intent_map_confirmed") or not preparation.get("previous_identity") or not preparation.get("candidate") or not preparation.get("worktree_head"):
-                raise ChainBroken("history-source-error: decision preparation lost its confirmed predecessor")
+            initial = preparation.get("initial_review") is True
+            valid_origin = isinstance(origin, dict) and origin.get("id") == task_id
+            if initial:
+                valid_origin = valid_origin and bool(origin.get("long_goal")) and not origin.get("intent_map_confirmed") and not origin.get("authorization_identity") and not human_confirmed
+            else:
+                valid_origin = valid_origin and bool(origin.get("intent_map_confirmed"))
+            if not valid_origin or not preparation.get("previous_identity") or not preparation.get("candidate") or not preparation.get("worktree_head"):
+                raise ChainBroken("history-source-error: decision preparation lost its confirmed predecessor or initial unapproved identity")
             prepared[rid] = preparation
         elif phase == "decision-reviewed":
             rid = str(step.get("resume_id") or "")
@@ -114,6 +121,8 @@ def pending_decisions(root: Path, task_id: str) -> list[dict[str, Any]]:
             for identity in ids:
                 pending.pop(identity)
                 resolved.add(identity)
+        if phase == "intent-map-confirmed":
+            human_confirmed = True
     return list(pending.values())
 
 
@@ -230,11 +239,19 @@ def prepare_resume(root: Path, *, change_ids: list[str], decision: str) -> dict[
         if git(worktree, "rev-parse", "HEAD") != previous["worktree_head"] or tree_digest(worktree) != previous["candidate"]:
             raise ChainBroken("intent-identity-changed: prepared candidate changed")
     else:
-        if not task.get("intent_map_confirmed"):
-            raise ChainBroken("intent-map-unconfirmed: resume requires a previously confirmed task")
+        initial_review = not task.get("intent_map_confirmed")
+        if initial_review and (not task.get("long_goal") or task.get("authorization_identity") or any(step.get("phase") == "intent-map-confirmed" for step in _steps(root, task["id"]))):
+            raise ChainBroken("intent-map-unconfirmed: resume requires a confirmed predecessor or a never-authorized long draft")
         origin = {name: value for name, value in task_facts(task).items() if name != "resume_preparation"}
         original_seal = copy_path(root).read_text(encoding="utf-8")
-    original_identity = _validate_preserved_ticket(root, origin, str(origin.get("anchor_preview") or ""), original_seal)
+    initial_review = not origin.get("intent_map_confirmed")
+    if initial_review:
+        from .delivery import intent_identity
+        original_identity = intent_identity(origin, str(origin.get("anchor_preview") or ""), original_seal)
+        if origin.get("intent_identity") != original_identity:
+            raise ChainBroken("intent-identity-changed: initial draft identity does not match its preserved opening")
+    else:
+        original_identity = _validate_preserved_ticket(root, origin, str(origin.get("anchor_preview") or ""), original_seal)
     if task.get("long_goal"):
         from .authorization import prepare_long_projection
 
@@ -245,7 +262,7 @@ def prepare_resume(root: Path, *, change_ids: list[str], decision: str) -> dict[
         assert_frozen(_tracked_files(worktree))
     except OSError as exc:
         raise ChainBroken(f"resume-freeze-failed: task retained: {exc}") from exc
-    preparation = {"resume_id": "resume_" + uuid.uuid4().hex, "task_id": task["id"], "change_ids": sorted(change_ids), "decision": decision.strip(), "previous_identity": original_identity, "previous_task": origin, "previous_seal": original_seal, "worktree_head": git(worktree, "rev-parse", "HEAD"), "candidate": tree_digest(worktree)}
+    preparation = {"resume_id": "resume_" + uuid.uuid4().hex, "task_id": task["id"], "initial_review": initial_review, "change_ids": sorted(change_ids), "decision": decision.strip(), "previous_identity": original_identity, "previous_task": origin, "previous_seal": original_seal, "worktree_head": git(worktree, "rev-parse", "HEAD"), "candidate": tree_digest(worktree)}
     append_task_step(root, task["id"], "decision-prepared", preparation=preparation)
     task["resume_preparation"] = preparation
     task["intent_map_confirmed"] = False

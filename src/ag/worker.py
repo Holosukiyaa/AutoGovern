@@ -182,6 +182,17 @@ def run_task(
     directory = worker_dir(worktree, worker_id)
     task_path = directory / "task.json"
     task_blob = json.loads(task_path.read_text(encoding="utf-8"))
+    from .loop import _canonical_root, load_task
+    from .managed import ChainBroken, project_key
+    canonical = _canonical_root(worktree)
+    parent = load_task(project_key(canonical)) or {}
+    if parent.get("long_goal"):
+        from .authorization import require_construction
+        require_construction(canonical, parent)
+        expected = parent["long_goal"].get("preview_intent_sha256") or parent["long_goal"].get("intent_sha256")
+        worker_binding = task_blob.get("long_goal") or {}
+        if worker_binding.get("parent_task_id") != parent.get("id") or worker_binding.get("intent_sha256") != expected:
+            raise ChainBroken("worker-intent-binding-stale: recreate this worker dossier from the current reviewed long ticket")
     write_allow = [str(item) for item in task_blob.get("write_allow") or []]
     prompt_path = directory / "TASK.md"
     if not task_path.is_file() or not prompt_path.is_file():
@@ -328,9 +339,11 @@ def create_task(
     parent = load_task(project_key(canonical))
     if parent and parent.get("long_goal"):
         from .long_tasks import work_package
+        from .authorization import require_construction
 
+        require_construction(canonical, parent)
         binding = parent["long_goal"]
-        dossier["long_goal"] = {"goal_id": binding["goal_id"], "intent_revision": binding["intent_revision"], "contribution": binding["contribution"], "result_ids": binding["result_ids"], "parent_task_id": parent["id"]}
+        dossier["long_goal"] = {"goal_id": binding["goal_id"], "intent_revision": binding["intent_revision"], "contribution": binding["contribution"], "result_ids": binding["result_ids"], "parent_task_id": parent["id"], "ticket_type": "long", "document_path": binding.get("document_path"), "intent_sha256": binding.get("preview_intent_sha256") or binding.get("intent_sha256")}
         dossier["work_package"] = work_package(canonical, binding["goal_id"], binding["result_ids"], contribution=binding["contribution"], task_id=parent["id"])
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "task.json").write_text(json.dumps(dossier, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

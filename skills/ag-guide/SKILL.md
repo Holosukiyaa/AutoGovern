@@ -86,7 +86,7 @@ description: >
 
 ### 第 2 步：编写启动票（`<AG_HOME>/projects/<key>/ticket.md`）
 
-legacy `single_md` 开工前先编辑 `<AG_HOME>/projects/<key>/ticket.md`，它是该模式的唯一权威意图文档。结构化长期任务改用 `long` 增量操作维护唯一权威 `long-goals.sqlite3` 记录，`start --goal-id` 单向生成票面审核快照，不能编辑快照或导出文件另立权威。下面模板针对 legacy 模式（详细提炼方法参见 [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)）。
+默认 `single` 开工前编辑 `<AG_HOME>/projects/<key>/ticket.md`，它是单票的权威意图文档。显式 `long` 则先用 `long create` 创建可直接编辑的 `long.md`，用 `long read` 找到路径；每轮 `start --ticket-type long --goal-id <GOAL_ID>`（或 `--long-file <LONG_MD>`）从同一 Markdown 准备审票快照，父目标仍以长票为权威。下面模板针对 single（详细提炼方法参见 [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)）。
 
 #### 标准写法模板：
 
@@ -111,9 +111,11 @@ anchor: 在哪个交互或数据链路上收敛什么行为：当输入或状态
 
 ---
 
+long 的用户确认还须携带刚展示的 `--preview <TOKEN>`；普通进度无需重授权，目标或约束改变才沿复审确认链恢复。
+
 ### 第 3 步：开工建工地与开票独立审票（`ag_start`）
 
-写好 `<AG_HOME>/projects/<key>/ticket.md` 后，启动任务：
+写好 single 启动票后，按下方命令开工；long 使用前述显式类型和长票身份，勿改写生成的子票快照：
 
 - **MCP 调用**：`ag_start(root="<PROJECT_ROOT>", portrait="做成之后：...")`
 - **CLI 命令**：
@@ -193,12 +195,14 @@ anchor: 在哪个交互或数据链路上收敛什么行为：当输入或状态
     ```
   - **效果**：安全丢弃 `<WORKTREE>`，立即恢复 `<PROJECT_ROOT>` 的正常读写权限。
 
-## 结构化长期目标
+## 单票与 Markdown 长票
 
-长期任务以 `<AG_HOME>/projects/<key>/long-goals.sqlite3` 的增量事件为唯一权威，保留用户原话、来源、结果、适用约束、事实、计划、依赖、调查、证据和待决。`revision` 拒绝陈旧写入，`intent_revision` 对齐审过的稳定意图；普通事实或计划更新不会撤销稳定授权。
+未指定类型时使用 `single`，保留现有单票工作流；需要跨多轮持续交付时显式选择 `long`。新长票以可直接编辑的 `long.md` 为意图权威。直接打开该文件即可阅读和维护目标，不需要手写 JSON，也不需要启动 HTML 面板。
 
-CLI `long create/read/list/update/history/diff/package/export` 与 MCP `ag_long` 共用同一身份、来源和校验。`long update --expected-revision <REVISION> --operation <JSON>` 只提交一个增量操作，冲突先读 diff；`long panel <PROJECT_ROOT> <GOAL_ID> --open-browser` 用本机 Python 提供六栏面板，面板只能编辑普通事实和准备待决，不能授予施工权限。
+长票首屏先说明交什么、怎样算完成、现在到哪、当前卡点和下一步，再用 Mermaid 展示主线。适用约束、现场依据、各轮贡献、变更与待定提案放在折叠段中。每轮已开子票链接到独立原票 `.md`；尚未开票的剩余节点明确标为未开。完结原票保留当时的承诺、用户原话和来源，后续进度摘要不能覆盖原票。
 
-用 `start <PROJECT_ROOT> --goal-id <GOAL_ID> --result-id <RESULT_ID> --contribution "本轮贡献"` 开票。完整展示投影及差异后，用户亲自执行 `confirm-map <PROJECT_ROOT> --preview <task.long_goal.preview_token>`；AI 不得代调，旧预览不能确认新内容，真实解冻和授权记账成功后才返回 ready。目标或约束变化先 propose_change，再沿既有 route --requires-decision、resume、独立复审和新的人工确认恢复。
+AI 每轮先读长票大纲，再读本轮原票和真实 `delivery` 回执，恢复未完成承诺、分支原因、返回节点和回归要求；收尾时只更新所需进度段。普通进度保留有效授权，目标或约束变化须记录旧→新、决定者、原因、影响、回归点和旧证据适用范围，再经独立复审和用户本人 `confirm-map`。待定提案保持待定，不能自动变成必做承诺。子票通过也不表示父目标已完成。
 
-长期票的 Markdown 是单向考卷投影，编辑导出文件不能修改结构化权威。旧 single_md 原样兼容，不静默迁移；显式 `long import --ticket-file <FILE> --title <TITLE> --source-ref <REF>` 仅创建未授权草稿，失败不改变原历史或继承旧权限。子票结束后用 delivery --task-id 恢复父目标差距、贡献和返回点；passed 和计划完成不会自动完成父目标，结果须有当前真实 AG 验据及显式覆盖判断。工作包始终携带未完成承诺、依赖链及直接/祖先适用约束。
+文件编辑时间与业务事件时间、实际核验时间分别记录。未核验变化标为待核验；读取文件或调整排版不会刷新核验时间。外部直接编辑后先重读，陈旧 token、坏引用、格式错误和意图冲突必须明确处理；不能覆盖外部改动、静默删除未知段落或把旧证据说成当前已验证。
+
+旧 single 票保持兼容。旧 `long-goals.sqlite3` 及其历史导出仍可只读追查，显式迁移才创建新的 Markdown 权威，并标明旧数据的历史地位；转换失败保留原文与原史，不能新旧双改或继承不存在的授权。旧 HTML 面板退出默认开票和阅读指导。

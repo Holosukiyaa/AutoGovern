@@ -854,6 +854,8 @@ def start(
     continuation_of: str = "",
     contribution: str = "",
     goal_id: str = "",
+    ticket_type: str | None = None,
+    long_file: str = "",
     result_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Open a worktree. Tracked canonical files stay frozen until finish or abandon.
@@ -861,6 +863,23 @@ def start(
     Windows freeze is a recoverable ACL deny-write entry. Elsewhere it is the
     user-write bit. Either mechanism is friction, not an absolute security boundary.
     """
+    if ticket_type is not None and ticket_type not in {"single", "long"}:
+        raise ChainBroken("ticket-type-invalid: expected single or long")
+    if ticket_type == "single" and (goal_id or long_file):
+        raise ChainBroken("ticket-type-conflict: single cannot bind a long goal")
+    if long_file:
+        from .long_tasks import list_goals
+
+        requested_path = Path(long_file).expanduser().resolve()
+        matches = [row["goal_id"] for row in list_goals(root) if row.get("format") == "markdown" and row.get("document_path") and Path(row["document_path"]).resolve() == requested_path]
+        if len(matches) != 1:
+            raise ChainBroken("long-document-not-found: --long-file must identify this project's authoritative long.md")
+        resolved = matches[0]
+        if goal_id and resolved != goal_id:
+            raise ChainBroken("long-goal-binding-changed: goal ID and Markdown path differ")
+        goal_id = resolved
+    if ticket_type == "long" and not goal_id:
+        raise ChainBroken("long-goal-required: provide --goal-id or --long-file")
     ensure_local_excludes(root)
     from .upgrade import ensure_upgraded
 
@@ -899,12 +918,14 @@ def start(
     )
 
     existing = load_task(key)
+    if existing and ticket_type and ticket_type != existing.get("ticket_type", "long" if existing.get("long_goal") else "single"):
+        raise ChainBroken("ticket-type-conflict: close the active ticket before changing its type")
     if existing and goal_id and goal_id != (existing.get("long_goal") or {}).get("goal_id"):
         raise ChainBroken("long-goal-binding-changed: close the existing ticket before choosing another goal")
-    if existing and existing.get("long_goal"):
+    if existing and existing.get("long_goal") and not existing.get("intent_map_confirmed"):
         from .authorization import prepare_long_projection
 
-        prepare_long_projection(root, existing, pending=bool(existing.get("resume_preparation")))
+        prepare_long_projection(root, existing, pending=True)
     if existing and Path(str(existing.get("worktree") or "")).is_dir():
         if existing.get("intent_map_confirmed"):
             from .authorization import validate_ticket
@@ -935,7 +956,8 @@ def start(
                 else [dict(item) for item in (existing.get("anchors") or []) if isinstance(item, dict)]
             )
             task_anchors = merge_anchors(base_anchors, caller_anchors)
-            task_fixed = resolve_fixed(chosen, fixed if fixed is not None else existing.get("fixed"))
+            inferred = [row["text"] for row in task_anchors if row.get("kind") != "hard"] if existing.get("long_goal") else existing.get("fixed")
+            task_fixed = resolve_fixed(chosen, fixed if fixed is not None else inferred)
             task_rules = hard_rules(task_anchors)
             if not task_fixed and not task_anchors:
                 usage_note(root, "ship", 8, "block", "start without intent anchors")
@@ -1018,6 +1040,8 @@ def start(
                 thaw_worktree(existing_wt)
                 thaw_canonical(root)
             raise
+        from .authorization import refresh_long_views
+        refresh_long_views(root, existing, preview=True)
         return status(root)
     if existing:
         raise ChainBroken("worktree-missing: task and goal retained; recover the worktree or abandon before starting another ticket")
@@ -1130,6 +1154,9 @@ def start(
         "verify": None,
         "goal_link": goal_link,
     }
+    task_blob["ticket_type"] = "long" if long_goal else "single"
+    if long_goal and ticket_type is None:
+        task_blob["ticket_type_notice"] = "legacy-goal-id-alias: new long tasks use explicit --ticket-type long; omission without long scope defaults to single"
     if long_goal:
         task_blob["long_goal"] = long_goal
     preview = write_scene(root, task_blob, process="active", product="pending") or preview
@@ -1151,7 +1178,9 @@ def start(
     append_task_step(root, task_id, "start", portrait_line=line, worktree=str(worktree), task=task_facts(task_blob))
     state = status(root)
     append_task_step(root, task_id, "anchor-preview", anchor_map_path=str(state.get("anchor_map_path") or ""), audit_anchor_map_path=str((state.get("task") or {}).get("audit_anchor_map_path") or ""), anchor_preview=str(state.get("anchor_preview") or ""), audit_anchor_preview_path=str((state.get("task") or {}).get("audit_anchor_preview_path") or ""))
-    return state
+    from .authorization import refresh_long_views
+    refresh_long_views(root, task_blob, preview=True)
+    return status(root)
 
 
 def _refuse_dirty_verify(root: Path, key: str, task: dict[str, Any], state: dict[str, Any]) -> None:
@@ -1411,6 +1440,8 @@ def verify(root: Path) -> dict[str, Any]:
     from .delivery import task_facts
 
     append_task_step(enrolled, task_id, "verify-result", verify=record, task=task_facts(task))
+    from .authorization import refresh_long_views
+    refresh_long_views(enrolled, task)
     if record.get("undeclared"):
         usage_note(root, "ship", 1, "help", "verify without tests")
     elif record["exit"] == 0:
@@ -1611,6 +1642,29 @@ def _cleanup(root: Path, task: dict[str, Any]) -> None:
             pass
 
 
+def _preserve_close_material(root: Path, task: dict[str, Any], *, process: str) -> None:
+    """Preserve a recoverable candidate and the actual sealed ticket before cleanup."""
+    from .history import append_fact
+    from .ticket_doc import preserve_original_ticket
+
+    # anchor_preview is the reviewed original. A live authority edit must not
+    # rewrite what this child actually promised or imply that it was authorized.
+    text = str(task.get("anchor_preview") or "")
+    if not text:
+        from .ticket_doc import require_ticket
+        text = require_ticket(root)
+    task["original_ticket"] = preserve_original_ticket(root, task["id"], text)
+    worktree = Path(str(task.get("worktree") or ""))
+    if process == "abandoned" and worktree.is_dir() and not task.get("candidate_archive"):
+        candidate = tree_digest(worktree)
+        head = git(worktree, "rev-parse", "HEAD")
+        commit = git(worktree, "commit-tree", candidate, "-p", head, "-m", f"Preserve abandoned AG task {task['id']}")
+        reference = f"refs/ag/abandoned/{task['id']}"
+        git(root, "update-ref", reference, commit)
+        task["candidate_archive"] = {"candidate": candidate, "commit": commit, "ref": reference, "source_head": head}
+    append_fact(root, "close-material", task["id"], {"task_id": task["id"], "process": process, "original_ticket": task["original_ticket"], "candidate_archive": task.get("candidate_archive"), "verified_evidence": task.get("verify"), "ticket_review": task.get("ticket_review"), "authorization_recorded": bool(task.get("intent_map_confirmed"))})
+
+
 def _close_task(root: Path, key: str, task: dict[str, Any], *, process: str, product: str, head: str = "") -> dict[str, Any]:
     from .delivery import build_delivery_snapshot, task_facts
     from .knowledge import archive_session
@@ -1629,13 +1683,20 @@ def _close_task(root: Path, key: str, task: dict[str, Any], *, process: str, pro
         touched = _ticket_paths(worktree, str(task.get("source_head") or "")) if worktree.is_dir() else []
         verify_blob = task.get("verify") if isinstance(task.get("verify"), dict) else None
         try:
-            write_scene(root, task, process=process, product=product)
-            archive_session(root, task, verify=verify_blob, touched=touched, check_exit=(verify_blob or {}).get("exit"), process=process, product=product)
-            if task.get("long_goal"):
-                from .authorization import record_long_close
+            if not task.get("close_evidence_recorded"):
+                _preserve_close_material(root, task, process=process)
+                save_task(key, task)
+                write_scene(root, task, process=process, product=product)
+                archive_session(root, task, verify=verify_blob, touched=touched, check_exit=(verify_blob or {}).get("exit"), process=process, product=product)
+                if task.get("long_goal"):
+                    from .authorization import record_long_close
 
-                record_long_close(root, task, process=process, product=product)
-            append_task_step(root, task["id"], "finish" if process == "completed" else "abandon", head=head, product=product, task=task_facts(task), switch_report_id=_switch_report_id(verify_blob))
+                    record_long_close(root, task, process=process, product=product)
+                append_task_step(root, task["id"], "finish" if process == "completed" else "abandon", head=head, product=product, task=task_facts(task), switch_report_id=_switch_report_id(verify_blob))
+                task["close_evidence_recorded"] = True
+                save_task(key, task)
+            from .authorization import refresh_long_views
+            refresh_long_views(root, task)
             task["close_recorded"] = True
             task.pop("archive_error", None)
             save_task(key, task)
