@@ -4,6 +4,8 @@
 
 Local engineering delivery guardrails and stateless review foundation (MCP + CLI) for AI-assisted programming (Vibe Coding).
 
+Current version: **v0.5.1**.
+
 Three orthogonal lanes that must never mix: **ship (交货)** · **lift (抬正确率)** · **see (看见)**.
 
 Only `ship` may set `product` or refuse `finish`. `lift` and `see` provide advice or observation only.
