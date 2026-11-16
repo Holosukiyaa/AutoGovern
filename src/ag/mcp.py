@@ -76,9 +76,11 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
         try:
             text = json.dumps(_call(name, args), ensure_ascii=False, indent=2)
         except (ChainBroken, OSError, TypeError, ValueError) as exc:
+            details = getattr(exc, "details", None)
+            message = json.dumps({"error": str(exc), "details": details}, ensure_ascii=False) if details else str(exc)
             return _ok(
                 req_id,
-                {"content": [{"type": "text", "text": str(exc)}], "isError": True},
+                {"content": [{"type": "text", "text": message}], "isError": True},
             )
         return _ok(req_id, {"content": [{"type": "text", "text": text}]})
     if req_id is None:

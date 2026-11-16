@@ -100,6 +100,7 @@ def _live_ticket_identity(root: Path, task: dict[str, Any]) -> str:
 def validate_ticket(root: Path, task: dict[str, Any]) -> str:
     from .decisions import pending_decisions
 
+    validate_long_binding(root, task)
     identity = _live_ticket_identity(root, task)
     if pending_decisions(root, task["id"]):
         raise ChainBroken("await-user-decision: use ag resume with the explicit pending change IDs, then user confirm-map")
@@ -110,6 +111,7 @@ def validate_confirmation(root: Path, task: dict[str, Any]) -> str:
     """Only the human confirmation gate may handle a reviewed, unresolved resume."""
     from .decisions import confirmation_preparation, pending_decisions
 
+    validate_long_binding(root, task, confirmation=True)
     identity = _live_ticket_identity(root, task)
     if pending_decisions(root, task["id"]) and not confirmation_preparation(root, task):
         raise ChainBroken("await-user-decision: pending decisions have no matching reviewed resume preparation")
@@ -146,3 +148,93 @@ def require_construction(root: Path, task: dict[str, Any]) -> None:
         task["authorization_identity"] = identity
         append_task_step(root, task["id"], "worktree-observed-ready", source="legacy-confirmation-and-live-permissions", intent_identity=identity)
         save_task(project_key(root), task)
+
+
+
+def _long_pending(goal: dict[str, Any]) -> list[dict[str, Any]]:
+    return [row for row in goal.get("decisions", []) if row.get("status", row.get("state", "pending")) in {"pending", "proposed", "awaiting-decision"}]
+
+
+def new_long_binding(root: Path, goal_id: str, *, result_ids: list[str] | None = None, contribution: str = "", pending: bool = False) -> dict[str, Any]:
+    from .long_tasks import read_goal, ticket_projection, work_package
+    import hashlib
+
+    goal = read_goal(root, goal_id)
+    pending = bool(pending and _long_pending(goal))
+    contribution = contribution or goal["title"]
+    chosen = list(result_ids or [row["id"] for row in goal["results"] if row.get("state") == "active"])
+    package = work_package(root, goal_id, chosen, contribution=contribution)
+    text = ticket_projection(root, goal_id, pending=pending, result_ids=chosen, contribution=contribution)
+    proposals = _long_pending(goal) if pending else []
+    stable = {"goal_id": goal_id, "intent_revision": goal["intent_revision"], "result_ids": chosen, "contribution": contribution, "proposal_ids": [row["id"] for row in proposals], "proposal_hashes": [row["preview_hash"] for row in proposals], "projection_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
+    return {**stable, "opened_revision": goal["revision"], "work_package": package, "return_to": package.get("return_to"), "projection": text, "preview_token": digest(stable)}
+
+
+def long_goal_link(binding: dict[str, Any]) -> dict[str, Any]:
+    return {key: binding[key] for key in ("goal_id", "intent_revision", "result_ids", "contribution", "proposal_ids", "proposal_hashes", "projection_sha256")}
+
+
+def prepare_long_projection(root: Path, task: dict[str, Any], *, pending: bool = False) -> None:
+    """Only start/resume may replace the one-way exam snapshot; never reads."""
+    binding = task["long_goal"]
+    if task.get("intent_map_confirmed") and not pending:
+        return
+    fresh = new_long_binding(root, binding["goal_id"], result_ids=binding["result_ids"], contribution=binding["contribution"], pending=pending)
+    task["long_goal"] = fresh
+    task["goal_link"] = long_goal_link(fresh)
+    from .ticket_doc import ticket_path
+
+    ticket_path(root).write_text(fresh["projection"], encoding="utf-8")
+
+
+def _accepted_long_binding(goal: dict[str, Any], task: dict[str, Any]) -> bool:
+    binding = task["long_goal"]
+    ids = binding.get("proposal_ids") or []
+    proof = goal.get("authorization") or {}
+    if proof.get("task_id") != task["id"] or proof.get("intent_identity") != task.get("intent_identity") or proof.get("preview_token") != binding.get("preview_token"):
+        return False
+    return goal["intent_revision"] == binding["intent_revision"] + len(ids) and all(any(row["id"] == identity and row.get("state") == "accepted" and (row.get("authorization") or {}).get("preview_token") == binding["preview_token"] for row in goal["decisions"]) for identity in ids)
+
+
+def validate_long_binding(root: Path, task: dict[str, Any], *, confirmation: bool = False) -> None:
+    binding = task.get("long_goal")
+    if not binding:
+        return
+    from .long_tasks import read_goal, ticket_projection
+    import hashlib
+
+    goal = read_goal(root, binding["goal_id"])
+    accepted = _accepted_long_binding(goal, task)
+    pending = _long_pending(goal)
+    reviewed = set(binding.get("proposal_ids") or [])
+    if pending and (not confirmation or {row["id"] for row in pending} != reviewed):
+        raise ChainBroken("await-user-decision: long goal has pending intent changes; route --requires-decision then resume")
+    if not accepted and goal["intent_revision"] != binding["intent_revision"]:
+        raise ChainBroken("long-intent-revision-changed: review and human confirmation required")
+    projection = ticket_projection(root, binding["goal_id"], pending=bool(reviewed and not accepted), result_ids=binding["result_ids"], contribution=binding["contribution"])
+    if hashlib.sha256(projection.encode("utf-8")).hexdigest() != binding["projection_sha256"]:
+        raise ChainBroken("long-intent-projection-changed: re-review and human confirmation required")
+
+
+def validate_long_preview(root: Path, task: dict[str, Any], token: str) -> None:
+    from .long_tasks import read_goal
+
+    binding = task["long_goal"]
+    accepted = _accepted_long_binding(read_goal(root, binding["goal_id"]), task)
+    current_token = binding["preview_token"] if accepted else new_long_binding(root, binding["goal_id"], result_ids=binding["result_ids"], contribution=binding["contribution"], pending=bool(binding.get("proposal_ids")))["preview_token"]
+    if not token or token != binding.get("preview_token") or token != current_token:
+        raise ChainBroken("stale-long-preview: display start/resume again and personally confirm its exact --preview token")
+
+
+def record_long_authorization(root: Path, task: dict[str, Any]) -> None:
+    from . import long_tasks
+
+    binding = task["long_goal"]
+    long_tasks.record_authorization(root, binding["goal_id"], task_id=task["id"], intent_revision=binding["intent_revision"], proposal_ids=binding.get("proposal_ids") or [], preview_token=binding["preview_token"], authorization={"intent_identity": task["intent_identity"]})
+
+
+def record_long_close(root: Path, task: dict[str, Any], *, process: str, product: str) -> None:
+    from . import long_tasks
+
+    binding = task["long_goal"]
+    long_tasks.record_iteration(root, binding["goal_id"], task_id=task["id"], contribution=binding["contribution"], process=process, product=product, return_to=binding.get("return_to"), evidence=task.get("verify") or {})

@@ -11,7 +11,7 @@
 它通过 **主仓冻结（Canonical Freeze）+ 独立工作树（`<WORKTREE>`）隔离施工 + 启动票意图锚点与红线封存（`<AG_HOME>/projects/<key>/ticket.md`）+ 0-Token 本地脚本预筛 + 一前一后（`ticket` 开票审 + `switch` 交卷守门）无状态 DS 审核 + 一次性验证（`<WORKTREE>` 内现场生成的一次性自检脚本）**，从物理机制上解决 AI 编程的三大核心痛点：
 
 1. **防止改乱主仓与半途污染**：主分支检出区（`<PROJECT_ROOT>`）在任务期间物理只读冻结；所有修改强制发生在隔离工作树 `<WORKTREE>`，验收通过后才以 `--ff-only` 原子合入主仓。
-2. **防止目标漂移与偷删红线**：开工前强制在 `<AG_HOME>/projects/<key>/ticket.md` 锁定业务意图、正反向行为链路锚点（`anchor:`）与聚焦红线（`## 红线`），封存为不可篡改的 `<AG_HOME>/projects/<key>/redlines.copy`，并必须经用户显式执行 `confirm-map` 确认后才解冻工作树。
+2. **防止目标漂移与偷删红线**：legacy `single_md` 在 `<AG_HOME>/projects/<key>/ticket.md` 锁定业务意图、正反向行为链路锚点（`anchor:`）与聚焦红线（`## 红线`）；结构化长期任务以 `long-goals.sqlite3` 记录为唯一权威，并单向生成同路径的审核快照。两种模式均封存红线到 `<AG_HOME>/projects/<key>/redlines.copy`，经用户本人 `confirm-map` 与真实解冻后才 ready；长期票确认还须携带所见 `--preview`。编辑长期票面快照或导出不能改变权威记录。
 3. **防止“自己考自己”写假测试凑分**：废除常驻 `tests/` 答案库，每张票在 `<WORKTREE>/.ag-check/` 现场编写针对本票结果的一次性自检脚本（合入即销毁），配合异构/无状态的 `ticket`（开票三维审票）与 `switch`（交卷代码终审 + 自动种回归探针 `probes`）守住交付底线。
 
 ---
@@ -77,3 +77,13 @@ python -m ag enroll <PROJECT_ROOT>
 4. **隔离施工与一次性自检**：仅在 `<WORKTREE>` 内修改代码（复杂任务可用 `ag worker-create` 拆分最多 3 个 Worker），并在 `<WORKTREE>/.ag-check/` 下编写针对本票结果的一次性自检脚本。
 5. **交卷验货**：调用 `ag_verify`（执行本地预筛、历史回归探针 `probes`、`.ag-check/` 验证与单次无状态 `switch` 终审）。
 6. **原子合入或放弃**：验收通过后调用 `ag_finish` 快进合入 `<PROJECT_ROOT>` 并自动清理 `<WORKTREE>` 与 `.ag-check/`；若任务无价值或需推翻重来，调用 `ag_abandon` 安全解冻主仓。
+
+## 结构化长期目标
+
+长期任务以 `<AG_HOME>/projects/<key>/long-goals.sqlite3` 的增量事件为唯一权威，保留用户原话、来源、结果、适用约束、事实、计划、依赖、调查、证据和待决。`revision` 拒绝陈旧写入，`intent_revision` 对齐审过的稳定意图；普通事实或计划更新不会撤销稳定授权。
+
+CLI `long create/read/list/update/history/diff/package/export` 与 MCP `ag_long` 共用同一身份、来源和校验。`long update --expected-revision <REVISION> --operation <JSON>` 只提交一个增量操作，冲突先读 diff；`long panel <PROJECT_ROOT> <GOAL_ID> --open-browser` 用本机 Python 提供六栏面板，面板只能编辑普通事实和准备待决，不能授予施工权限。
+
+用 `start <PROJECT_ROOT> --goal-id <GOAL_ID> --result-id <RESULT_ID> --contribution "本轮贡献"` 开票。完整展示投影及差异后，用户亲自执行 `confirm-map <PROJECT_ROOT> --preview <task.long_goal.preview_token>`；AI 不得代调，旧预览不能确认新内容，真实解冻和授权记账成功后才返回 ready。目标或约束变化先 propose_change，再沿既有 route --requires-decision、resume、独立复审和新的人工确认恢复。
+
+长期票的 Markdown 是单向考卷投影，编辑导出文件不能修改结构化权威。旧 single_md 原样兼容，不静默迁移；显式 `long import --ticket-file <FILE> --title <TITLE> --source-ref <REF>` 仅创建未授权草稿，失败不改变原历史或继承旧权限。子票结束后用 delivery --task-id 恢复父目标差距、贡献和返回点；passed 和计划完成不会自动完成父目标，结果须有当前真实 AG 验据及显式覆盖判断。工作包始终携带未完成承诺、依赖链及直接/祖先适用约束。

@@ -90,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     start_p.add_argument("root")
     start_p.add_argument("--portrait", default="")
+    start_p.add_argument("--goal-id", default="", help="structured long goal identity")
+    start_p.add_argument("--result-id", action="append", default=[], help="long goal result included in this contribution; repeatable")
     start_p.add_argument("--continuation-of", default="")
     start_p.add_argument("--contribution", default="")
     start_p.add_argument("--fixed", action="append", default=[], help="locked done-state line; repeatable; not rewritten before confirm-map")
@@ -100,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("verify", help="run enrolled tests and pin the tree").add_argument("root")
     confirm_p = sub.add_parser("confirm-map", help="record user approval of the current intent map")
     confirm_p.add_argument("root")
+    confirm_p.add_argument("--preview", default="", help="exact long-goal preview token shown by start/resume; required for structured goals")
     confirm_p.add_argument(
         "--by",
         default="",
@@ -261,8 +264,60 @@ def main(argv: list[str] | None = None) -> int:
     run_s.add_argument("--head", default="", help="diff head ref; requires --base")
     sub.add_parser("switch-prompt", help="print the switch startup prompt")
     sub.add_parser("hook", help="git pre-commit helper")
+    long_p = sub.add_parser("long", help="structured long goals: create, inspect, incrementally update, and open the local panel")
+    long_sub = long_p.add_subparsers(dest="long_cmd", required=True)
+    for action in ("list", "read", "history", "diff", "package", "export", "update", "create", "import", "panel"):
+        lp = long_sub.add_parser(action)
+        lp.add_argument("root")
+        if action not in {"list", "create", "import"}:
+            lp.add_argument("goal_id")
+        if action in {"history", "diff"}:
+            lp.add_argument("--since-revision", type=int, default=0)
+        if action in {"package", "export"}:
+            lp.add_argument("--result-id", action="append", default=[])
+            lp.add_argument("--contribution", default="")
+        if action == "update":
+            lp.add_argument("--expected-revision", type=int, required=True)
+            lp.add_argument("--operation", required=True, help="one JSON incremental operation")
+        if action in {"create", "import"}:
+            lp.add_argument("--goal-id", default="")
+            lp.add_argument("--title", required=True)
+            lp.add_argument("--source-ref", required=True)
+            if action == "create":
+                lp.add_argument("--original", required=True)
+                lp.add_argument("--result", action="append", default=[])
+                lp.add_argument("--constraint", action="append", default=[])
+            else:
+                lp.add_argument("--ticket-file", required=True, help="explicit legacy import; existing authorization is never inherited")
+        if action == "panel":
+            lp.add_argument("--port", type=int, default=0)
+            lp.add_argument("--open-browser", action="store_true")
     args = parser.parse_args(argv)
     try:
+        if args.cmd == "long":
+            from .ship import long_call
+
+            values = vars(args).copy()
+            action = values.pop("long_cmd")
+            if action == "panel":
+                from .long_panel import start_panel
+
+                panel = start_panel(Path(args.root), args.goal_id, port=args.port, open_browser=args.open_browser)
+                print(json.dumps({"goal_id": args.goal_id, "url": panel.url}, ensure_ascii=False), flush=True)
+                panel.serve_forever()
+                return 0
+            values["action"] = action
+            if action == "update":
+                values["operation"] = json.loads(args.operation)
+            if action == "create":
+                values["results"] = [{"text": text} for text in args.result]
+                values["constraints"] = [{"text": text, "scope": ["*"]} for text in args.constraint]
+            result = long_call(Path(args.root), values)
+            if action == "export":
+                print(result["markdown"], end="")
+            else:
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
         if args.cmd == "mcp":
             from .mcp import serve
 
@@ -374,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
             from .worker import artifacts_dir
 
             worker_root = artifacts_dir(worktree) / "workers"
-            if worker_count(worktree) >= MAX_WORKERS:
+            if worker_count(worktree) >= MAX_WORKERS and not (args.worker_id and (worker_root / args.worker_id / "task.json").is_file()):
                 raise ChainBroken(f"worker limit reached: at most {MAX_WORKERS} workers per task")
             anchors = [
                 *[{"id": f"a{index}", "text": text, "kind": "soft"} for index, text in enumerate(args.anchor, 1)],
@@ -485,7 +540,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(read_result(worktree, args.worker_id), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "confirm-map":
-            print(json.dumps(confirm_map(Path(args.root), by=str(args.by or "")), ensure_ascii=False, indent=2))
+            print(json.dumps(confirm_map(Path(args.root), by=str(args.by or ""), preview=str(args.preview or "")), ensure_ascii=False, indent=2))
             return 0
         root = Path(args.root)
         if args.cmd == "delivery":
@@ -530,6 +585,8 @@ def main(argv: list[str] | None = None) -> int:
                         guards=args.guard,
                         defaults=args.default,
                         fixed=args.fixed or None,
+                        goal_id=args.goal_id,
+                        result_ids=args.result_id or None,
                         continuation_of=args.continuation_of,
                         contribution=args.contribution,
                     ),
@@ -613,8 +670,9 @@ def main(argv: list[str] | None = None) -> int:
                 if t["lesson"]:
                     print(f"  教训: {t['lesson']}")
             return 0
-    except ChainBroken as exc:
-        print(str(exc), file=sys.stderr)
+    except (ChainBroken, OSError, ValueError) as exc:
+        details = getattr(exc, "details", None)
+        print(json.dumps({"error": str(exc), "details": details}, ensure_ascii=False) if details else str(exc), file=sys.stderr)
         return 1
     return 2
 

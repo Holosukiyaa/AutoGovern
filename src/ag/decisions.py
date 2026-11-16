@@ -161,7 +161,7 @@ def record_resume_review(root: Path, task: dict[str, Any]) -> None:
     if not preparation:
         return
     review = task.get("ticket_review") or {}
-    names = ("id", "source_head", "worktree", "portrait", "anchors", "fixed", "goal_link", "redlines", "anchor_preview")
+    names = ("id", "source_head", "worktree", "portrait", "anchors", "fixed", "goal_link", "redlines", "anchor_preview", "long_goal")
     snapshot = {name: task[name] for name in names if name in task}
     intent, _ = split_document(str(task.get("anchor_preview") or ""))
     source = review_identity(intent, str(task.get("portrait") or ""), list(task.get("anchors") or []), list(task.get("redlines") or []), task.get("goal_link"))
@@ -235,6 +235,10 @@ def prepare_resume(root: Path, *, change_ids: list[str], decision: str) -> dict[
         origin = {name: value for name, value in task_facts(task).items() if name != "resume_preparation"}
         original_seal = copy_path(root).read_text(encoding="utf-8")
     original_identity = _validate_preserved_ticket(root, origin, str(origin.get("anchor_preview") or ""), original_seal)
+    if task.get("long_goal"):
+        from .authorization import prepare_long_projection
+
+        prepare_long_projection(root, task, pending=True)
     intent, _redlines = split_document(require_ticket(root))
     freeze_worktree(worktree)
     try:
@@ -252,5 +256,10 @@ def prepare_resume(root: Path, *, change_ids: list[str], decision: str) -> dict[
     # Reuse the ordinary sealing/review path. A crash remains frozen and retryable.
     from .anchor_map import resolve_fixed
 
-    result = start(root, portrait=intent.strip(), fixed=resolve_fixed(intent))
+    if task.get("long_goal"):
+        from .loop import parse_anchors
+
+        result = start(root, portrait=task["long_goal"]["contribution"], fixed=[row["text"] for row in parse_anchors(intent) if row.get("kind") != "hard"])
+    else:
+        result = start(root, portrait=intent.strip(), fixed=resolve_fixed(intent))
     return {**result, "schema": "ag.resume.v1", "resume_preparation": preparation}

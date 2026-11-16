@@ -86,7 +86,7 @@ description: >
 
 ### 第 2 步：编写启动票（`<AG_HOME>/projects/<key>/ticket.md`）
 
-每次开工前，必须先编辑 `<AG_HOME>/projects/<key>/ticket.md`。这是本轮任务的唯一权威意图文档（详细提炼方法参见 [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)）。
+legacy `single_md` 开工前先编辑 `<AG_HOME>/projects/<key>/ticket.md`，它是该模式的唯一权威意图文档。结构化长期任务改用 `long` 增量操作维护唯一权威 `long-goals.sqlite3` 记录，`start --goal-id` 单向生成票面审核快照，不能编辑快照或导出文件另立权威。下面模板针对 legacy 模式（详细提炼方法参见 [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)）。
 
 #### 标准写法模板：
 
@@ -192,3 +192,13 @@ anchor: 在哪个交互或数据链路上收敛什么行为：当输入或状态
     python -m ag abandon <PROJECT_ROOT>
     ```
   - **效果**：安全丢弃 `<WORKTREE>`，立即恢复 `<PROJECT_ROOT>` 的正常读写权限。
+
+## 结构化长期目标
+
+长期任务以 `<AG_HOME>/projects/<key>/long-goals.sqlite3` 的增量事件为唯一权威，保留用户原话、来源、结果、适用约束、事实、计划、依赖、调查、证据和待决。`revision` 拒绝陈旧写入，`intent_revision` 对齐审过的稳定意图；普通事实或计划更新不会撤销稳定授权。
+
+CLI `long create/read/list/update/history/diff/package/export` 与 MCP `ag_long` 共用同一身份、来源和校验。`long update --expected-revision <REVISION> --operation <JSON>` 只提交一个增量操作，冲突先读 diff；`long panel <PROJECT_ROOT> <GOAL_ID> --open-browser` 用本机 Python 提供六栏面板，面板只能编辑普通事实和准备待决，不能授予施工权限。
+
+用 `start <PROJECT_ROOT> --goal-id <GOAL_ID> --result-id <RESULT_ID> --contribution "本轮贡献"` 开票。完整展示投影及差异后，用户亲自执行 `confirm-map <PROJECT_ROOT> --preview <task.long_goal.preview_token>`；AI 不得代调，旧预览不能确认新内容，真实解冻和授权记账成功后才返回 ready。目标或约束变化先 propose_change，再沿既有 route --requires-decision、resume、独立复审和新的人工确认恢复。
+
+长期票的 Markdown 是单向考卷投影，编辑导出文件不能修改结构化权威。旧 single_md 原样兼容，不静默迁移；显式 `long import --ticket-file <FILE> --title <TITLE> --source-ref <REF>` 仅创建未授权草稿，失败不改变原历史或继承旧权限。子票结束后用 delivery --task-id 恢复父目标差距、贡献和返回点；passed 和计划完成不会自动完成父目标，结果须有当前真实 AG 验据及显式覆盖判断。工作包始终携带未完成承诺、依赖链及直接/祖先适用约束。

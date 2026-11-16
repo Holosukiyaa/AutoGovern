@@ -321,6 +321,17 @@ def create_task(
         "guards": [str(item) for item in (guards or []) if str(item).strip()],
         "defaults": [str(item) for item in (defaults or []) if str(item).strip()],
     }
+    from .loop import _canonical_root, load_task
+    from .managed import project_key
+
+    canonical = _canonical_root(worktree)
+    parent = load_task(project_key(canonical))
+    if parent and parent.get("long_goal"):
+        from .long_tasks import work_package
+
+        binding = parent["long_goal"]
+        dossier["long_goal"] = {"goal_id": binding["goal_id"], "intent_revision": binding["intent_revision"], "contribution": binding["contribution"], "result_ids": binding["result_ids"], "parent_task_id": parent["id"]}
+        dossier["work_package"] = work_package(canonical, binding["goal_id"], binding["result_ids"], contribution=binding["contribution"], task_id=parent["id"])
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "task.json").write_text(json.dumps(dossier, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     prompt = [
@@ -352,6 +363,8 @@ def create_task(
         "Write `result.json` beside `task.json` using schema `ag.worker.result.v1`.",
         "Report evidence and open questions; do not claim AG acceptance.",
     ]
+    if dossier.get("work_package"):
+        prompt.extend(["", "## Structured parent goal work package", "", "```json", json.dumps(dossier["work_package"], ensure_ascii=False, indent=2), "```", "", "This package is a read view, not construction authority. Preserve unfinished parent results and applicable constraints."])
     (directory / "TASK.md").write_text("\n".join(prompt) + "\n", encoding="utf-8")
     return {**dossier, "task_path": str((directory / "task.json").resolve()), "prompt_path": str((directory / "TASK.md").resolve())}
 

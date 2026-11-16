@@ -21,7 +21,7 @@ def intent_identity(task: dict[str, Any], text: str, sealed_redlines: str) -> st
 
 
 def task_facts(task: dict[str, Any]) -> dict[str, Any]:
-    names = ("id", "branch", "source_head", "worktree", "portrait", "anchors", "fixed", "fixed_rules", "redlines", "anchor_preview", "intent_identity", "intent_map_confirmed", "authorization_identity", "worktree_ready", "thaw_error", "ticket_review", "verify", "verified_tree", "goal_link", "check_argv", "verified_executor_src", "process", "cleanup_error", "archive_error", "merged_head", "resume_preparation")
+    names = ("id", "branch", "source_head", "worktree", "portrait", "anchors", "fixed", "fixed_rules", "redlines", "anchor_preview", "intent_identity", "intent_map_confirmed", "authorization_identity", "worktree_ready", "thaw_error", "ticket_review", "verify", "verified_tree", "goal_link", "check_argv", "verified_executor_src", "process", "cleanup_error", "archive_error", "merged_head", "resume_preparation", "long_goal")
     return {name: task[name] for name in names if name in task}
 
 
@@ -191,6 +191,8 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
             if any(row.get("task_id") != requested for row in foreign):
                 diagnostics.append({"kind": "wrong-task", "source": "verify.switch", "report_id": switch["report_id"]})
     evidence_bound = bool(candidate and report and report.get("candidate") == candidate and report.get("task_id") == requested and report.get("outcome") == switch.get("outcome"))
+    if task.get("long_goal"):
+        evidence_bound = evidence_bound and bool(verify.get("long_goal_inputs")) and (report or {}).get("long_goal_inputs") == verify.get("long_goal_inputs")
     if task.get("resume_preparation"):
         evidence_bound = evidence_bound and verify.get("intent_identity") == task.get("intent_identity")
     if verify.get("product_tree"):
@@ -213,7 +215,7 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
 
     verified_ok = bool(verify and verify.get("exit") == 0 and not verify.get("undeclared") and not verify.get("probe_red") and switch.get("outcome") in PASS and evidence_bound and candidate_current)
     if verified_ok:
-        verified = [{"result": outcome, "report_id": switch.get("report_id"), "candidate": candidate, "checks": verify.get("check_argv") or [], "source": report["ref"]} for outcome in fixed]
+        verified = [{"result": outcome, "report_id": switch.get("report_id"), "candidate": candidate, "checks": verify.get("check_argv") or [], "source": report["ref"], **({"long_goal_inputs": verify["long_goal_inputs"]} if verify.get("long_goal_inputs") else {})} for outcome in fixed]
     elif verify:
         if verify.get("exit") != 0:
             blockers.append(issue("checks-failed", verify.get("stderr") or verify.get("refused") or verify.get("exit"), "fix-and-verify"))
@@ -290,6 +292,23 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
         action = "finish"
     else:
         action = "implement-and-verify"
+    long_view = None
+    long_binding = task.get("long_goal")
+    if long_binding:
+        from .long_tasks import read_goal, work_package
+
+        parent = read_goal(root, long_binding["goal_id"])
+        package = work_package(root, long_binding["goal_id"], long_binding["result_ids"], contribution=long_binding["contribution"], task_id=requested)
+        long_view = {"goal_id": parent["goal_id"], "revision": parent["revision"], "intent_revision": parent["intent_revision"], "authorized_intent_revision": parent.get("authorized_intent_revision"), "binding": long_binding, "parent": parent, "work_package": package, "return_to": parent.get("return_to") or {"goal_id": parent["goal_id"], "action": "read-parent-gap"}, "grants_authority": False}
+        proposal_ids = long_binding.get("proposal_ids") or []
+        accepted_ids = {row["id"] for row in parent.get("decisions", []) if row.get("state") == "accepted"}
+        projected_revision = long_binding["intent_revision"] + (len(proposal_ids) if set(proposal_ids) <= accepted_ids else 0)
+        intent_pending = parent["intent_revision"] != projected_revision or any(row.get("state") == "pending" for row in parent.get("decisions", []))
+        if is_active and process == "active" and intent_pending:
+            readiness, action = "await-user-decision", "prepare-resume"
+            blockers.append(issue("long-intent-decision-pending", parent["goal_id"], action))
+        elif process in {"completed", "abandoned"}:
+            action = "read-parent-gap"
     return {
         "schema": "ag.delivery.v1",
         "root": str(root),
@@ -299,6 +318,8 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
         "process": process,
         "goal": goal,
         "goal_link": goal_link,
+        "long_goal": long_view,
+        "return_to": (long_view or {}).get("return_to"),
         "contribution": (goal_link or {}).get("contribution") or task.get("portrait") or "",
         "progress": {
             "verified": verified,
@@ -306,7 +327,7 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
             "candidate": candidate,
             "route_changes": [step for step in steps if step.get("phase") == "delivery-change"],
         },
-        "remaining": [] if verified_ok else fixed,
+        "remaining": ((long_view or {}).get("work_package") or {}).get("remaining", [] if verified_ok else fixed),
         "pending_decisions": pending,
         "blockers": blockers,
         "advisories": advisories,

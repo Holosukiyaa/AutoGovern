@@ -853,6 +853,8 @@ def start(
     fixed: list[str] | None = None,
     continuation_of: str = "",
     contribution: str = "",
+    goal_id: str = "",
+    result_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Open a worktree. Tracked canonical files stay frozen until finish or abandon.
 
@@ -897,6 +899,12 @@ def start(
     )
 
     existing = load_task(key)
+    if existing and goal_id and goal_id != (existing.get("long_goal") or {}).get("goal_id"):
+        raise ChainBroken("long-goal-binding-changed: close the existing ticket before choosing another goal")
+    if existing and existing.get("long_goal"):
+        from .authorization import prepare_long_projection
+
+        prepare_long_projection(root, existing, pending=bool(existing.get("resume_preparation")))
     if existing and Path(str(existing.get("worktree") or "")).is_dir():
         if existing.get("intent_map_confirmed"):
             from .authorization import validate_ticket
@@ -1036,11 +1044,20 @@ def start(
             raise ChainBroken("invalid-continuation: expected a closed, confirmed predecessor")
         parent_link = previous.get("goal_link") or {}
         goal_link = {"task_id": continuation_of, "common_goal": parent_link.get("common_goal") or previous["goal"], "contribution": contribution or chosen, "remaining": previous["remaining"]}
-    document = require_ticket(root)
+    long_goal = None
+    if goal_id:
+        from .authorization import long_goal_link, new_long_binding
+
+        long_goal = new_long_binding(root, goal_id, result_ids=result_ids, contribution=contribution or chosen, pending=True)
+        chosen = chosen or long_goal["contribution"]
+        goal_link = long_goal_link(long_goal)
+        document = long_goal["projection"]
+    else:
+        document = require_ticket(root)
     intent_body, redline_body = split_document(document)
     caller_anchors = None if anchors is None else [dict(item) for item in anchors if isinstance(item, dict)]
     task_anchors = merge_anchors(parse_anchors(intent_body), caller_anchors)
-    task_fixed = resolve_fixed(chosen, fixed)
+    task_fixed = resolve_fixed(chosen, fixed if fixed is not None else ([row["text"] for row in task_anchors if row.get("kind") != "hard"] if long_goal else None))
     task_rules = hard_rules(task_anchors)
     if not task_fixed and not task_anchors:
         usage_note(root, "ship", 8, "block", "start without intent anchors")
@@ -1113,6 +1130,8 @@ def start(
         "verify": None,
         "goal_link": goal_link,
     }
+    if long_goal:
+        task_blob["long_goal"] = long_goal
     preview = write_scene(root, task_blob, process="active", product="pending") or preview
     task_blob["anchor_preview"] = preview
     from .authorization import bind_ticket
@@ -1221,10 +1240,19 @@ def verify(root: Path) -> dict[str, Any]:
         for ln in git(worktree, "ls-files", "-o", "--exclude-standard", check=False).splitlines()
         if ln.strip()
     ]
+    long_goal_inputs = None
+    if task.get("long_goal"):
+        from .long_tasks import work_package
+
+        binding = task["long_goal"]
+        package = work_package(enrolled, binding["goal_id"], binding["result_ids"], contribution=binding["contribution"], task_id=task_id)
+        long_goal_inputs = {"goal_id": binding["goal_id"], "revision": package["revision"], "intent_revision": package["intent_revision"], "reviewed_intent_revision": binding["intent_revision"], "result_ids": binding["result_ids"], "package_fingerprint": package["fingerprint"], "input_fingerprints": package["input_fingerprints"], "candidate": candidate_before, "check_id": chosen_checks["sha256"]}
     timings: dict[str, float] = {}
     t0 = time.perf_counter()
     t_tests = time.perf_counter()
     record = {**run_checks(worktree, chosen_checks), "untracked": untracked[:50], "task_id": task_id, "candidate": candidate_before, "product_tree": product_before, "intent_identity": task.get("intent_identity")}
+    if long_goal_inputs:
+        record["long_goal_inputs"] = long_goal_inputs
     timings["tests_s"] = round(time.perf_counter() - t_tests, 3)
     append_task_step(enrolled, task_id, "verify-tests", seconds=timings["tests_s"])
     paths = _ticket_paths(worktree, str(task.get("source_head") or ""))
@@ -1315,7 +1343,7 @@ def verify(root: Path) -> dict[str, Any]:
         probe_red=probe_red,
         critic=None,
         tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
-        verification={"task_id": task_id, "candidate": candidate_before, "product_tree": product_before, "check_selection": chosen_checks, **record["evidence"]},
+        verification={"task_id": task_id, "candidate": candidate_before, "product_tree": product_before, "check_selection": chosen_checks, **({"long_goal_inputs": long_goal_inputs} if long_goal_inputs else {}), **record["evidence"]},
         redlines=sealed_redlines,
         source_head=str(task.get("source_head") or ""),
     )
@@ -1449,7 +1477,7 @@ def verify(root: Path) -> dict[str, Any]:
     return out
 
 
-def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
+def confirm_map(root: Path, *, by: str = "", preview: str = "") -> dict[str, Any]:
     started = time.perf_counter()
     stages = []
     def stage(name: str) -> None:
@@ -1474,6 +1502,10 @@ def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
     from .delivery import build_delivery_snapshot
     from .freeze import _tracked_files, assert_frozen
 
+    if task.get("long_goal"):
+        from .authorization import validate_long_preview
+
+        validate_long_preview(root, task, preview)
     identity = validate_confirmation(root, task)
     preparation = confirmation_preparation(root, task)
     if not _hook_ok(root, key):
@@ -1518,6 +1550,10 @@ def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
         task["worktree_ready"] = True
         task.pop("thaw_error", None)
         save_task(key, task)
+        if task.get("long_goal"):
+            from .authorization import record_long_authorization
+
+            record_long_authorization(root, task)
     except (OSError, ChainBroken) as exc:
         task["worktree_ready"] = False
         task["thaw_error"] = str(exc)
@@ -1595,6 +1631,10 @@ def _close_task(root: Path, key: str, task: dict[str, Any], *, process: str, pro
         try:
             write_scene(root, task, process=process, product=product)
             archive_session(root, task, verify=verify_blob, touched=touched, check_exit=(verify_blob or {}).get("exit"), process=process, product=product)
+            if task.get("long_goal"):
+                from .authorization import record_long_close
+
+                record_long_close(root, task, process=process, product=product)
             append_task_step(root, task["id"], "finish" if process == "completed" else "abandon", head=head, product=product, task=task_facts(task), switch_report_id=_switch_report_id(verify_blob))
             task["close_recorded"] = True
             task.pop("archive_error", None)

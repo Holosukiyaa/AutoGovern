@@ -224,3 +224,13 @@ python -m ag worker-create <PROJECT_ROOT> --portrait "做成之后：..." --anch
   - `see-15`（一前一后精简考卷）：记录单次 `switch` 与窗口裁剪节省的字符与 Token 账本。
   - `see-17`（评审跑没跑）：现算开票审 / 批改 / 开关三席各跑过多少次、通过 / 拒绝 / 没审各多少、没审的原因与次数，以及每席最近一条结论与时间。
   - `see-18`（正本对账）：把评审历史的正本 jsonl 与 `-last.json` 缓存逐字段对上，报出不一致字段、坏行数，以及旧 `ag.sqlite` 里还剩多少行镜像。
+
+## 结构化长期目标
+
+长期任务以 `<AG_HOME>/projects/<key>/long-goals.sqlite3` 的增量事件为唯一权威，保留用户原话、来源、结果、适用约束、事实、计划、依赖、调查、证据和待决。`revision` 拒绝陈旧写入，`intent_revision` 对齐审过的稳定意图；普通事实或计划更新不会撤销稳定授权。
+
+CLI `long create/read/list/update/history/diff/package/export` 与 MCP `ag_long` 共用同一身份、来源和校验。`long update --expected-revision <REVISION> --operation <JSON>` 只提交一个增量操作，冲突先读 diff；`long panel <PROJECT_ROOT> <GOAL_ID> --open-browser` 用本机 Python 提供六栏面板，面板只能编辑普通事实和准备待决，不能授予施工权限。
+
+用 `start <PROJECT_ROOT> --goal-id <GOAL_ID> --result-id <RESULT_ID> --contribution "本轮贡献"` 开票。完整展示投影及差异后，用户亲自执行 `confirm-map <PROJECT_ROOT> --preview <task.long_goal.preview_token>`；AI 不得代调，旧预览不能确认新内容，真实解冻和授权记账成功后才返回 ready。目标或约束变化先 propose_change，再沿既有 route --requires-decision、resume、独立复审和新的人工确认恢复。
+
+长期票的 Markdown 是单向考卷投影，编辑导出文件不能修改结构化权威。旧 single_md 原样兼容，不静默迁移；显式 `long import --ticket-file <FILE> --title <TITLE> --source-ref <REF>` 仅创建未授权草稿，失败不改变原历史或继承旧权限。子票结束后用 delivery --task-id 恢复父目标差距、贡献和返回点；passed 和计划完成不会自动完成父目标，结果须有当前真实 AG 验据及显式覆盖判断。工作包始终携带未完成承诺、依赖链及直接/祖先适用约束。

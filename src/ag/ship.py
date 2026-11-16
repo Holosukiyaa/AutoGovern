@@ -56,6 +56,8 @@ TOOLS = [
                 "fixed": {"type": "array", "items": {"type": "string"}},
                 "guards": {"type": "array", "items": {"type": "string"}},
                 "defaults": {"type": "array", "items": {"type": "string"}},
+                "goal_id": {"type": "string"},
+                "result_ids": {"type": "array", "items": {"type": "string"}},
                 "continuation_of": {"type": "string"},
                 "contribution": {"type": "string"},
             },
@@ -73,6 +75,7 @@ TOOLS = [
             "properties": {
                 "root": {"type": "string"},
                 "by": {"type": "string"},
+                "preview": {"type": "string"},
             },
             "required": ["root"],
         },
@@ -120,6 +123,8 @@ TOOLS.extend([
 
 def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     root = Path(str(args.get("root") or "")).expanduser()
+    if name == "ag_long":
+        return long_call(root, args)
     if name == "ag_status":
         return status(root)
     if name == "ag_delivery":
@@ -154,11 +159,13 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
             guards=guards,
             defaults=defaults,
             fixed=fixed,
+            goal_id=str(args.get("goal_id") or ""),
+            result_ids=args.get("result_ids"),
             continuation_of=str(args.get("continuation_of") or ""),
             contribution=str(args.get("contribution") or ""),
         )
     if name == "ag_confirm_map":
-        return confirm_map(root, by=str(args.get("by") or ""))
+        return confirm_map(root, by=str(args.get("by") or ""), preview=str(args.get("preview") or ""))
     if name == "ag_verify":
         return verify(root)
     if name == "ag_finish":
@@ -170,3 +177,61 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     from .managed import ChainBroken
 
     raise ChainBroken(f"unknown tool {name}")
+
+
+TOOLS.append({
+    "name": "ag_long",
+    "description": "Shared structured goal authority. Read/list/history/diff/package/export are read-only. Create/import make an unapproved draft; update applies one revision-checked operation. No action grants construction authority; user personally runs confirm-map with the reviewed preview token.",
+    "inputSchema": {"type": "object", "properties": {
+        "root": {"type": "string"}, "action": {"type": "string", "enum": ["create", "import", "read", "list", "update", "history", "diff", "package", "export"]},
+        "goal_id": {"type": "string"}, "title": {"type": "string"}, "original": {"type": "string"},
+        "source": {"type": "object"}, "source_ref": {"type": "string"}, "ticket_file": {"type": "string"},
+        "results": {"type": "array", "items": {"type": "object"}}, "constraints": {"type": "array", "items": {"type": "object"}},
+        "operation": {"type": "object"}, "expected_revision": {"type": "integer"}, "since_revision": {"type": "integer"},
+        "result_ids": {"type": "array", "items": {"type": "string"}}, "contribution": {"type": "string"}
+    }, "required": ["root", "action"]}
+})
+
+
+def long_call(root: Path, args: dict[str, Any]) -> Any:
+    from . import long_tasks
+
+    action = str(args.get("action") or "read")
+    goal_id = str(args.get("goal_id") or "")
+    if action == "list":
+        return long_tasks.list_goals(root)
+    if action in {"create", "import"}:
+        original = str(args.get("original") or "")
+        results, constraints = args.get("results"), args.get("constraints")
+        source = args.get("source") or {"kind": "user", "ref": str(args.get("source_ref") or ""), "text": original}
+        if action == "import":
+            from .ticket_doc import collect_redlines, split_document
+            from .loop import parse_anchors
+
+            path = Path(str(args.get("ticket_file") or ""))
+            if not path.is_file():
+                raise ValueError("legacy-import-missing: explicit ticket file required")
+            original = path.read_text(encoding="utf-8")
+            intent, redlines = split_document(original)
+            anchors = parse_anchors(intent)
+            if not anchors or not intent.strip():
+                raise ValueError("legacy-import-invalid: a ticket with intent anchors is required; historical task remains unchanged")
+            results = [{"text": row["text"]} for row in anchors if row.get("kind") != "hard"] or [{"text": intent.strip()}]
+            constraints = [{"text": line, "scope": ["*"], "source": {"kind": "legacy-ticket-boundary", "ref": str(path.resolve()), "text": line}} for line in collect_redlines(redlines, anchors)]
+            source = {"kind": "legacy-ticket", "ref": str(args.get("source_ref") or path.resolve()), "text": original}
+        return long_tasks.create_goal(root, str(args.get("title") or ""), original, source, results=results, constraints=constraints, goal_id=goal_id)
+    if action == "read":
+        return long_tasks.read_goal(root, goal_id)
+    if action == "update":
+        if type(args.get("expected_revision")) is not int or not isinstance(args.get("operation"), dict):
+            raise ValueError("long-update-invalid: expected_revision and one operation required")
+        return long_tasks.apply_operation(root, goal_id, args["operation"], args["expected_revision"], source=args.get("source") or {"kind": "cli-mcp", "ref": goal_id, "text": "Incremental operation through AG"})
+    if action == "history":
+        return long_tasks.goal_history(root, goal_id, since_revision=int(args.get("since_revision") or 0))
+    if action == "diff":
+        return long_tasks.goal_diff(root, goal_id, int(args.get("since_revision") or 0))
+    if action == "package":
+        return long_tasks.work_package(root, goal_id, args.get("result_ids") or args.get("result_id") or None, contribution=str(args.get("contribution") or ""))
+    if action == "export":
+        return {"goal_id": goal_id, "authority": "structured-record", "editable": False, "markdown": long_tasks.ticket_projection(root, goal_id, result_ids=args.get("result_ids") or args.get("result_id") or None, contribution=str(args.get("contribution") or ""))}
+    raise ValueError(f"unknown long goal action: {action}")
