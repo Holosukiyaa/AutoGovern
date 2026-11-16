@@ -4,7 +4,13 @@
 
 Local engineering delivery guardrails and stateless review foundation (MCP + CLI) for AI-assisted programming (Vibe Coding).
 
-Current version: **v0.5.1**.
+Current version: **v0.5.2**.
+
+## What's New in v0.5.2
+
+- **Single tickets and Markdown long tickets**: CLI and MCP default to `single`; ongoing goals explicitly select `long`, with a directly readable and editable `long.md` as the intent authority. Each round keeps its own original child ticket and sources.
+- **Human confirmation and verified delivery**: both ticket types retain independent ticket review, personal human `confirm-map`, worktree isolation, verification and archiving. Long-ticket confirmation includes the reviewed preview; routine document maintenance does not refresh the actual verification time.
+- **Explicit legacy migration**: legacy SQLite long tickets and historical exports remain available for read-only inspection. Only explicit migration creates the Markdown authority; the old HTML panel is no longer the default ticket creation or reading interface.
 
 Three orthogonal lanes that must never mix: **ship (交货)** · **lift (抬正确率)** · **see (看见)**.
 
