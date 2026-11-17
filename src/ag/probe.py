@@ -806,15 +806,15 @@ def run(
 
 
 def calibrate(root: Path, *, id: str, observation: Any) -> dict[str, Any]:
-    from .authorization import validate_ticket
     from .loop import git, load_task, tree_digest
     from .store import append_task_step
 
     repo = real_root(root)
     task = load_task(project_key(repo))
-    if not task or not task.get("intent_map_confirmed"):
+    from .authorization import require_construction
+    if not task:
         raise ChainBroken("intent-map-unconfirmed: calibrate in an approved worktree")
-    validate_ticket(repo, task)
+    require_construction(repo, task)
     worktree = Path(task["worktree"])
     if git(repo, "rev-parse", "HEAD") != task.get("source_head"):
         raise ChainBroken("probe-comparison-source-changed")

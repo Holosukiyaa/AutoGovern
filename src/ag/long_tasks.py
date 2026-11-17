@@ -692,8 +692,13 @@ def _apply(root,goal_id,operation,expected_revision,*,source=None,internal=False
                 from .managed import project_key
                 active=load_task(project_key(real_root(Path(root)))) or {}; link=active.get('long_goal') or {}
                 if active.get('id')!=op.get('task_id') or link.get('goal_id')!=goal_id or set(op.get('result_ids') or [])-set(link.get('result_ids') or []): _fail('iteration-task-scope-mismatch')
-                auth=goal.get('authorization') or {}
-                if auth.get('task_id')!=active['id'] or auth.get('intent_identity')!=active.get('intent_identity') or not active.get('worktree_ready'): _fail('iteration-task-not-authorized')
+                from .authorization import validate_ticket
+                from .long_authorization import recorded
+                if not recorded(active) or not active.get('worktree_ready') or active.get('thaw_error'): _fail('iteration-task-not-authorized')
+                validate_ticket(Path(root),active)
+                if not active.get('long_authorization'):
+                    auth=goal.get('authorization') or {}
+                    if auth.get('task_id')!=active['id'] or auth.get('intent_identity')!=active.get('intent_identity'): _fail('iteration-task-not-authorized')
                 op['reviewed_intent_revision']=link['intent_revision']
                 op['authorization_identity']=active['intent_identity']
                 _result_ids(goal,op.get('result_ids')); package=work_package(root,goal_id,op['result_ids'],contribution=op.get('contribution',''),task_id=op.get('task_id',''))
@@ -758,7 +763,7 @@ def work_package(root,goal_id,result_ids=None,*,contribution='',task_id=''):
     package['fingerprint']=_hash(package)
     return package
 
-def ticket_projection(root,goal_id,*,pending=False,result_ids=None,contribution=''):
+def ticket_projection(root,goal_id,*,pending=False,result_ids=None,contribution='',authorization_context=True):
     _require_valid(read_goal(root,goal_id))
     raw,_=_load(root,goal_id)
     if pending:
@@ -775,8 +780,12 @@ def ticket_projection(root,goal_id,*,pending=False,result_ids=None,contribution=
     lines.extend(['','## Parent remaining commitments (context; outside this ticket acceptance)'])
     for row in raw['results']:
         if row['state']=='active' and row['id'] not in selected: lines.append(f"- [{row['id']}] {row['text']}")
+    if authorization_context:
+        lines.extend(['','## 父长票授权范围（整体批准一次）','首次确认批准完整父目标、全部结果与约束；本轮只验收选定结果。已批准范围内后续子票独立审票后继承授权，目标或约束变化重新交用户决定。'])
+        other_constraints=[r for r in raw['constraints'] if r.get('state')=='active' and not (r['scope']==['*'] or set(r['scope']) & ancestry)]
+        for row in other_constraints: lines.append(f"- 父约束 [{row['id']}]（适用 {', '.join(row['scope'])}）：{row['text']}")
     lines.extend(['','## 红线']); constraints=[r for r in raw['constraints'] if r.get('state')=='active' and (r['scope']==['*'] or set(r['scope']) & ancestry)]
-    if not constraints: lines.append('- 沿现有独立审校、人工 confirm-map 与 ready 门禁施工；本投影不授予权限。')
+    if not constraints: lines.append('- 沿现有独立审校、有效父授权与真实 ready 门禁施工；无原始授权须用户本人首次 confirm-map，本投影不授予权限。' if authorization_context else '- 沿现有独立审校、人工 confirm-map 与 ready 门禁施工；本投影不授予权限。')
     for row in constraints: lines.append(f"- [{row['id']}] {row['text']}")
     lines.extend(['','## 长期记录来源','authority: '+str(document_path(root,goal_id)),'projection: immutable single-ticket scope; edit parent long.md for future intent',''])
     return '\n'.join(lines)
@@ -786,6 +795,13 @@ def ticket_projection(root,goal_id,*,pending=False,result_ids=None,contribution=
 export_ticket=ticket_projection
 history=goal_history
 diff=goal_diff
+
+
+def record_inherited_iteration(root, task):
+    binding=task['long_goal']; goal_id=binding['goal_id']; goal=read_goal(root,goal_id)
+    if any(row['task_id']==task['id'] and row.get('authorization_identity')==task['intent_identity'] for row in goal['iterations']): return goal
+    package=work_package(root,goal_id,binding['result_ids'],contribution=binding['contribution'],task_id=task['id'])
+    return apply_operation(root,goal_id,{'type':'bind_iteration','id':_id(prefix='iteration'),'task_id':task['id'],'contribution':binding['contribution'],'result_ids':binding['result_ids'],'return_to':binding.get('return_to') or {'goal_id':goal_id,'result_id':binding['result_ids'][0]},'package_fingerprint':package['fingerprint'],'authorization_identity':task['intent_identity'],'reviewed_intent_revision':binding['intent_revision']},goal['revision'],source={'kind':'ag-inherited-child','ref':'task:'+task['id']})
 
 
 def record_authorization(root,goal_id,*,task_id,intent_revision,proposal_ids,preview_token,authorization):

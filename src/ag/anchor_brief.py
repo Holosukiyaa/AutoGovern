@@ -1,4 +1,4 @@
-"""Short anchor template, plus the full skill after the first look."""
+"""Anchor guidance only; start validates long inheritance and grants readiness."""
 from __future__ import annotations
 
 import json
@@ -39,7 +39,7 @@ def load_skill() -> str:
 
 
 def anchor_guidance(template_issued: bool) -> dict[str, object]:
-    """First look is the template. Every later look while unconfirmed is the full skill."""
+    """Return writing and authorization guidance; views never grant inheritance."""
     if not template_issued:
         return {"anchor_brief": load_brief()}
     return {"skill": load_skill()}

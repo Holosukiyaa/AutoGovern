@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .history import digest
+from .long_authorization import recorded
 from .managed import ChainBroken, ag_home, lookup_project, project_key, real_root
 from .store import append_task_step, list_llm_events, load_task_timeline
 
@@ -84,7 +85,7 @@ def pending_decisions(root: Path, task_id: str) -> list[dict[str, Any]]:
             if initial:
                 valid_origin = valid_origin and bool(origin.get("long_goal")) and not origin.get("intent_map_confirmed") and not origin.get("authorization_identity") and not human_confirmed
             else:
-                valid_origin = valid_origin and bool(origin.get("intent_map_confirmed"))
+                valid_origin = valid_origin and recorded(origin)
             if not valid_origin or not preparation.get("previous_identity") or not preparation.get("candidate") or not preparation.get("worktree_head"):
                 raise ChainBroken("history-source-error: decision preparation lost its confirmed predecessor or initial unapproved identity")
             prepared[rid] = preparation
@@ -233,18 +234,18 @@ def prepare_resume(root: Path, *, change_ids: list[str], decision: str) -> dict[
     unresolved_previous = previous and any(row["change_id"] in previous["change_ids"] for row in pending)
     if unresolved_previous:
         if task.get("intent_map_confirmed"):
-            raise ChainBroken("resume-confirmation-recorded: approval retained; retry user confirm-map to complete thaw")
+            raise ChainBroken("resume-confirmation-recorded: approval retained; retry start for long, human confirm-map for single to complete thaw")
         origin = previous["previous_task"]
         original_seal = previous["previous_seal"]
         if git(worktree, "rev-parse", "HEAD") != previous["worktree_head"] or tree_digest(worktree) != previous["candidate"]:
             raise ChainBroken("intent-identity-changed: prepared candidate changed")
     else:
-        initial_review = not task.get("intent_map_confirmed")
+        initial_review = not recorded(task)
         if initial_review and (not task.get("long_goal") or task.get("authorization_identity") or any(step.get("phase") == "intent-map-confirmed" for step in _steps(root, task["id"]))):
             raise ChainBroken("intent-map-unconfirmed: resume requires a confirmed predecessor or a never-authorized long draft")
         origin = {name: value for name, value in task_facts(task).items() if name != "resume_preparation"}
         original_seal = copy_path(root).read_text(encoding="utf-8")
-    initial_review = not origin.get("intent_map_confirmed")
+    initial_review = not recorded(origin)
     if initial_review:
         from .delivery import intent_identity
         original_identity = intent_identity(origin, str(origin.get("anchor_preview") or ""), original_seal)
@@ -268,6 +269,7 @@ def prepare_resume(root: Path, *, change_ids: list[str], decision: str) -> dict[
     task["intent_map_confirmed"] = False
     task["worktree_ready"] = False
     task.pop("authorization_identity", None)
+    task.pop("long_authorization", None)
     task.pop("thaw_error", None)
     save_task(project_key(root), task)
     # Reuse the ordinary sealing/review path. A crash remains frozen and retryable.

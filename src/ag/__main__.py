@@ -86,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     resume_p.add_argument("--decision", required=True, help="the user's explicit decision; preparation never grants construction authority")
     start_p = sub.add_parser(
         "start",
-        help="open a worktree; tracked canonical files stay frozen until finish or abandon",
+        help="open/resume a reviewed worktree; approved long scope inherits once, start retries long thaw; single needs human confirm-map",
     )
     start_p.add_argument("root")
     start_p.add_argument("--portrait", default="")
@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     start_p.add_argument("--default", action="append", default=[], help="negotiable default shown beside the route; repeatable")
     start_p.add_argument("--hard-anchor", action="append", default=[], help="hard anchor only from explicit user/project rule; repeatable")
     sub.add_parser("verify", help="run enrolled tests and pin the tree").add_argument("root")
-    confirm_p = sub.add_parser("confirm-map", help="record user approval of the current intent map")
+    confirm_p = sub.add_parser("confirm-map", help="human approval: each single ticket, first long parent or changed parent intent; in-scope long children inherit via start")
     confirm_p.add_argument("root")
     confirm_p.add_argument("--preview", default="", help="exact long-goal preview token shown by start/resume; required for structured goals")
     confirm_p.add_argument(

@@ -21,7 +21,7 @@ def intent_identity(task: dict[str, Any], text: str, sealed_redlines: str) -> st
 
 
 def task_facts(task: dict[str, Any]) -> dict[str, Any]:
-    names = ("id", "branch", "source_head", "worktree", "portrait", "anchors", "fixed", "fixed_rules", "redlines", "anchor_preview", "intent_identity", "intent_map_confirmed", "authorization_identity", "worktree_ready", "thaw_error", "ticket_review", "verify", "verified_tree", "goal_link", "check_argv", "verified_executor_src", "process", "cleanup_error", "archive_error", "merged_head", "resume_preparation", "long_goal", "ticket_type", "ticket_type_notice", "original_ticket", "candidate_archive", "long_view_refresh")
+    names = ("id", "branch", "source_head", "worktree", "portrait", "anchors", "fixed", "fixed_rules", "redlines", "anchor_preview", "intent_identity", "intent_map_confirmed", "intent_map_confirmed_by", "intent_map_confirmed_at", "long_authorization", "authorization_identity", "worktree_ready", "thaw_error", "ticket_review", "verify", "verified_tree", "goal_link", "check_argv", "verified_executor_src", "process", "cleanup_error", "archive_error", "merged_head", "resume_preparation", "long_goal", "ticket_type", "ticket_type_notice", "original_ticket", "candidate_archive", "long_view_refresh")
     return {name: task[name] for name in names if name in task}
 
 
@@ -264,9 +264,42 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
             identity_changed = intent_identity(task, live.read_text(encoding="utf-8"), sealed.read_text(encoding="utf-8")) != expected
     if identity_changed:
         blockers.append(issue("intent-identity-changed", str(base / "ticket.md"), "await-user-decision"))
-    approved = goal["confirmed"]
-    ready = approved and process == "active" and bool(task.get("worktree_ready")) and not task.get("thaw_error") and not identity_changed and not requires_decision
-    readiness = "ready" if ready else "thaw-failed" if task.get("thaw_error") else "approved-but-frozen" if approved else "await-confirmation"
+    from .long_authorization import recorded
+    inherited = task.get("long_authorization") or {}
+    approved = recorded(task) or goal["confirmed"]
+    authorization_error = ""
+    live_error = ""
+    activation_published = True
+    if is_active and task.get("long_goal") and recorded(task):
+        from .long_authorization import activation_complete
+        activation_published = activation_complete(root, task)
+    if is_active and task.get("long_goal") and recorded(task):
+        from .authorization import validate_ticket, validate_confirmation
+        from .long_authorization import validate_human_record
+        try:
+            if inherited or task.get("worktree_ready") and activation_published:
+                validate_ticket(root, task)
+            else:
+                validate_human_record(root, task)
+                validate_confirmation(root, task)
+        except (OSError, ValueError, KeyError, ChainBroken) as exc:
+            approved = False
+            authorization_error = str(exc)
+            blockers.append(issue("long-authorization-invalid", authorization_error, "recover-long-authorization"))
+    goal["human_confirmed"] = current_confirmation
+    goal["confirmed"] = approved
+    ready = approved and process == "active" and bool(task.get("worktree_ready")) and activation_published and not task.get("thaw_error") and not identity_changed and not requires_decision
+    if is_active and ready:
+        from .authorization import assert_live_construction
+        try:
+            assert_live_construction(root, task)
+        except ChainBroken as exc:
+            ready = False
+            live_error = str(exc)
+            blockers.append(issue("live-construction-unavailable", live_error, "recover-long-authorization" if task.get("long_goal") else "recover-thaw"))
+    if approved and not activation_published:
+        blockers.append(issue("long-activation-incomplete", "parent iteration publication is incomplete", "recover-long-authorization"))
+    readiness = "ready" if ready else "thaw-failed" if task.get("thaw_error") or live_error else "activation-pending" if approved and not activation_published else "approved-but-frozen" if approved else "await-confirmation"
     if requires_decision or identity_changed:
         readiness = "thaw-failed" if task.get("thaw_error") else "await-confirmation" if prepared and not identity_changed else "await-user-decision"
         action = "recover-thaw" if task.get("thaw_error") else "user-confirm-map" if prepared and not identity_changed else "prepare-resume"
@@ -283,9 +316,9 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
     elif config_error:
         readiness, action = "config-error", "repair-config"
     elif not approved:
-        action = "user-confirm-map"
+        action = "recover-long-authorization" if inherited else "user-confirm-map"
     elif not ready:
-        action = "recover-thaw"
+        action = "recover-long-authorization" if task.get("long_goal") else "recover-thaw"
     elif blockers:
         action = blockers[0]["next_action"]
     elif verified_ok:
@@ -316,6 +349,19 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
             blockers.append(issue("long-intent-decision-pending", parent["goal_id"], action))
         elif process in {"completed", "abandoned"}:
             action = "read-parent-gap"
+        elif is_active and process == "active" and not approved and not prepared and not pending and not identity_changed and parent.get("authorization"):
+            from .long_authorization import parent_proof
+            try:
+                parent_proof(root, parent)
+            except (OSError, ValueError, KeyError, ChainBroken) as exc:
+                readiness, action = "blocked", "recover-long-authorization"
+                blockers.append(issue("long-authorization-invalid", str(exc), action))
+            else:
+                if not authorization_error:
+                    action = "start-long-inheritance"
+        if is_active and process == "active" and approved and not ready and long_binding and not requires_decision:
+            action = "recover-long-authorization"
+
     deferred_view = task.get("long_view_refresh")
     if deferred_view and deferred_view.get("status") == "deferred":
         advisories.append(issue("long-view-refresh-deferred", deferred_view, "repair-long-markdown"))
@@ -351,7 +397,10 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
         "advisories": advisories,
         "next_action": action,
         "authorization": {
-            "source": "recorded-review-confirmation-and-thaw-events",
+            "source": "parent-human-approval-and-child-review" if inherited else "recorded-review-confirmation-and-thaw-events",
+            "mode": "inherited-long" if inherited else "direct-human" if goal["confirmed"] else "unapproved",
+            "source_task_id": inherited.get("source_task_id") or (requested if goal["confirmed"] else ""),
+            "parent_proof": inherited.get("parent_proof") or "",
             "grants_authority": False,
             "approved": approved,
             "intent_identity": task.get("intent_identity") or "",

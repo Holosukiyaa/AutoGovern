@@ -32,6 +32,7 @@ def bind_ticket(root: Path, task: dict[str, Any]) -> None:
     task["ticket_review"] = review
     task["worktree_ready"] = False
     task.pop("authorization_identity", None)
+    task.pop("long_authorization", None)
     task.pop("thaw_error", None)
     task["intent_map_confirmed"] = False
 
@@ -106,6 +107,12 @@ def validate_ticket(root: Path, task: dict[str, Any]) -> str:
     identity = _live_ticket_identity(root, task)
     if pending_decisions(root, task["id"]):
         raise ChainBroken("await-user-decision: use ag resume with the explicit pending change IDs, then user confirm-map")
+    if task.get("long_authorization"):
+        from .long_authorization import validate_inherited
+        validate_inherited(root, task)
+    elif task.get("long_goal") and task.get("intent_map_confirmed"):
+        from .long_authorization import validate_direct
+        validate_direct(root, task)
     return identity
 
 
@@ -123,11 +130,30 @@ def validate_confirmation(root: Path, task: dict[str, Any]) -> str:
 def require_construction(root: Path, task: dict[str, Any]) -> None:
     if task.get("process") in {"completed", "abandoned"}:
         raise ChainBroken("cleanup-pending: task is closing; retry its finish/abandon operation")
-    if not task.get("intent_map_confirmed"):
-        raise ChainBroken("intent-map-unconfirmed: user must personally confirm the map")
+    from .long_authorization import recorded
+    if not recorded(task):
+        raise ChainBroken("intent-map-unconfirmed: first approval requires human confirm-map; approved long children resume with start")
     identity = validate_ticket(root, task)
     if task.get("thaw_error") or ("worktree_ready" in task and not task["worktree_ready"]):
-        raise ChainBroken("thaw-failed: approval is recorded but construction is not ready; user must retry confirmation")
+        raise ChainBroken("thaw-failed: approval is recorded but construction is not ready; retry start for long, human confirm-map for single")
+    if task.get("long_goal"):
+        from .long_authorization import activation_complete
+        if not activation_complete(root, task):
+            raise ChainBroken("thaw-failed: long activation registration is incomplete; retry start with the retained approval")
+    assert_live_construction(root, task)
+    if "worktree_ready" not in task:
+        from .loop import save_task
+        from .store import append_task_step
+
+        task["worktree_ready"] = True
+        task["intent_identity"] = identity
+        task["authorization_identity"] = identity
+        append_task_step(root, task["id"], "worktree-observed-ready", source="legacy-confirmation-and-live-permissions", intent_identity=identity)
+        save_task(project_key(root), task)
+
+
+def assert_live_construction(root: Path, task: dict[str, Any]) -> None:
+    """Read-only permission observation shared by views and action gates."""
     from .freeze import _tracked_files, assert_frozen
 
     try:
@@ -141,16 +167,6 @@ def require_construction(root: Path, task: dict[str, Any]) -> None:
             os.close(descriptor)
     except OSError as exc:
         raise ChainBroken(f"thaw-failed: live construction permissions are unavailable: {exc}") from exc
-    if "worktree_ready" not in task:
-        from .loop import save_task
-        from .store import append_task_step
-
-        task["worktree_ready"] = True
-        task["intent_identity"] = identity
-        task["authorization_identity"] = identity
-        append_task_step(root, task["id"], "worktree-observed-ready", source="legacy-confirmation-and-live-permissions", intent_identity=identity)
-        save_task(project_key(root), task)
-
 
 
 def _long_pending(goal: dict[str, Any]) -> list[dict[str, Any]]:
@@ -185,7 +201,8 @@ def long_goal_link(binding: dict[str, Any]) -> dict[str, Any]:
 def prepare_long_projection(root: Path, task: dict[str, Any], *, pending: bool = False) -> None:
     """Only start/resume may replace the one-way exam snapshot; never reads."""
     binding = task["long_goal"]
-    if task.get("intent_map_confirmed") and not pending:
+    from .long_authorization import recorded
+    if recorded(task) and not pending:
         return
     fresh = new_long_binding(root, binding["goal_id"], result_ids=binding["result_ids"], contribution=binding["contribution"], pending=pending)
     task["long_goal"] = fresh
@@ -224,7 +241,9 @@ def validate_long_binding(root: Path, task: dict[str, Any], *, confirmation: boo
         raise ChainBroken("long-intent-revision-changed: review and human confirmation required")
     projection = ticket_projection(root, binding["goal_id"], pending=bool(reviewed and not accepted), result_ids=binding["result_ids"], contribution=binding["contribution"])
     if hashlib.sha256(projection.encode("utf-8")).hexdigest() != binding["projection_sha256"]:
-        raise ChainBroken("long-intent-projection-changed: re-review and human confirmation required")
+        legacy = ticket_projection(root, binding["goal_id"], pending=bool(reviewed and not accepted), result_ids=binding["result_ids"], contribution=binding["contribution"], authorization_context=False)
+        if hashlib.sha256(legacy.encode("utf-8")).hexdigest() != binding["projection_sha256"]:
+            raise ChainBroken("long-intent-projection-changed: re-review the child scope; changed parent intent requires human confirmation")
 
 
 def validate_long_preview(root: Path, task: dict[str, Any], token: str) -> None:
@@ -285,7 +304,8 @@ def refresh_long_views(root: Path, task: dict[str, Any], *, preview: bool = Fals
     if goal.get("issues") and task.get("process") == "abandoned":
         return _require_deferred_view_receipt(root, task)
     long_tasks.apply_operation(root, binding["goal_id"], {"type": "refresh_views", "task_id": task["id"]}, goal["revision"], source={"kind": "ag-task-timeline", "ref": "task:" + task["id"]})
-    if preview and not task.get("intent_map_confirmed"):
+    from .long_authorization import recorded
+    if preview and not recorded(task):
         fresh = new_long_binding(root, binding["goal_id"], result_ids=binding["result_ids"], contribution=binding["contribution"], pending=bool(binding.get("proposal_ids")))
         if long_goal_link(fresh) != task.get("goal_link"):
             raise ChainBroken("long-intent-revision-changed: lifecycle view refresh cannot change reviewed intent")

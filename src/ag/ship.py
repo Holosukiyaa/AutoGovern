@@ -31,7 +31,7 @@ TOOLS = [
     },
     {
         "name": "ag_start",
-        "description": "Open a worktree. Write only there. The portrait or fixed lines lock the done-state on the map. Attention anchors are the unsettled route. Later status calls do not rewrite the locked lines.",
+        "description": "Open or resume the same isolated worktree and independently review its sealed scope. A long parent needs human approval once; subsequent in-scope children inherit its traceable approval. Retry start for long thaw failure. Single and changed parent intent still require human confirm-map; status never grants authority.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -70,7 +70,7 @@ TOOLS = [
         "name": "ag_confirm_map",
         "description": (
             "Human-only confirmation. The user must execute confirm-map themselves; AI must never call it. "
-            "Checks current review and intent identity, then returns ready only after actual thaw."
+            "For single tickets, first long-parent approval, or materially changed parent intent. In-scope long children inherit through start. Checks current review and intent identity, then returns ready only after actual thaw."
         ),
         "inputSchema": {
             "type": "object",
@@ -109,7 +109,7 @@ TOOLS.extend([
     {"name": "ag_route", "description": "Record a route adjustment with its reason. Commitment or hard-boundary changes wait for a user decision; this never grants approval.", "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}, "reason": {"type": "string"}, "requires_decision": {"type": "boolean"}}, "required": ["root", "reason"]}},
     {
         "name": "ag_resume",
-        "description": "Prepare the user's explicit decision for all pending change_ids in the same task. Re-seal and independently re-review; preserve history and worktree. Never grants construction authority: requires configured=true independent review passage and then the user's personal confirm-map; unconfigured/unavailable/rejected review remains blocked. Retry failed review with resume; after thaw-failed the user retries confirm-map. Wrong, replayed or partial change identities are refused.",
+        "description": "Prepare the user's explicit decision for all pending change_ids in the same task. Re-seal and independently re-review; preserve history and worktree. Never grants construction authority: requires configured=true independent review passage and then the user's personal confirm-map; unconfigured/unavailable/rejected review remains blocked. Retry failed review with resume; after recorded approval and thaw failure, long retries start while single retains human confirm-map recovery. Wrong, replayed or partial change identities are refused.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -185,7 +185,7 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
 
 TOOLS.append({
     "name": "ag_long",
-    "description": "Editable Markdown long goal authority; legacy SQLite is read-only and requires explicit migrate. Read/list/history/diff/package/export are read-only. Create/import make an unapproved draft; update applies one revision-checked operation. No action grants construction authority; user personally runs confirm-map with the reviewed preview token.",
+    "description": "Editable Markdown long goal authority; legacy SQLite is read-only and requires explicit migrate. Read/list/history/diff/package/export are read-only. Create/import make an unapproved draft; update applies one revision-checked operation. Read/update never grants construction authority. First parent approval or materially changed intent requires human confirm-map with the reviewed preview; in-scope children inherit via start after independent review and actual thaw.",
     "inputSchema": {"type": "object", "properties": {
         "root": {"type": "string"}, "action": {"type": "string", "enum": ["create", "import", "read", "list", "update", "history", "diff", "package", "export", "migrate", "migration-candidate", "legacy-read", "legacy-history"]},
         "goal_id": {"type": "string"}, "title": {"type": "string"}, "original": {"type": "string"},
