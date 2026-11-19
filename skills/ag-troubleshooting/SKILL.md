@@ -137,7 +137,7 @@ description: >
       - `not-configured`：尚未配置独立审核席位（未配置时默认不拦截 `finish`；若需启用，运行 `python -m ag config <PROJECT_ROOT>` 查看配置指南并填写 `config.json` 的 `critic` 段）。
       - `missing_api_key:<ENV_NAME>`：已在 `config.json` 启用审核，但当前环境中未找到 `<ENV_NAME>` 环境变量。请设置对应环境变量后重跑 `ag_verify`（详见 [`skills/ag-config/SKILL.md`](../ag-config/SKILL.md)）。
       - `same_family:<FAMILY>`：`config.json` 的 `critic` 段中的审核 `model` 与施工 `worker_model` 属于同一模型家族。请更换异构审核模型，或在 `critic` 段中显式设置 `"allow_same_family": true`。
-      - `void:...`（如网络超时、HTTP 报错或返回非 JSON）：远程大模型接口调用异常。因已启用审核席位，为遵循 fail-closed 原则，`void` 状态的 `switch` 会拒绝 `finish`。请检查网络、`endpoint` 地址或适当调大 `critic` 段中的 `"timeout"`（如 `120`），然后重跑 `ag_verify`。
+      - `void:...`（如网络超时、HTTP 报错或返回非 JSON）：远程大模型接口调用异常。因已启用审核席位，为遵循 fail-closed 原则，`void` 状态的 `switch` 会拒绝 `finish`。请检查网络、`endpoint` 地址或适当调大 `critic` 段中的 `"timeout"`（单次审核调用的总耗时上限，如 `120`），然后重跑 `ag_verify`。
 
 ---
 

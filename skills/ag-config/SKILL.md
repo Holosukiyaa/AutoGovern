@@ -70,7 +70,7 @@ python -m ag config <PROJECT_ROOT>
    - `AG_CRITIC_ENDPOINT`（OpenAI 兼容 Chat Completions 接口 URL）
    - `AG_CRITIC_MODEL`（审核模型名称，如 `deepseek-reasoner` 或 `deepseek-chat`）
    - `AG_CRITIC_API_KEY_ENV`（存放 API Key 的环境变量名称，默认 `AG_CRITIC_API_KEY`）
-   - `AG_CRITIC_TIMEOUT`（请求超时秒数，默认 `60`）
+   - `AG_CRITIC_TIMEOUT`（单次审核调用的总耗时上限秒数，默认 `60`）
    - `AG_WORKER_MODEL`（当前施工主力 AI 的模型标识，用于异构模型家族校验）
    - `AG_CRITIC_ALLOW_SAME_FAMILY`（是否允许审核模型与施工模型同家族，`1` / `true` 允许）
 2. **项目级配置文件（次高优先级）**：
@@ -106,7 +106,7 @@ python -m ag config <PROJECT_ROOT>
 | `endpoint` | `string` | `""` | OpenAI 兼容的 Chat Completions 完整接口地址（例如 `https://api.deepseek.com/v1/chat/completions`）。 |
 | `model` | `string` | `""` | 独立审核使用的模型名称（例如 `deepseek-reasoner`、`deepseek-chat` 或其他异构推理模型）。 |
 | `api_key_env` | `string` | `"AG_CRITIC_API_KEY"` | **存放 API Key 的环境变量名称**（注意：这里填的是环境变量的名字，如 `"AG_CRITIC_API_KEY"` 或 `"DEEPSEEK_API_KEY"`，**严禁在此字段直接填写 `sk-...` 密钥明文！**）。 |
-| `timeout` | `number` | `60` | 单次审核 HTTP 请求的超时时间（秒）。若使用推理模型（如 `deepseek-reasoner`），建议设为 `90` ~ `180`。 |
+| `timeout` | `number` | `60` | 单次审核调用的总耗时上限（秒），从发出请求到读完整个（含流式）响应都计入，不是单次读取的空闲时间；超时或响应被截断时该次审核判为 `unavailable`。若使用推理模型（如 `deepseek-reasoner`），建议设为 `90` ~ `180`。 |
 | `worker_model` | `string` | `""` | （可选）声明当前编写代码的施工 AI 模型名称（如 `"gpt-5"`、`"claude-sonnet"`）。用于防止审核模型与施工模型“同家族自己审自己”。 |
 | `allow_same_family` | `boolean` | `false` | 当 `model` 与 `worker_model` 属于同一模型家族时，默认会报 `same_family` 并拒绝审核；若确需同家族模型审核，可显式设为 `true`。 |
 

@@ -1429,19 +1429,8 @@ def verify(root: Path) -> dict[str, Any]:
     )
     timings["switch_s"] = round(time.perf_counter() - t_switch, 3)
     timings["critic_s"] = 0.0
+    # The switch seat already made the one planting attempt for this rejection.
     planted = list(switch.get("probes_planted") or [])
-    if not planted and str(switch.get("outcome") or "") == "rejected":
-        from .probe import plant_from_reject
-        from .seat import report_path as seat_report_path
-
-        try:
-            sw_blob = json.loads(seat_report_path("switch", enrolled).read_text(encoding="utf-8"))
-            planted = list(plant_from_reject(
-                enrolled, items=sw_blob.get("items"), tree=worktree,
-                source_head=str(task.get("source_head") or ""), task_id=task_id,
-            ) or [])
-        except Exception:
-            planted = []
     critic = dict(switch)
     critic["merged_into"] = "switch"
     if planted:

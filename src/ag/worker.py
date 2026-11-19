@@ -64,6 +64,7 @@ def _worker_proxy(worktree: Path, worker_id: str) -> Path:
     code = r'''import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -80,6 +81,45 @@ def allowed(path: Path, roots: list[Path]) -> bool:
         return False
 
 
+def program_stem(program: str) -> str:
+    """Launcher name without directory or Windows extension, lower-cased: C:/x/AG.EXE -> ag."""
+    name = re.split(r"[\\/]", program)[-1].lower()
+    stem, ext = os.path.splitext(name)
+    return stem if ext in {".exe", ".cmd", ".bat"} else name
+
+
+def interpreter_target(argv: list[str]) -> tuple[str, str]:
+    """What a python-like argv runs: ("-m", module), ("-c", code) or ("script", path).
+
+    Interpreter options before the target are skipped: -X utf8, -W x, -I, -Xutf8, py -3, -Im ag.
+    """
+    index = 1
+    if program_stem(argv[0]) == "py" and index < len(argv) and re.match(r"-(\d|V:)", argv[index]):
+        index += 1
+    while index < len(argv):
+        token = argv[index]
+        if token == "--":
+            index += 1
+            break
+        if not token.startswith("-") or token == "-":
+            break
+        if token.startswith("--"):
+            index += 2 if token == "--check-hash-based-pycs" else 1
+            continue
+        step = 1
+        for pos, char in enumerate(token[1:], start=1):
+            if char in "cmWX":
+                value = token[pos + 1:]
+                if not value:
+                    value = argv[index + 1] if index + 1 < len(argv) else ""
+                    step = 2
+                if char in "cm":
+                    return "-" + char, value
+                break
+        index += step
+    return "script", argv[index] if index < len(argv) else ""
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("argv", nargs=argparse.REMAINDER)
@@ -90,19 +130,19 @@ def main() -> int:
     if not argv:
         return 2
     program = argv[0]
-    lowered = program.lower()
     if program == "git" and len(argv) >= 2 and argv[1] in {"commit", "merge", "rebase", "push"}:
         print("AG worker guard: git commit/merge/rebase/push is forbidden", file=sys.stderr)
         return 126
-    if lowered in {"ag", "ag.exe"} or (program.endswith("ag") and argv and argv[0] in {"start", "confirm-map", "verify", "finish", "abandon", "unenroll"}):
+    stem = program_stem(program)
+    if stem == "ag":
         print("AG worker guard: governance commands are forbidden", file=sys.stderr)
         return 126
-    if program in {sys.executable, "python"} and len(argv) >= 2:
-        script = argv[1]
-        if script == "-m" and len(argv) >= 3 and argv[2] == "ag":
+    if program == sys.executable or re.fullmatch(r"py|pythonw?[\d.]*", stem):
+        kind, target = interpreter_target(argv)
+        if kind == "-m" and target in {"ag", "ag.__main__"}:
             print("AG worker guard: python -m ag is forbidden", file=sys.stderr)
             return 126
-        if script.endswith("ag\\__main__.py") or script.endswith("ag/__main__.py"):
+        if kind == "script" and (target.endswith("ag\\__main__.py") or target.endswith("ag/__main__.py")):
             print("AG worker guard: ag module is forbidden", file=sys.stderr)
             return 126
     roots = [Path(item).resolve() for item in json.loads(os.environ["AG_WORKER_WRITE_ROOTS"])]

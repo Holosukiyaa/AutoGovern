@@ -5,11 +5,13 @@ Not a worker ticket. Does not write product files or refuse finish.
 from __future__ import annotations
 
 import ast
+import http.client
 import json
 import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -1165,12 +1167,17 @@ def complete_chat(config: dict[str, Any], messages: list[dict[str, str]]) -> tup
         ensure_ascii=False,
     ).encode("utf-8")
     request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    # timeout bounds the whole call (connect + every read), not just one idle read.
     timeout = int(config.get("timeout") or DEFAULT_TIMEOUT)
+    deadline = time.monotonic() + timeout
     on_delta = config.get("on_delta")
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            content, reasoning = _read_chat_body(response, on_delta=on_delta if callable(on_delta) else None)
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, json.JSONDecodeError, ValueError) as exc:
+            content, reasoning = _read_chat_body(
+                response, on_delta=on_delta if callable(on_delta) else None, deadline=deadline, timeout=timeout
+            )
+    except (urllib.error.URLError, urllib.error.HTTPError, http.client.HTTPException, TimeoutError, OSError,
+            json.JSONDecodeError, ValueError) as exc:
         raise RuntimeError(f"failed: {exc}") from exc
     if not content.strip() and not reasoning.strip():
         raise RuntimeError("failed: empty message")
@@ -1200,12 +1207,21 @@ def _apply_delta(payload: dict[str, Any], content: str, reasoning: str) -> tuple
     return content, reasoning
 
 
-def _read_chat_body(response: Any, *, on_delta: Any = None) -> tuple[str, str]:
-    first = _decode_line(response.readline() or b"")
+def _read_chat_body(
+    response: Any, *, on_delta: Any = None, deadline: float | None = None, timeout: int = 0
+) -> tuple[str, str]:
+    def readline() -> bytes | str:
+        if deadline is not None and time.monotonic() > deadline:
+            raise RuntimeError(f"failed: reviewer call exceeded timeout {timeout}s")
+        return response.readline()
+
+    first = _decode_line(readline() or b"")
     rest_head = first.lstrip()
     if rest_head.startswith("{"):
-        raw = first.encode("utf-8") + (response.read() or b"")
-        body = json.loads(raw.decode("utf-8"))
+        raw = [first.encode("utf-8")]
+        while chunk := readline():
+            raw.append(chunk)
+        body = json.loads(b"".join(raw).decode("utf-8"))
         try:
             message = body["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as exc:
@@ -1243,7 +1259,7 @@ def _read_chat_body(response: Any, *, on_delta: Any = None) -> tuple[str, str]:
     if first and not handle(first):
         return content, reasoning
     while True:
-        chunk = response.readline()
+        chunk = readline()
         if not chunk:
             break
         if not handle(_decode_line(chunk)):
@@ -1297,8 +1313,6 @@ def verdict_problems(verdict: dict[str, Any]) -> list[str]:
         outcome = "pass"
     elif raw in {"reject", "rejected", "fail", "failed"}:
         outcome = "reject"
-    elif raw in {"unproven", "unknown", "uncertain", "unavailable"}:
-        outcome = "unproven"
     else:
         problems.append(f"verdict must be pass|reject, got {raw!r}")
         outcome = ""

@@ -130,6 +130,16 @@ def _trim_items(items: Any) -> list[dict[str, str]]:
     return out
 
 
+def _content_verdict(content: str) -> dict[str, Any]:
+    """The reviewer's final answer (content) is the verdict; the reasoning draft never stands in for it."""
+    if not str(content or "").strip():
+        raise ValueError("final answer (content) is empty")
+    try:
+        return parse_verdict(content)
+    except ValueError as exc:
+        raise ValueError("final answer (content) is not a JSON verdict") from exc
+
+
 def _user_pack(packed: dict[str, Any], critic: dict[str, Any] | None) -> dict[str, Any]:
     out = dict(packed)
     if isinstance(critic, dict) and critic:
@@ -330,23 +340,27 @@ def seat_result(
     if retried_lazy:
         blob["retried_lazy"] = True
     blob["store"] = str(report_path(kind, root))
-    blob["report_id"] = append_log(
-        kind,
-        root,
-        outcome=outcome,
-        reason=reason,
-        configured=bool(configured),
-        store=str(blob.get("store") or ""),
-        exam=exam,
-        pack=pack,
-        items=items,
-        task_id=task_id,
-        model=str(model or ""),
-        probe_red=probe_red,
-        allow_same_family=bool(allow_same_family),
-        thinking=thinking,
-        timings=merged_timings if merged_timings else None,
-    )
+    try:
+        blob["report_id"] = append_log(
+            kind,
+            root,
+            outcome=outcome,
+            reason=reason,
+            configured=bool(configured),
+            store=str(blob.get("store") or ""),
+            exam=exam,
+            pack=pack,
+            items=items,
+            task_id=task_id,
+            model=str(model or ""),
+            probe_red=probe_red,
+            allow_same_family=bool(allow_same_family),
+            thinking=thinking,
+            timings=merged_timings if merged_timings else None,
+        )
+    except ChainBroken as exc:
+        # The review log is damaged, so this verdict cannot be recorded: it must not count.
+        blob.update(outcome="unavailable", reason=f"failed: {exc}", report_id="")
     try:
         _write_report(kind, root, blob)
     except OSError:
@@ -873,22 +887,14 @@ def ticket_run(
         )
         return _enrich(res)
 
-    verdict: dict[str, Any] | None = None
-    parse_error: ValueError | None = None
-    for blob in (content, reasoning):
-        if not str(blob or "").strip():
-            continue
-        try:
-            verdict = parse_verdict(blob)
-            break
-        except ValueError as exc:
-            parse_error = exc
-    if verdict is None:
+    try:
+        verdict = _content_verdict(content)
+    except ValueError as exc:
         res = seat_result(
             "ticket",
             repo,
             outcome="unavailable",
-            reason=f"void: {parse_error or 'ticket output is not JSON'} (作废)",
+            reason=f"void: ticket {exc} (作废)",
             pack=packed,
             configured=configured,
             exam=exam_text,
@@ -926,14 +932,10 @@ def ticket_run(
             retry_content, retry_reasoning = complete_chat(run_cfg, retry_messages)
             thinking = (held["r"] or retry_reasoning or thinking) if spec["live"] else (retry_reasoning or thinking)
             retry_verdict: dict[str, Any] | None = None
-            for blob in (retry_content, retry_reasoning):
-                if not str(blob or "").strip():
-                    continue
-                try:
-                    retry_verdict = parse_verdict(blob)
-                    break
-                except ValueError:
-                    continue
+            try:
+                retry_verdict = _content_verdict(retry_content)
+            except ValueError:
+                pass
             if retry_verdict is not None:
                 verdict = retry_verdict
                 problems, _ = ticket_verdict_problems(verdict, prescreen, portrait, intent_body)
@@ -1083,19 +1085,24 @@ def attach_ticket_review(
         cfg = load_config(enrolled)
         configured = bool(cfg.get("error") or _configured(cfg))
         thread_id = f"tr-{task_id or 'init'}-{uuid.uuid4().hex[:8]}"
-        rid = append_log(
-            "ticket",
-            enrolled,
-            outcome="unavailable",
-            reason=f"failed: {exc}",
-            configured=configured,
-            exam=portrait or intent_body,
-            task_id=task_id,
-            timings={"thread_id": thread_id},
-        )
+        reason = f"failed: {exc}"
+        try:
+            rid = append_log(
+                "ticket",
+                enrolled,
+                outcome="unavailable",
+                reason=reason,
+                configured=configured,
+                exam=portrait or intent_body,
+                task_id=task_id,
+                timings={"thread_id": thread_id},
+            )
+        except ChainBroken as log_exc:
+            rid = ""
+            reason = f"{reason}; review log: {log_exc}"
         return {
             "outcome": "unavailable",
-            "reason": f"failed: {exc}",
+            "reason": reason,
             "store": "",
             "prompt_version": "ag.ticket.v1",
             "configured": configured,
@@ -1275,20 +1282,12 @@ def seat_run(
         extra["thinking"] = (held["r"] or reasoning) if spec["live"] else reasoning
     except RuntimeError as exc:
         return finish(outcome="unavailable", reason=str(exc), model=str(cfg.get("model") or ""))
-    verdict: dict[str, Any] | None = None
-    parse_error: ValueError | None = None
-    for blob in (content, reasoning):
-        if not str(blob or "").strip():
-            continue
-        try:
-            verdict = parse_verdict(blob)
-            break
-        except ValueError as exc:
-            parse_error = exc
-    if verdict is None:
+    try:
+        verdict = _content_verdict(content)
+    except ValueError as exc:
         return finish(
             outcome="unavailable",
-            reason=f"void: {parse_error or spec['void_who'] + ' output is not JSON'} (作废)",
+            reason=f"void: {spec['void_who']} {exc} (作废)",
             model=str(cfg.get("model") or ""),
         )
     problems = verdict_problems(verdict)
@@ -1312,14 +1311,10 @@ def seat_run(
             else:
                 extra["thinking"] = retry_reasoning or extra.get("thinking", "")
             retry_verdict: dict[str, Any] | None = None
-            for blob in (retry_content, retry_reasoning):
-                if not str(blob or "").strip():
-                    continue
-                try:
-                    retry_verdict = parse_verdict(blob)
-                    break
-                except ValueError:
-                    continue
+            try:
+                retry_verdict = _content_verdict(retry_content)
+            except ValueError:
+                pass
             if retry_verdict is not None:
                 verdict = retry_verdict
                 problems = verdict_problems(verdict)
@@ -1410,7 +1405,16 @@ def attach_verify(
                 blob["items"] = raw["items"]
             if raw.get("summary"):
                 blob["summary"] = str(raw["summary"])
-            if kind in {"critic", "switch"} and str(raw.get("outcome") or "") == "rejected":
+        except Exception as exc:
+            blob = {
+                "outcome": "unavailable",
+                "reason": f"failed: {exc}",
+                "store": "",
+                "configured": True,
+            }
+        if logged and kind in {"critic", "switch"} and blob["outcome"] == "rejected":
+            # The rejection is already recorded; a planting failure is reported beside it, never instead of it.
+            try:
                 from .probe import plant_from_reject
 
                 if not str(source_head or "").strip():
@@ -1427,25 +1431,25 @@ def attach_verify(
                     source_head=source_head, task_id=str(task_id or ""),
                 ) or [])
                 blob["probes_planted"] = planted
-        except Exception as exc:
-            blob = {
-                "outcome": "unavailable",
-                "reason": f"failed: {exc}",
-                "store": "",
-                "configured": True,
-            }
+            except Exception as exc:
+                blob["probes_plant_error"] = f"failed: {exc}"
     if not logged:
-        blob["report_id"] = append_log(
-            kind,
-            enrolled,
-            outcome=str(blob.get("outcome") or "unavailable"),
-            reason=str(blob.get("reason") or ""),
-            configured=bool(blob.get("configured")),
-            store=str(blob.get("store") or ""),
-            exam=portrait,
-            task_id=task_id,
-            probe_red=probe_red,
-        )
+        try:
+            blob["report_id"] = append_log(
+                kind,
+                enrolled,
+                outcome=str(blob.get("outcome") or "unavailable"),
+                reason=str(blob.get("reason") or ""),
+                configured=bool(blob.get("configured")),
+                store=str(blob.get("store") or ""),
+                exam=portrait,
+                task_id=task_id,
+                probe_red=probe_red,
+            )
+        except ChainBroken as exc:
+            # Only unavailable results reach this branch; a damaged log must not turn them into an exception.
+            blob["report_id"] = ""
+            blob["reason"] = f"{blob.get('reason') or 'unavailable'}; review log: {exc}"
     if kind in {"critic", "switch"}:
         blob["redlines"] = sealed
     if kind == "critic":
