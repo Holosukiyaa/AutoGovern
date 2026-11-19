@@ -80,7 +80,9 @@ MCP 对应 `ag_resume(root="<PROJECT_ROOT>", change_ids=["<CHANGE_ID>"], decisio
 
 验货和终审使用包含当前产品代码与 `.ag-check` 的同一候选快照；回执同时记录不含临时检查的 `product_tree`，用于核对最终提交。候选计算不修改实际暂存区；误暂存或跟踪的 `.ag-check` 会被拒绝，临时检查不会进入产品提交。
 
-历史正本采用 `history/current.jsonl` 与按月、容量分卷的 JSONL；活动票面和指针保留可读文件。`prune` 对闭票时间线、票档、会话与对应旧审核事件先写临时分卷，刷新、回读校验、原子发布，再回收来源；索引可重建。旧格式继续可读，未知格式、活动现场、`preparations/`、`audits/` 和用户备份保留，写失败明确报错。自动审核指针先保留为待行为核查线索，`probe calibrate` 用真实修复前后命令对照后才能把它作为行为探针。
+历史正本采用 `history/current.jsonl` 与按月、容量分卷的 JSONL；活动票面和指针保留可读文件。`prune` 对闭票时间线、票档、会话与对应旧审核事件先写临时分卷，刷新、回读校验、原子发布，再回收来源；索引可重建。旧格式继续可读，未知格式、活动现场、`preparations/`、`audits/` 和用户备份保留，写失败明确报错。自动审核指针先保留为待行为核查线索，`probe calibrate` 用真实修复前后命令对照后才能把它作为行为探针。命令探针默认 30 秒超时，可在观测中写 `timeout_s`（1 到 1800 的整数秒）；非法值在 `probe insert` 和 `calibrate` 时被拒绝，探针库中存量的非法值判红。
+
+`history-corrupt`：`current.jsonl` 或某个分卷中有一行不是合法 JSON、schema 不对或校验和不符。读取时跳过该行，其余记录照常可读，坏行不会让任何记录凭空出现；`status` 的 `hazards` 含 `history-corrupt`，`history_issues` 列出 `path` 与 `line`（从 1 起算）；`delivery` 的 `blockers` 含同名条目，`next_action` 不会是 `finish`。`start`、`verify`、`finish`、在坏 `current.jsonl` 上续写、需要生成编号的写入以及 `prune` 都会拒绝，并写明 `<文件> line <行号>`。ag 不会自动删除或改写坏行：先备份，人工核对并修复（或移走）报出的行，再重试。
 
 ## 核心交付闭环
 
@@ -162,7 +164,7 @@ anchor!: 严禁修改原有的鉴权中间件签名
 python -m ag config <PROJECT_ROOT>
 ```
 
-配置支持**全局级** `<AG_HOME>/critic.json` 与**项目级** `<AG_HOME>/projects/<PROJECT_KEY>/config.json` 的 `critic` 段；项目级覆盖全局。旧项目级 `critic.json` 仅作兼容读取。API Key 存放在环境变量中，切勿写入 JSON：
+配置支持**全局级** `<AG_HOME>/critic.json` 与**项目级** `<AG_HOME>/projects/<PROJECT_KEY>/config.json` 的 `critic` 段；项目级覆盖全局：项目 `config.json` 没有 `critic` 段时继承全局配置（升级不会再写入默认段）；只要有 `critic` 段（哪怕只写 `{"enabled": false}`），就由项目段覆盖全局。旧项目级 `critic.json` 仅作兼容读取。API Key 存放在环境变量中，切勿写入 JSON：
 
 ```json
 {
@@ -218,6 +220,7 @@ python -m ag worker-create <PROJECT_ROOT> --portrait "做成之后：..." --anch
 
 - **`ship`（交货闸）**：唯一拥有阻断 `finish` 与设置 `product` 权力的轨道（含主仓冻结、工作树隔离、`ship-12` 红线封条、`ship-13` 开票独立审票闸、探针与 `switch` 终审）。
 - **`lift`（抬正确率建议）**：
+  - `lift-4` / `lift-11`：运行 `AG_LIFT_CMD`（经 shell），输出按 UTF-8 解码；超过 `AG_LIFT_TIMEOUT` 秒（1 到 1800 的整数，不设置或非法时为 300）就结束整个进程树，该条 finding 标 `timed_out=true`，`ag lift` 照常返回。`lift-2` 的 linter 同样受此超时约束。
   - `lift-12`：意图锚点注意力跟踪。
   - `lift-13` / `lift-14`：变更感知摘要与任务快照。
   - `lift-15`（红线回声）：对比上一票与本票红线，提醒被删减的旧红线。

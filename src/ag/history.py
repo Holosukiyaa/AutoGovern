@@ -4,15 +4,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import time
 import uuid
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .managed import ChainBroken
-from .store import project_dir
+from .store import exclusive_lock, project_dir, replace_file
 
 SCHEMA = "ag.history.record.v1"
 MAX_VOLUME_BYTES = 1024 * 1024
@@ -36,34 +35,65 @@ def record(kind: str, task_id: str, payload: dict[str, Any], *, identity: str = 
     return {"schema": SCHEMA, **body, "id": identity or checksum, "sha256": checksum}
 
 
-def _read(path: Path) -> list[dict[str, Any]]:
+def _scan(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Valid records and bad lines ({path, line, reason}; physical line numbers from 1)."""
     if not path.exists():
-        return []
+        return [], []
     try:
-        rows = []
-        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if not line.strip():
-                continue
-            row = json.loads(line)
-            if not isinstance(row, dict) or row.get("schema") != SCHEMA or not isinstance(row.get("payload"), dict):
-                raise ValueError(f"unknown record at line {number}")
-            body = {name: row[name] for name in ("kind", "task_id", "payload")}
-            if not row.get("id") or digest(body) != row.get("sha256"):
-                raise ValueError(f"checksum mismatch at line {number}")
-            rows.append(row)
-        return rows
-    except (OSError, ValueError, KeyError) as exc:
+        lines = path.read_bytes().splitlines()
+    except OSError as exc:
         raise ChainBroken(f"history-source-error: {path}: {exc}") from exc
+    rows, issues = [], []
+    for number, line in enumerate(lines, 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line.decode("utf-8"))
+            if not isinstance(row, dict) or row.get("schema") != SCHEMA or not isinstance(row.get("payload"), dict):
+                raise ValueError("unknown record")
+            body = {name: row[name] for name in ("kind", "task_id", "payload")}
+            if not row.get("id") or not isinstance(row["id"], str) or digest(body) != row.get("sha256"):
+                raise ValueError("checksum mismatch")
+        except (ValueError, KeyError) as exc:
+            issues.append({"path": str(path), "line": number, "reason": str(exc)[:120]})
+            continue
+        rows.append(row)
+    return rows, issues
+
+
+def _describe(issues: list[dict[str, Any]]) -> str:
+    return "history-corrupt: " + "; ".join(f"{item['path']} line {item['line']} ({item['reason']})" for item in issues)
+
+
+def _read(path: Path) -> list[dict[str, Any]]:
+    """Strict read for writers: any bad line refuses, naming file and line; nothing is rewritten."""
+    rows, issues = _scan(path)
+    if issues:
+        raise ChainBroken(_describe(issues))
+    return rows
+
+
+def _sources(root: Path) -> list[Path]:
+    folder = history_dir(root)
+    return [*sorted(folder.glob("volume-*.jsonl")), folder / "current.jsonl"]
+
+
+def history_issues(root: Path) -> list[dict[str, Any]]:
+    """Every bad line in current.jsonl and the volumes. Readers skip them; gates must refuse."""
+    return [issue for path in _sources(root) for issue in _scan(path)[1]]
+
+
+def require_intact(root: Path) -> None:
+    issues = history_issues(root)
+    if issues:
+        raise ChainBroken(_describe(issues) + " [下一步] 坏行不会被自动删除或改写；人工核对并修复这些行后重试")
 
 
 def read_records(root: Path, *, kind: str = "", task_id: str = "") -> list[dict[str, Any]]:
-    folder = history_dir(root)
-    current_path = folder / "current.jsonl"
-    current = [{**row, "_source": str(current_path)} for row in _read(current_path)]
+    """Valid records only. Bad lines are skipped (see history_issues), so they never add a record."""
     rows = []
-    for path in sorted(folder.glob("volume-*.jsonl")):
-        rows.extend({**row, "_source": str(path)} for row in _read(path))
-    rows.extend(current)
+    for path in _sources(root):
+        rows.extend({**row, "_source": str(path)} for row in _scan(path)[0])
     found: dict[str, dict[str, Any]] = {}
     for row in rows:
         prior = found.get(row["id"])
@@ -85,7 +115,7 @@ def _publish(path: Path, rows: list[dict[str, Any]]) -> None:
         verified = _read(temporary)
         if verified != rows:
             raise ChainBroken(f"history-write-mismatch: {temporary}")
-        os.replace(temporary, path)
+        replace_file(temporary, path)
         if _read(path) != rows:
             raise ChainBroken(f"history-publish-mismatch: {path}")
     finally:
@@ -94,42 +124,12 @@ def _publish(path: Path, rows: list[dict[str, Any]]) -> None:
 
 @contextmanager
 def _writer(root: Path):
-    folder = history_dir(root)
-    folder.mkdir(parents=True, exist_ok=True)
-    with (folder / "writer.lock").open("a+b") as handle:
-        handle.seek(0)
-        if not handle.read(1):
-            handle.write(b"0")
-            handle.flush()
-        deadline = time.monotonic() + 10
-        while True:
-            try:
-                handle.seek(0)
-                if os.name == "nt":
-                    import msvcrt
-
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-
-                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError:
-                if time.monotonic() >= deadline:
-                    raise ChainBroken("history-writer-busy: retry after the current writer")
-                time.sleep(0.02)
+    with ExitStack() as stack:
         try:
-            yield
-        finally:
-            handle.seek(0)
-            if os.name == "nt":
-                import msvcrt
-
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(handle, fcntl.LOCK_UN)
+            stack.enter_context(exclusive_lock(history_dir(root) / "writer.lock"))
+        except TimeoutError:
+            raise ChainBroken("history-writer-busy: retry after the current writer") from None
+        yield
 
 
 def _volume(root: Path, rows: list[dict[str, Any]]) -> Path:
@@ -149,6 +149,8 @@ def append_fact(root: Path, kind: str, task_id: str, payload: dict[str, Any], *,
         path = history_dir(root) / "current.jsonl"
         rows = _read(path)
         if number_prefix:
+            # A skipped line could hide a used number: never mint one over a bad line.
+            require_intact(root)
             numbers = [floor]
             for prior in read_records(root, kind=kind):
                 suffix = str(prior["payload"].get("report_id") or "").removeprefix(number_prefix + "-")
@@ -168,6 +170,7 @@ def append_fact(root: Path, kind: str, task_id: str, payload: dict[str, Any], *,
 
 def publish_archive(root: Path, records: list[dict[str, Any]]) -> list[str]:
     with _writer(root):
+        require_intact(root)
         known = {row["id"]: row["sha256"] for row in read_records(root)}
         pending = []
         for row in records:

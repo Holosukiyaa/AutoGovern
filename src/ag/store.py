@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+import os
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from .managed import ChainBroken, ag_home, project_key, real_root
 
@@ -28,6 +31,57 @@ def foreign_dir(root: Path) -> Path:
 
 def project_dir(root: Path) -> Path:
     return ag_home() / "projects" / project_key(real_root(root))
+
+
+def _byte_zero_lock(handle: Any, *, release: bool = False) -> None:
+    handle.seek(0)
+    if os.name == "nt":
+        import msvcrt
+
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK if release else msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(handle, fcntl.LOCK_UN if release else fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+@contextmanager
+def exclusive_lock(path: Path, wait_s: float = 10.0) -> Iterator[None]:
+    """Hold an exclusive lock on byte 0 of `path`, waiting up to `wait_s` seconds.
+
+    The locked byte is never read or written: Windows byte-range locks are
+    mandatory, so touching a byte another process holds fails at once instead
+    of queueing. Raises TimeoutError when the holder does not let go in time."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as handle:
+        deadline = time.monotonic() + wait_s
+        while True:
+            try:
+                _byte_zero_lock(handle)
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"lock busy: {path}") from None
+                time.sleep(0.02)
+        try:
+            yield
+        finally:
+            _byte_zero_lock(handle, release=True)
+
+
+def replace_file(source: Path, target: Path) -> None:
+    """os.replace; on Windows retry for about 3 s while another process has the target open.
+
+    If the target stays busy the last PermissionError propagates and the target keeps its old bytes."""
+    deadline = time.monotonic() + 3.0
+    while True:
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if os.name != "nt" or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.1)
 
 
 def append_project_jsonl(root: Path, name: str, row: dict[str, Any]) -> str:

@@ -64,7 +64,16 @@ def _probe_main(args: argparse.Namespace) -> int:
     return 2
 
 
+def _utf8_stdio() -> None:
+    """Emit UTF-8 whatever the console code page, exactly as `python -X utf8` would."""
+    for stream, errors in ((sys.stdout, "surrogateescape"), (sys.stderr, "backslashreplace")):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors=errors)
+
+
 def main(argv: list[str] | None = None) -> int:
+    _utf8_stdio()
     parser = argparse.ArgumentParser(prog="ag")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("mcp", help="stdio MCP server — main entry")
@@ -183,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     insert_p.add_argument(
         "--observation",
         required=True,
-        help="JSON object; kind=command (argv, expect_exit, optional stdout_contains/stderr_contains) or kind=text_in_file (path, must_include and/or must_exclude)",
+        help="JSON object; kind=command (argv, expect_exit, optional stdout_contains/stderr_contains, optional timeout_s 1..1800, default 30) or kind=text_in_file (path, must_include and/or must_exclude)",
     )
     insert_p.add_argument("--exam-fragment", required=True, help="the exam sentence this probe pins")
     insert_p.add_argument(

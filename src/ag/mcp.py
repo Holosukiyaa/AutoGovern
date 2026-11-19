@@ -54,8 +54,12 @@ def _ok(req_id: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": req_id, "result": result}
 
 
-def _err(req_id: Any, message: str) -> dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": req_id, "error": {"code": -32000, "message": message}}
+PARSE_ERROR = -32700
+INVALID_REQUEST = -32600
+
+
+def _err(req_id: Any, message: str, code: int = -32000) -> dict[str, Any]:
+    return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
 
 
 def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
@@ -112,27 +116,40 @@ def _reconfigure_utf8(stream: Any) -> None:
         pass
 
 
+class BadMessage(ValueError):
+    """A request that cannot be served; answered with id=null and the JSON-RPC code."""
+
+    def __init__(self, code: int, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def _bytes(chunk: Any) -> bytes:
+    return chunk.encode("utf-8") if isinstance(chunk, str) else chunk
+
+
 def _read_message(reader: Any) -> dict[str, Any] | None:
-    first = reader.readline()
-    if first == "":
-        return None
-    if first.lower().startswith("content-length:"):
-        length = int(first.split(":", 1)[1].strip())
-        while True:
-            line = reader.readline()
-            if line in ("", "\n", "\r\n"):
-                break
-        body = reader.read(length)
-        payload = json.loads(body)
-        return payload if isinstance(payload, dict) else None
-    text = first.strip()
-    if not text:
-        return None
+    """Next request object, None at EOF. Blank lines are skipped; bad input raises BadMessage."""
+    first = b""
+    while not first.strip():
+        first = _bytes(reader.readline())
+        if not first:
+            return None
+    if first.lower().startswith(b"content-length:"):
+        try:
+            length = int(first.split(b":", 1)[1].strip())
+        except ValueError:
+            raise BadMessage(PARSE_ERROR, "parse error: invalid Content-Length header") from None
+        while _bytes(reader.readline()).strip():
+            pass
+        first = _bytes(reader.read(length))
     try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    return payload if isinstance(payload, dict) else None
+        payload = json.loads(first.decode("utf-8"))
+    except ValueError:  # includes invalid UTF-8
+        raise BadMessage(PARSE_ERROR, "parse error: not valid UTF-8 JSON") from None
+    if not isinstance(payload, dict):
+        raise BadMessage(INVALID_REQUEST, "invalid request: expected a JSON object")
+    return payload
 
 
 def _write_message(writer: Any, payload: dict[str, Any]) -> None:
@@ -149,16 +166,18 @@ def _write_message(writer: Any, payload: dict[str, Any]) -> None:
 
 
 def serve(stdin: Any | None = None, stdout: Any | None = None) -> None:
-    reader = stdin or sys.stdin
+    # Read raw bytes: a bad byte must cost one -32700 reply, not the stream.
+    reader = stdin or sys.stdin.buffer
     writer = stdout or sys.stdout
-    if stdin is None:
-        _reconfigure_utf8(sys.stdin)
     if stdout is None:
         _reconfigure_utf8(sys.stdout)
     while True:
         try:
             message = _read_message(reader)
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        except BadMessage as exc:
+            _write_message(writer, _err(None, str(exc), exc.code))
+            continue
+        except OSError:
             return
         if message is None:
             return

@@ -55,7 +55,9 @@ Do **not** store long-lived tests in this repo. Worker checks belong in worktree
 
 Verification and review bind the same snapshot of product files and `.ag-check`. Receipts also record a `product_tree` without temporary checks to match the final commit. Snapshot calculation leaves the real index unchanged; staged or tracked `.ag-check` files are refused and never enter the product commit.
 
-`ag_verify` runs an enrolled command only if one was set (other products may enroll a tiny smoke). This repo enrolls **no** test command. Then path-hit probes, and finally a single **switch** review call. A **configured** switch that is not passed (`rejected` / void unavailable, `sw-` id) refuses finish. Unconfigured or not-run switch does not. No enrolled tests and switch allow → `product` stays `undeclared`. Probe red still refuses finish.
+`ag_verify` runs an enrolled command only if one was set (other products may enroll a tiny smoke). This repo enrolls **no** test command. Then path-hit probes, and finally a single **switch** review call. A **configured** switch that is not passed (`rejected` / void unavailable, `sw-` id) refuses finish. Unconfigured or not-run switch does not. No enrolled tests and switch allow → `product` stays `undeclared`. Probe red still refuses finish. A command probe times out after 30 s unless its observation sets `timeout_s` (an integer from 1 to 1800); invalid values are refused by `probe insert` and `calibrate`, and an invalid stored value makes the probe red.
+
+`history-corrupt` means a line in `history/current.jsonl` or a `volume-*.jsonl` is not valid JSON, has the wrong schema, or fails its checksum. Readers skip that line (it never makes a record appear); `status` adds the `history-corrupt` hazard and lists `history_issues` (`path`, 1-based `line`); `delivery` adds a `history-corrupt` blocker and never offers `finish`. `start`, `verify`, `finish`, appends onto a bad `current.jsonl`, numbered (report id) writes and `prune` refuse with `<file> line <n>`. ag never deletes or rewrites the bad line: back it up, repair or remove the reported line by hand, then retry.
 
 ```powershell
 python -m ag enroll <PROJECT_ROOT>
@@ -126,7 +128,7 @@ Configured critic and switch chats stream their incremental reasoning/content in
 
 ## Change-Aware Advice & Observation (`lift` & `see`)
 
-- **Advice (`lift`)**: `lift-13` summarizes the task signal. `lift-14` stores an out-of-tree task snapshot. `lift-15` compares sealed red lines against the previous ticket (`dropped_redlines`). `lift-16` scans added diff lines for silent exception swallowing, production mock/fixture references, and placeholder stubs. `lift-17` suggests converging multi-touchpoint imports of new modules into a single mount point. `lift-18` tracks consecutive ticket sequence (`ticket_seq`) and enables strict anti-lazy review mode on round 3+ (`ticket_seq >= 3`).
+- **Advice (`lift`)**: `lift-4` / `lift-11` run `AG_LIFT_CMD` through the shell, decode its output as UTF-8, and stop the whole process tree after `AG_LIFT_TIMEOUT` seconds (an integer from 1 to 1800; unset or invalid means 300), marking that finding `timed_out=true`; the `lift-2` linter uses the same limit. `lift-13` summarizes the task signal. `lift-14` stores an out-of-tree task snapshot. `lift-15` compares sealed red lines against the previous ticket (`dropped_redlines`). `lift-16` scans added diff lines for silent exception swallowing, production mock/fixture references, and placeholder stubs. `lift-17` suggests converging multi-touchpoint imports of new modules into a single mount point. `lift-18` tracks consecutive ticket sequence (`ticket_seq`) and enables strict anti-lazy review mode on round 3+ (`ticket_seq >= 3`).
 - **Observation (`see`)**: `see-10` and `see-11` track repeated CSS selectors and ownership. `see-12` tracks suppression directive deltas (`suppression_delta`) and upward/reverse imports. `see-13` reports seat/pack health. `see-14` aggregates ticket history and recurring red lines from `<AG_HOME>/projects/<key>/tickets/`. `see-15` records the one-front-one-back (`ticket` + single `switch`) review token ledger (`saved_chars`, `script_digest`). `see-17` counts how often each review seat actually ran, and `see-18` reconciles the jsonl master against the `-last.json` caches and any legacy `ag.sqlite` rows.
 
 ---
@@ -139,7 +141,7 @@ Inspect dynamically resolved config paths, readiness status (`reviewer_ready`, `
 python -m ag config <PROJECT_ROOT>
 ```
 
-Configuration lives in `<AG_HOME>/critic.json` (global) or the `critic` section of `<AG_HOME>/projects/<PROJECT_KEY>/config.json` (project override). Legacy per-project `critic.json` remains readable for migration. The API key stays in the environment variable named by `api_key_env`:
+Configuration lives in `<AG_HOME>/critic.json` (global) or the `critic` section of `<AG_HOME>/projects/<PROJECT_KEY>/config.json` (project override). A project whose `config.json` has no `critic` section inherits the global file (upgrades no longer write a default section); any `critic` section, even just `{"enabled": false}`, overrides the global file. Legacy per-project `critic.json` remains readable for migration. The API key stays in the environment variable named by `api_key_env`:
 
 ```json
 {

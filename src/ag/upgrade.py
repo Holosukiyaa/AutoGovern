@@ -178,7 +178,6 @@ def _step_scaffold_home(root: Path) -> str:
     top up config.json to the full v2 sections. Fills only what's missing."""
     from .knowledge import knowledge_dir
     from .settings import (
-        _CRITIC_DEFAULTS,
         _PRUNE_DEFAULTS,
         default_adapters,
         settings_path,
@@ -198,9 +197,8 @@ def _step_scaffold_home(root: Path) -> str:
     path = settings_path(root)
     blob = _read_json(path)
     filled: list[str] = []
-    if not isinstance(blob.get("critic"), dict):
-        blob["critic"] = dict(_CRITIC_DEFAULTS)
-        filled.append("critic")
+    # No critic section is scaffolded: a project without one inherits the
+    # global <AG_HOME>/critic.json; a section the user wrote still overrides it.
     struct = blob.get("structure")
     if not isinstance(struct, dict) or not isinstance(struct.get("adapters"), dict):
         blob["structure"] = {"enabled": True, "adapters": default_adapters()}

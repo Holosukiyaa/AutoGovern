@@ -25,6 +25,7 @@ MIN_EVIDENCE = 20
 DEFAULT_TTL = 10
 TAIL_CHARS = 2000
 CMD_TIMEOUT_S = 30
+CMD_TIMEOUT_MAX_S = 1800
 PLANT_HEAD_BYTES = 4096
 PLANT_MAX_FILE_BYTES = 1_000_000
 PLANT_MAX_LINE_CHARS = 400
@@ -225,6 +226,12 @@ def _save(path: Path, blob: dict[str, Any]) -> None:
     _atomic_write_text(path, json.dumps(blob, ensure_ascii=False, indent=2) + "\n")
 
 
+def _timeout_s(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= CMD_TIMEOUT_MAX_S:
+        raise ChainBroken(f"timeout_s must be an integer from 1 to {CMD_TIMEOUT_MAX_S} seconds, got {value!r}")
+    return value
+
+
 def _normalize_observation(raw: Any) -> dict[str, Any]:
     if isinstance(raw, str):
         try:
@@ -246,6 +253,8 @@ def _normalize_observation(raw: Any) -> dict[str, Any]:
         if isinstance(expect, bool) or not isinstance(expect, int):
             raise ChainBroken("command observation requires expect_exit as an int")
         out: dict[str, Any] = {"kind": "command", "argv": list(argv), "expect_exit": int(expect)}
+        if "timeout_s" in raw:
+            out["timeout_s"] = _timeout_s(raw["timeout_s"])
         stdout_contains = raw.get("stdout_contains")
         stderr_contains = raw.get("stderr_contains")
         if stdout_contains is not None:
@@ -659,6 +668,10 @@ def _eval_command(repo: Path, observation: dict[str, Any]) -> tuple[str, int, st
     if (repo / "src").is_dir():
         environment["PYTHONPATH"] = str(repo / "src") + os.pathsep + str(repo)
     try:
+        timeout = _timeout_s(observation.get("timeout_s", CMD_TIMEOUT_S))
+    except ChainBroken as exc:  # a hand-edited store: red, never unbounded
+        return "red", -1, _tail(str(exc))
+    try:
         ran = subprocess.run(
             argv,
             cwd=str(repo),
@@ -666,7 +679,7 @@ def _eval_command(repo: Path, observation: dict[str, Any]) -> tuple[str, int, st
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=CMD_TIMEOUT_S,
+            timeout=timeout,
             check=False,
             shell=False,
             env=environment,

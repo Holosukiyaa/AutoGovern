@@ -16,10 +16,11 @@ from pathlib import Path
 from typing import Any
 
 from .freeze import freeze_canonical, freeze_worktree, thaw_canonical, thaw_worktree
+from .history import history_issues, require_intact
 from .hook import hook_main
 from .switch import block_message as _switch_block_message
 from .switch import report_id_from_verify as _switch_report_id
-from .store import append_project_jsonl, append_task_step, ensure_start_step, latest_timeline_path
+from .store import append_project_jsonl, append_task_step, ensure_start_step, latest_timeline_path, replace_file
 from .managed import ChainBroken, ag_home, lookup_project, project_key, real_root, load_managed, save_managed
 from .see import note as usage_note
 
@@ -105,7 +106,7 @@ def save_task(key: str, task: dict[str, Any] | None) -> None:
             handle.write(json.dumps(task, ensure_ascii=False, indent=2) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        replace_file(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -732,6 +733,9 @@ def status(root: Path) -> dict[str, Any]:
         hazards.append("canonical-dirty")
     if task and not recorded(task):
         hazards.append("intent-map-unconfirmed")
+    corrupt = history_issues(root)
+    if corrupt:
+        hazards.append("history-corrupt")
     if task:
         product = _product(test_argv, verify if isinstance(verify, dict) else None)
         process = _process(task)
@@ -749,6 +753,7 @@ def status(root: Path) -> dict[str, Any]:
         "hook_ok": hook_ok,
         "canonical_dirty": dirty,
         "hazards": hazards,
+        "history_issues": corrupt,
         "test_argv": test_argv,
         "process": process,
         "product": product,
@@ -898,6 +903,7 @@ def start(
 
     ensure_upgraded(root)
     state = status(root)
+    require_intact(Path(state["root"]))
     root = Path(state["root"])
     key = str(state["key"])
     if state["canonical_dirty"]:
@@ -1273,6 +1279,7 @@ def _refuse_dirty_verify(root: Path, key: str, task: dict[str, Any], state: dict
 
 def verify(root: Path) -> dict[str, Any]:
     state = status(root)
+    require_intact(Path(state["root"]))
     key = str(state["key"])
     task = load_task(key)
     if not task:
@@ -1833,6 +1840,7 @@ def _close_task(root: Path, key: str, task: dict[str, Any], *, process: str, pro
 
 def finish(root: Path) -> dict[str, Any]:
     state = status(root)
+    require_intact(Path(state["root"]))
     root = Path(state["root"])
     key = str(state["key"])
     task = load_task(key)

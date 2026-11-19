@@ -84,12 +84,17 @@ def note(root: Path, lane: str, seq: int, kind: str, detail: str = "") -> None:
             "kind": kind,
             "detail": detail,
         }
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
         from . import settings as _settings
+        from .store import exclusive_lock
 
-        _max_b, _keep_b = _settings.prune_limits(root)
-        freed = _rolling_truncate_usage(path, _max_b, _keep_b)
+        # Append and truncate under one cross-process lock, or a row appended
+        # between the tail read and the rewrite is lost. A lock still busy
+        # after 10 s raises TimeoutError (an OSError): this observation is dropped.
+        with exclusive_lock(path.with_name("usage.jsonl.lock")):
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            _max_b, _keep_b = _settings.prune_limits(root)
+            freed = _rolling_truncate_usage(path, _max_b, _keep_b)
         if freed:
             try:
                 from .store import append_project_jsonl

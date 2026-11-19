@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
-from .history import digest, read_records
+from .history import digest, history_issues, read_records
 from .managed import ChainBroken, lookup_project, project_key, real_root
 from .store import list_llm_events, load_task_timeline, project_dir, scan_llm_log
 from .ticket_doc import section_lines, split_document
@@ -67,12 +70,25 @@ def _candidate_current(root: Path, task: dict[str, Any], verify: dict[str, Any])
     if not candidate or not tree.is_dir():
         return False
     product = str(verify.get("product_tree") or candidate)
-    diff = subprocess.run(["git", "-C", str(tree), "diff", "--quiet", product, "--"], capture_output=True)
-    if diff.returncode not in {0, 1}:
-        raise ChainBroken("history-source-error: verification candidate is unavailable")
-    if diff.returncode:
-        return False
-    untracked = subprocess.run(["git", "-C", str(tree), "ls-files", "--others", "--exclude-standard", "-z"], capture_output=True)
+    git = ["git", "--no-optional-locks", "-C", str(tree)]
+    located = subprocess.run([*git, "rev-parse", "--git-path", "index"], capture_output=True, text=True)
+    if located.returncode:
+        raise ChainBroken("history-source-error: cannot read candidate working state")
+    index = Path(located.stdout.strip())
+    if not index.is_absolute():
+        index = tree / index
+    # A read-only view: compare on a scratch copy of the index, so refreshing
+    # stale stat data never rewrites (or locks) the builder's real index.
+    with tempfile.TemporaryDirectory(prefix="ag-view-") as scratch:
+        environment = {**os.environ, "GIT_INDEX_FILE": str(Path(scratch) / "index")}
+        if index.is_file():
+            shutil.copyfile(index, environment["GIT_INDEX_FILE"])
+        diff = subprocess.run([*git, "diff", "--quiet", product, "--"], capture_output=True, env=environment)
+        if diff.returncode not in {0, 1}:
+            raise ChainBroken("history-source-error: verification candidate is unavailable")
+        if diff.returncode:
+            return False
+        untracked = subprocess.run([*git, "ls-files", "--others", "--exclude-standard", "-z"], capture_output=True, env=environment)
     if untracked.returncode:
         raise ChainBroken("history-source-error: cannot read candidate working state")
     if untracked.stdout:
@@ -172,6 +188,10 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
     advisories = []
     def issue(kind, evidence, action, **extra):
         return {"kind": kind, "evidence": evidence, "next_action": action, **extra}
+    corrupt = history_issues(root)
+    if corrupt:
+        # Skipped lines may hide facts (a refusal, a pending decision): never offer finish.
+        blockers.append(issue("history-corrupt", corrupt, "repair-history"))
     by_report = {row["report_id"]: row for row in reviews}
     review = task.get("ticket_review") if isinstance(task.get("ticket_review"), dict) else {}
     if not review:

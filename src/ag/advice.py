@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -24,16 +25,71 @@ _SKIP_DIR = {"node_modules", "dist", "__pycache__", ".git"}
 _DOOR_SUFFIX = {".css", ".py", ".js", ".mjs", ".ts", ".tsx"}
 
 
+_GIT_TIMEOUT_S = 60
+_LIFT_TIMEOUT_S = 300
+_LIFT_TIMEOUT_MAX_S = 1800
+
+
 def _git(cwd: Path, *args: str) -> str:
-    ran = subprocess.run(
-        ["git", "-C", str(cwd), *args],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+    try:
+        ran = subprocess.run(
+            ["git", "-C", str(cwd), *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=_GIT_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        return ""
     return (ran.stdout or "").strip()
+
+
+def _lift_timeout() -> int:
+    """AG_LIFT_TIMEOUT seconds: an integer 1..1800; unset or anything else means 300."""
+    raw = os.environ.get("AG_LIFT_TIMEOUT", "").strip()
+    value = int(raw) if raw.isdecimal() else 0
+    return value if 1 <= value <= _LIFT_TIMEOUT_MAX_S else _LIFT_TIMEOUT_S
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, check=False)
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            proc.kill()
+
+
+def _run_bounded(cmd: str | list[str], cwd: Path, *, shell: bool = False) -> dict[str, Any]:
+    """Run a lift subprocess for at most AG_LIFT_TIMEOUT s; on timeout kill its whole process tree.
+
+    Output is decoded as UTF-8 (undecodable bytes become U+FFFD), never with the locale code page."""
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(cwd),
+        shell=shell,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=os.name != "nt",
+    )
+    timed_out = False
+    try:
+        out, err = proc.communicate(timeout=_lift_timeout())
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        _kill_tree(proc)
+        try:
+            out, err = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:  # a survivor still holds the pipes: do not wait on it
+            out, err = b"", b""
+    result: dict[str, Any] = {"exit": proc.returncode, "tail": (out + err).decode("utf-8", errors="replace")[-1500:]}
+    if timed_out:
+        result["timed_out"] = True
+    return result
 
 
 def _task(root: Path) -> dict[str, Any] | None:
@@ -108,8 +164,7 @@ def lift_2(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
         cmd = ["pyright"]
     if not cmd:
         return {"detail": "no repo linter config"}
-    ran = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True, check=False)
-    return {"exit": ran.returncode, "tail": ((ran.stdout or "") + (ran.stderr or ""))[-1500:]}
+    return _run_bounded(cmd, cwd)
 
 
 def lift_3(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
@@ -122,8 +177,7 @@ def lift_4(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     if not cmd:
         return {"detail": "no AG_LIFT_CMD, skipped"}
     cwd = _wt(root) or _repo(root)
-    ran = subprocess.run(cmd, cwd=str(cwd), shell=True, capture_output=True, text=True, check=False)
-    return {"exit": ran.returncode, "tail": ((ran.stdout or "") + (ran.stderr or ""))[-1500:]}
+    return _run_bounded(cmd, cwd, shell=True)
 
 
 def lift_5(root: Path, _item: dict[str, Any]) -> dict[str, Any]:

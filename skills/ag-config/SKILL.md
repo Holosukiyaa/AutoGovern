@@ -16,7 +16,7 @@ description: >
 
 日常恢复用 `python -m ag delivery <PROJECT_ROOT> --task-id <TASK_ID>` 或 MCP `ag_delivery` 查看目标、已验证进展、未完成项、阻塞、建议和下一动作。该查询与 `status` 不安装、不迁移、不解冻；完整体检用 `ag_see`，需要生成或修复配置时显式运行 `config/enroll`。
 
-项目配置正本为 `<AG_HOME>/projects/<key>/config.json` 的 `critic` 区，旧 `critic.json` 保持兼容；全局席位仍可从 `<AG_HOME>/critic.json` 读取。`confirm-map` 只读配置并重验审核身份：配置损坏报 `config-error`，审核配置变化报 `intent-identity-changed`，修复后重审；single 按原确认流程，long 范围内子票重新核验父授权，只有实质变更才再次请用户决定。API Key 只检查环境变量是否存在，始终不索要、不打印明文。
+项目配置正本为 `<AG_HOME>/projects/<key>/config.json` 的 `critic` 区，旧 `critic.json` 保持兼容；全局席位仍可从 `<AG_HOME>/critic.json` 读取：项目 `config.json` 没有 `critic` 段时继承全局配置（升级不会再写入默认段），只要有 `critic` 段（无论内容）就由项目段覆盖全局。`confirm-map` 只读配置并重验审核身份：配置损坏报 `config-error`，审核配置变化报 `intent-identity-changed`，修复后重审；single 按原确认流程，long 范围内子票重新核验父授权，只有实质变更才再次请用户决定。API Key 只检查环境变量是否存在，始终不索要、不打印明文。
 
 single 票面位于 `<AG_HOME>/projects/<key>/ticket.md`，完整展示后用户亲自执行 `python -m ag confirm-map <PROJECT_ROOT>`；**长票整体只需要同意一次**：用户首次审阅完整父目标、结果承诺和适用约束后，亲自执行带所见 `--preview <TOKEN>` 的 `confirm-map`。已批准范围内的后续子票继承可追溯父授权，不再逐票请求人类确认；每张子票仍须独立审票、隔离施工、实际解冻、真实检查与 `switch` 验货。目标、约束或批准结果范围实质变化、存在待决提案时阻塞继承，记录差异并经独立复审和用户决定。默认 `single` 仍逐票本人确认。 AI 不得代调确认 CLI/MCP。进程会即时输出阶段，真实解冻成功才 `ready`；解冻重试保留批准，不重复 long 业务授权。新 MCP 同时暴露 `ag_delivery`、`ag_route`；更新软件后重启宿主中的旧 MCP 进程以加载新工具。用 `python -m ag install-skill --target codex` 或 `grok` 同步四套自带技能；安装保留旧版备份。
 

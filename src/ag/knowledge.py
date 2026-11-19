@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .managed import ChainBroken, real_root
-from .store import project_dir
+from .store import project_dir, replace_file
 
 KNOWLEDGE_NAME = "knowledge"
 SESSIONS_NAME = "sessions"
@@ -68,7 +68,7 @@ def _atomic_write(path: Path, text: str) -> None:
     try:
         with open(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(text)
-        temp.replace(path)
+        replace_file(temp, path)
     finally:
         try:
             temp.unlink()

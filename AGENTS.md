@@ -46,7 +46,7 @@
 
 恢复任务先用 `python -m ag delivery <PROJECT_ROOT> --task-id <TASK_ID>` 或 MCP `ag_delivery` 读取共同目标、本票贡献、已验证进展、未完成项及下一动作。完整功能可在一票内跨必要模块分阶段实现；路线调整说明原因即可，减少承诺或改变硬边界须用户决定。真正独立的续作使用明确 `continuation_of`，不自动串联无关票。
 
-`status/delivery` 只读，完整诊断用 `ag_see`，安装修复用 `enroll/config`。`confirm-map` 必须由用户亲自执行；long 范围内子票由系统核验父授权继承，实际解冻完成后才 `ready`。解冻失败保留批准来源并按 `delivery.next_action` 正式重试，不重复业务授权。交卷选取本票 `.ag-check/check_*.py` 并绑定脚本、候选和审核。历史按时间和容量分卷，先校验发布再回收闭票散档；活动票、准备资料、审计与备份保留。
+`status/delivery` 只读，完整诊断用 `ag_see`，安装修复用 `enroll/config`。`confirm-map` 必须由用户亲自执行；long 范围内子票由系统核验父授权继承，实际解冻完成后才 `ready`。解冻失败保留批准来源并按 `delivery.next_action` 正式重试，不重复业务授权。交卷选取本票 `.ag-check/check_*.py` 并绑定脚本、候选和审核。历史按时间和容量分卷，先校验发布再回收闭票散档；活动票、准备资料、审计与备份保留。出现 `history-corrupt` 时，按 `history_issues` 报告的文件和行号交给用户人工核对，AI 不得自行删除或改写历史行。
 
 当用户第一次在项目中接入 `ag`，或询问“怎么配置 / 怎么开始 / 为什么报错”时，AI 必须按以下 4 步主动引导：
 

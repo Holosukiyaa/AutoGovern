@@ -21,6 +21,8 @@ description: >
 | `approved-but-frozen` / `thaw-failed` | 已批准仍未就绪，保留批准来源，修复权限或占用后按 `delivery.next_action` 正式恢复；long 不重复业务授权，AI 不代确认。 |
 | `check-digest-mismatch` | 当前票脚本改变，重新 `verify`；检查自动选择本票 `.ag-check/check_*.py`。 |
 | `pending-behavior` / `unproven` 探针 | 保留线索，用 `probe calibrate` 提供实际修复前失败、修复后通过的命令观察；无法区分则待查，不当成已证实回归。真实红灯仍阻塞。 |
+| `history-corrupt` | `history_issues` 列出坏行的 `path` 与 `line`；读取跳过坏行，`start/verify/finish`、续写、编号写入和 `prune` 拒绝。ag 不自动删除或改写坏行：备份后由用户人工核对并修复或移走该行，再重试。 |
+| 探针 `timeout_s` 被拒 / lift 条目 `timed_out=true` | 探针 `timeout_s` 须为 1 到 1800 的整数（默认 30 秒）；`AG_LIFT_CMD` 超过 `AG_LIFT_TIMEOUT`（1 到 1800，默认 300）秒被结束整个进程树，检查命令为何卡住或调大该值。 |
 | `history-source-error` / 归档写失败 | 原件保留，修复来源或磁盘后重试 `prune`；索引可重建，不手工删分卷。 |
 | `history-close-pending` / `cleanup-pending` | 活动指针保留，排除文件占用后重试原 `finish` 或 `abandon`；已合入的票用 `finish` 恢复清理。 |
 
