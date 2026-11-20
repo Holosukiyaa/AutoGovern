@@ -16,7 +16,7 @@ INSTRUCTIONS = (
     "ag has three lanes that must not mix: ship (交货), lift (抬正确率), see (看见). "
     "Only ship may set product or refuse finish. "
     "File-changing work: ag_status → ag_start → write ONLY in worktree.path → ag_verify → ag_finish. "
-    "ag_start reads <AG_HOME>/projects/<key>/ticket.md. "
+    "ag_start reads <AG_HOME>/projects/<key>/draft/: ticket.md (four human sections), spec.json and checks/. target baselines must fail and guard baselines must pass before review; tickets/<id>/ is sealed with seal.json. verify runs sealed and added checks; altered packages refuse sealed-check-changed, invalid seals refuse seal-invalid, missing active seals refuse legacy-ticket-format. "
     "the ticket never lives in the project tree. "
     "Single tickets require personal confirm-map per ticket. "
     "AI must never call ag_confirm_map or edit approval state. "

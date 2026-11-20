@@ -91,7 +91,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     start_p.add_argument("root")
     start_p.add_argument("--portrait", default="")
-    start_p.add_argument("--continuation-of", default="")
     start_p.add_argument("--contribution", default="")
     start_p.add_argument("--fixed", action="append", default=[], help="locked done-state line; repeatable; not rewritten before confirm-map")
     start_p.add_argument("--anchor", action="append", default=[], help="attention anchor for what is still unsettled; repeatable")
@@ -530,7 +529,6 @@ def _run(args: argparse.Namespace) -> int:
                         guards=args.guard,
                         defaults=args.default,
                         fixed=args.fixed or None,
-                        continuation_of=args.continuation_of,
                         contribution=args.contribution,
                     ),
                     ensure_ascii=False,

@@ -31,7 +31,7 @@ TOOLS = [
     },
     {
         "name": "ag_start",
-        "description": "Open or revisit the same isolated worktree and independently review its sealed scope. Each ticket requires human confirm-map; status never grants authority.",
+        "description": "Open the draft/ ticket package (ticket.md, spec.json, checks/). Validate results and coverage, seal exact bytes and run target-red/guard-green baselines before independent review. continuation_of comes only from spec.json. Each ticket requires human confirm-map.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -56,7 +56,6 @@ TOOLS = [
                 "fixed": {"type": "array", "items": {"type": "string"}},
                 "guards": {"type": "array", "items": {"type": "string"}},
                 "defaults": {"type": "array", "items": {"type": "string"}},
-                "continuation_of": {"type": "string"},
                 "contribution": {"type": "string"},
             },
             "required": ["root"],
@@ -123,6 +122,8 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
             value = args.get(parameter)
             if value and (parameter != "ticket_type" or value != "single"):
                 raise ChainBroken(f"long-ticket-retired: ag_start parameter {parameter} is retired")
+        if args.get("continuation_of"):
+            raise ChainBroken("spec-invalid: continuation_of must come from draft/spec.json")
         raw = args.get("anchors")
         anchors = [dict(item) for item in raw if isinstance(item, dict)] if isinstance(raw, list) else None
         raw_fixed = args.get("fixed")
@@ -138,7 +139,6 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
             guards=guards,
             defaults=defaults,
             fixed=fixed,
-            continuation_of=str(args.get("continuation_of") or ""),
             contribution=str(args.get("contribution") or ""),
         )
     if name == "ag_confirm_map":

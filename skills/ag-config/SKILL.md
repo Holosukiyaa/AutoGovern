@@ -18,7 +18,7 @@ description: >
 
 项目配置正本为 `<AG_HOME>/projects/<key>/config.json` 的 `critic` 区，旧 `critic.json` 保持兼容；全局席位仍可从 `<AG_HOME>/critic.json` 读取：项目 `config.json` 没有 `critic` 段时继承全局配置（升级不会再写入默认段），只要有 `critic` 段（无论内容）就由项目段覆盖全局。`confirm-map` 只读配置并重验审核身份：配置损坏报 `config-error`，审核配置变化报 `intent-identity-changed`，修复后重审；每张票按本人确认流程执行。API Key 只检查环境变量是否存在，始终不索要、不打印明文。
 
-票面位于 `<AG_HOME>/projects/<key>/ticket.md`，完整展示后用户亲自执行 `python -m ag confirm-map <PROJECT_ROOT>`。AI 不得代调确认 CLI/MCP。进程会即时输出阶段，真实解冻成功才 `ready`；解冻重试保留批准。MCP 暴露只读 `ag_delivery`；更新软件后重启宿主中的旧 MCP 进程以加载新工具。用 `python -m ag install-skill --target codex` 或 `grok` 同步四套自带技能；安装保留旧版备份。
+票包包括 draft/ticket.md、draft/spec.json 和 draft/checks/。人话票位于 `<AG_HOME>/projects/<key>/draft/ticket.md`，完整展示后用户亲自执行 `python -m ag confirm-map <PROJECT_ROOT>`。AI 不得代调确认 CLI/MCP。进程会即时输出阶段，真实解冻成功才 `ready`；解冻重试保留批准。MCP 暴露只读 `ag_delivery`；更新软件后重启宿主中的旧 MCP 进程以加载新工具。用 `python -m ag install-skill --target codex` 或 `grok` 同步四套自带技能；安装保留旧版备份。
 
 - **返回项目总入口**：[`AGENTS.md`](../../AGENTS.md)
 - **查看 6 步使用流程**：[`skills/ag-guide/SKILL.md`](../ag-guide/SKILL.md)
@@ -178,7 +178,7 @@ export AG_CRITIC_API_KEY="<YOUR_API_KEY>"
 ## 七、一键安装自带的 4 套独立 Skill
 
 `ag` 在 `skills/` 目录下内置了 4 套职责分明的独立技能包：
-- [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)：意图锚点提炼、`<AG_HOME>/projects/<key>/ticket.md` 编写与 `confirm-map` 确认纪律
+- [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md)：意图锚点提炼、`<AG_HOME>/projects/<key>/draft/ticket.md` 编写与 `confirm-map` 确认纪律
 - [`skills/ag-guide/SKILL.md`](../ag-guide/SKILL.md)：项目核心原理、三条正交轨道与 6 步完整工作流
 - [`skills/ag-config/SKILL.md`](../ag-config/SKILL.md)：`critic.json` 配置、环境变量与 MCP 挂载指南
 - [`skills/ag-troubleshooting/SKILL.md`](../ag-troubleshooting/SKILL.md)：常见报错码与问题排障手册
@@ -192,3 +192,15 @@ python -m ag install-skill --target codex
 # 安装全部 4 个 Skill 到 Grok 技能目录 (~/.grok/skills/{ag-anchor,ag-guide,ag-config,ag-troubleshooting})
 python -m ag install-skill --target grok
 ```
+
+## 票据文件包
+
+票据文件包放在 `<AG_HOME>/projects/<key>/draft/`：`ticket.md` 给人看，`spec.json` 给机器看，`checks/` 放开票前写好的 Python 检查及辅助文件。enroll 生成起步模板；`origin.user_words` 默认为空，必须按用户原话填写后才可 start。
+
+`ticket.md` 必须有四个非空段落：`## 要做成什么`、`## 怎样算做成`、`## 不做什么`、`## 需要你拍板的事`，最后一段可写“无”。不再把机器结果或检查藏在人话标记行中。
+
+start 校验、把 draft 逐字节封存到 `tickets/<task_id>/`，在尚未解冻的 source_head 工地中运行封存检查，cwd 为工地，每条用 Python 执行且限时 300 秒。target 基线必须失败，guard 必须通过，再把完整人话、spec、检查源码和基线交给独立 ticket 席位。seal.json 原子写入，记录全部文件摘要、身份、基线和审核回执。
+
+每张票仍须用户本人 confirm-map，AI 不得代调；实际解冻并返回 ready 后才可施工。verify 运行封存检查、工地 `.ag-check/check_*.py` 追加检查及项目登记命令，并调用 switch；finish 复核 seal、候选和审核后快进合入。封存 ticket.md 不回写现场段，现场由 status/delivery 展示。
+
+确认前修改 draft 再 start，在同一 task_id 重封存、重跑基线并重新审票；没有改动只恢复现场。确认后改票属于 T4b，本版先 abandon（候选保留在 `refs/ag/abandoned/<task_id>`）再重新开票。不要直接改封存区。

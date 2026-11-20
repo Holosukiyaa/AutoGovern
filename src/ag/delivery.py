@@ -13,18 +13,13 @@ from typing import Any
 from .history import digest, history_issues, read_records
 from .managed import ChainBroken, lookup_project, real_root
 from .store import list_llm_events, load_task_timeline, project_dir, scan_llm_log
-from .ticket_doc import section_lines, split_document
+from .ticket_doc import split_document
 
 PASS = {"passed", "pass", "allow"}
 
 
-def intent_identity(task: dict[str, Any], text: str, sealed_redlines: str) -> str:
-    intent, redlines = split_document(text)
-    return digest({"task_id": task.get("id"), "source_head": task.get("source_head"), "worktree": task.get("worktree"), "intent": intent, "redlines": section_lines(redlines), "sealed_redlines": sealed_redlines, "fixed": task.get("fixed") or [], "anchors": task.get("anchors") or [], "goal_link": task.get("goal_link")})
-
-
 def task_facts(task: dict[str, Any]) -> dict[str, Any]:
-    names = ("id", "branch", "source_head", "worktree", "portrait", "anchors", "fixed", "fixed_rules", "redlines", "anchor_preview", "intent_identity", "intent_map_confirmed", "intent_map_confirmed_by", "intent_map_confirmed_at", "authorization_identity", "worktree_ready", "thaw_error", "ticket_review", "verify", "verified_tree", "goal_link", "check_argv", "verified_executor_src", "process", "cleanup_error", "archive_error", "merged_head", "ticket_type", "original_ticket", "candidate_archive")
+    names = ("id", "branch", "source_head", "worktree", "portrait", "anchors", "fixed", "fixed_rules", "redlines", "anchor_preview", "intent_identity", "intent_map_confirmed", "intent_map_confirmed_by", "intent_map_confirmed_at", "authorization_identity", "worktree_ready", "thaw_error", "ticket_review", "verify", "verified_tree", "goal_link", "check_argv", "verified_executor_src", "process", "cleanup_error", "archive_error", "merged_head", "ticket_type", "original_ticket", "candidate_archive", "package_spec")
     return {name: task[name] for name in names if name in task}
 
 
@@ -97,7 +92,10 @@ def _candidate_current(root: Path, task: dict[str, Any], verify: dict[str, Any])
         from .checks import selection
 
         enrolled = (lookup_project(root) or {}).get("test_argv") or []
-        if selection(tree, list(enrolled))["sha256"] != verify["check_selection"].get("sha256"):
+        try:
+            if selection(tree, list(enrolled), root=root, task=task)["sha256"] != verify["check_selection"].get("sha256"):
+                return False
+        except ChainBroken:
             return False
     return True
 
@@ -167,7 +165,7 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
     reviews = task_reviews(root, requested, diagnostics=diagnostics)
     if not task and not timeline.get("found") and not texts and not session and not reviews:
         return {"schema": "ag.delivery.v1", "root": str(root), "task_id": requested, "found": False, "error": "task-not-found", "readiness": "task-not-found", "next_action": "check-task-id", "diagnostics": diagnostics}
-    intent, red_body = split_document(text)
+    intent = text if task.get("package_spec") else split_document(text)[0]
     fixed = list(task.get("fixed") or [])
     if not fixed and intent.strip():
         fixed = [intent.strip()]
@@ -261,16 +259,14 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
         if not current and row.get("outcome") not in PASS:
             advisories.append(issue("historical-review", row["ref"], "retain-original-conclusion", outcome=row.get("outcome"), items=row.get("items") or []))
     identity_changed = False
-    if is_active and text:
-        live = base / "ticket.md"
-        sealed = base / "redlines.copy"
-        if not live.is_file() or not sealed.is_file():
-            identity_changed = True
-        else:
-            expected = task.get("intent_identity") or intent_identity(task, text, "\n".join(task.get("redlines") or []) + ("\n" if task.get("redlines") else ""))
-            identity_changed = intent_identity(task, live.read_text(encoding="utf-8"), sealed.read_text(encoding="utf-8")) != expected
-    if identity_changed:
-        blockers.append(issue("intent-identity-changed", str(base / "ticket.md"), "abandon" if current_confirmation else "revise-ticket-and-start"))
+    package_error = ""
+    if is_active and "long_goal" not in task:
+        from .ticket_package import load_seal
+        try:
+            load_seal(root, task)
+        except ChainBroken as exc:
+            package_error = str(exc).split(":", 1)[0]
+            blockers.append(issue(package_error, str(exc), "abandon" if package_error == "legacy-ticket-format" else "restore-sealed-package"))
     from .authorization import recorded
 
     retired = "long_goal" in task
@@ -278,7 +274,7 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
     live_error = ""
     goal["human_confirmed"] = current_confirmation
     goal["confirmed"] = approved
-    ready = approved and process == "active" and bool(task.get("worktree_ready")) and not task.get("thaw_error") and not identity_changed
+    ready = approved and process == "active" and bool(task.get("worktree_ready")) and not task.get("thaw_error") and not identity_changed and not package_error
     if is_active and ready:
         from .authorization import assert_live_construction
         try:
@@ -313,6 +309,9 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
         action = "finish"
     else:
         action = "implement-and-verify"
+    if package_error:
+        ready = False
+        readiness, action = "blocked", "abandon" if package_error == "legacy-ticket-format" else "restore-sealed-package"
     if retired:
         notice = issue("long-ticket-retired", "Long ticket data is archived, no longer interpreted, and grants no authority; use abandon to close an active ticket.", "abandon" if is_active else "read-archive")
         (blockers if is_active else advisories).append(notice)
@@ -329,7 +328,7 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
         "goal": goal,
         "goal_link": goal_link,
         "original_ticket": task.get("original_ticket"),
-        "candidate_archive": task.get("candidate_archive"),
+        "candidate_archive": task.get("candidate_archive", "package_spec"),
         "contribution": (goal_link or {}).get("contribution") or task.get("portrait") or "",
         "progress": {
             "verified": verified,

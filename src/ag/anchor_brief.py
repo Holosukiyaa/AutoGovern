@@ -1,4 +1,4 @@
-"""Anchor guidance only; human confirmation grants construction readiness."""
+"""Ticket package guidance only; human confirmation grants construction readiness."""
 from __future__ import annotations
 
 import json

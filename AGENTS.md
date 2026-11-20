@@ -1,88 +1,41 @@
-# AG 全局入口与 AI 行动指南 (`AGENTS.md`)
+# AutoGovern：AI 施工入口
 
-欢迎进入 `ag`！本文件是 AI 编程助手（Codex、Claude、Grok、Cursor 等）与开发者的顶层入口锚点。当用户打开本仓库或将 `ag` 接入目标项目时，AI 应首先阅读本文件并按下方导航引导用户完成配置、使用与排障。
+ag 是本地交付护栏与独立审核底座。主仓 `<PROJECT_ROOT>` 在活动票期间冻结；只有 `<WORKTREE>` 可施工。ship 设置 product 或拒绝交付，lift/see 只给建议和观测。
 
----
+票据文件包放在 `<AG_HOME>/projects/<key>/draft/`：`ticket.md` 给人看，`spec.json` 给机器看，`checks/` 放开票前写好的 Python 检查及辅助文件。enroll 生成起步模板；`origin.user_words` 默认为空，必须按用户原话填写后才可 start。
 
-## 1. 项目定位（`ag` 是什么）
+`ticket.md` 必须有四个非空段落：`## 要做成什么`、`## 怎样算做成`、`## 不做什么`、`## 需要你拍板的事`，最后一段可写“无”。不再把机器结果或检查藏在人话标记行中。
 
-**一句话定位**：`ag` 是面向 AI 编程（Vibe Coding）的**本地工程交付护栏与独立审核底座（MCP + CLI）**。
+start 校验、把 draft 逐字节封存到 `tickets/<task_id>/`，在尚未解冻的 source_head 工地中运行封存检查，cwd 为工地，每条用 Python 执行且限时 300 秒。target 基线必须失败，guard 必须通过，再把完整人话、spec、检查源码和基线交给独立 ticket 席位。seal.json 原子写入，记录全部文件摘要、身份、基线和审核回执。
 
-它通过 **主仓冻结（Canonical Freeze）+ 独立工作树（`<WORKTREE>`）隔离施工 + 启动票意图锚点与红线封存（`<AG_HOME>/projects/<key>/ticket.md`）+ 0-Token 本地脚本预筛 + 一前一后（`ticket` 开票审 + `switch` 交卷守门）无状态 DS 审核 + 一次性验证（`<WORKTREE>` 内现场生成的一次性自检脚本）**，从物理机制上解决 AI 编程的三大核心痛点：
+每张票仍须用户本人 confirm-map，AI 不得代调；实际解冻并返回 ready 后才可施工。verify 运行封存检查、工地 `.ag-check/check_*.py` 追加检查及项目登记命令，并调用 switch；finish 复核 seal、候选和审核后快进合入。封存 ticket.md 不回写现场段，现场由 status/delivery 展示。
 
-1. **防止改乱主仓与半途污染**：主分支检出区（`<PROJECT_ROOT>`）在任务期间物理只读冻结；所有修改强制发生在隔离工作树 `<WORKTREE>`，验收通过后才以 `--ff-only` 原子合入主仓。
-2. **防止目标漂移与偷删红线**：在 `<AG_HOME>/projects/<key>/ticket.md` 锁定业务意图、正反向行为链路锚点（`anchor:`）与聚焦红线（`## 红线`）；每张票独立审票、用户本人确认、实际解冻后才可施工。
-3. **防止“自己考自己”写假测试凑分**：废除常驻 `tests/` 答案库，每张票在 `<WORKTREE>/.ag-check/` 现场编写针对本票结果的一次性自检脚本（合入即销毁），配合异构/无状态的 `ticket`（开票三维审票）与 `switch`（交卷代码终审 + 自动种回归探针 `probes`）守住交付底线。
+确认前修改 draft 再 start，在同一 task_id 重封存、重跑基线并重新审票；没有改动只恢复现场。确认后改票属于 T4b，本版先 abandon（候选保留在 `refs/ag/abandoned/<task_id>`）再重新开票。不要直接改封存区。
 
----
+## 操作纪律
 
-## 2. 自带 Skill 套件导航（职责分离，按需加载）
+- 开始或恢复前先读用户合同、红线、delivery 和适用技能；不能缩小承诺。
+- 不代用户 confirm-map，不手改批准状态或 ACL，不在主仓施工或提交。
+- 未 ready 不修改产品；工地不可写时报告真实原因，不绕过冻结。
+- 每条结果对应真实 target，保护已有行为用 guard；只在工地 .ag-check/ 追加检查，不建立常驻 tests/ 答案库。
+- 自检走不通真实内部入口时查明断点，不用造假桩掩盖。
+- 完成后运行 verify，引用 task_id、verified_tree、switch.report_id 和检查结果；失败按具体证据修复。
+- 审核配置通过 config/config_guide 诊断；只检查密钥环境变量是否存在，不索要或打印密钥。
+- history-corrupt 报出的文件和行号交人工核对，不自动改写历史；旧长票数据不迁移，long-ticket-retired 用 abandon。
 
-`ag` 将使用说明、配置引导、问题排障与意图写票拆分为 `skills/` 下的 **4 套独立自带 Skill**（执行 `python -m ag install-skill --target codex|grok` 可一键全量安装）：
+## 导航
 
-- 📘 **使用指南 Skill（项目是干什么的 & 6 步完整工作流）**：[`skills/ag-guide/SKILL.md`](skills/ag-guide/SKILL.md)
-- ⚙️ **配置引导 Skill（`config.json` 的 `critic` 段、全局兼容配置、环境变量与 AI 引导配置）**：[`skills/ag-config/SKILL.md`](skills/ag-config/SKILL.md)
-- 🛠️ **问题排障 Skill（常见报错码、原因分析与一步修复方案）**：[`skills/ag-troubleshooting/SKILL.md`](skills/ag-troubleshooting/SKILL.md)
-- 🎯 **意图锚点 Skill（写票规范、正反完整行为链路 `anchor:` 与窄化红线）**：[`skills/ag-anchor/SKILL.md`](skills/ag-anchor/SKILL.md)
-- 📄 **架构与命令速查**：[`README.md`](README.md)
+[写包 ag-anchor](skills/ag-anchor/SKILL.md) · [工作流 ag-guide](skills/ag-guide/SKILL.md) · [配置 ag-config](skills/ag-config/SKILL.md) · [排障 ag-troubleshooting](skills/ag-troubleshooting/SKILL.md)
 
----
-
-## 3. 路径变量约定
-
-为保证跨平台与多机环境开箱即用，`ag` 全系文档与配置统一使用以下动态变量占位符（严禁硬编码个人电脑目录路径）：
-
-| 占位符 | 含义说明 |
-| :--- | :--- |
-| `<PROJECT_ROOT>` | 被治理的目标项目仓库根目录（Canonical Checkout，任务期间只读冻结） |
-| `<AG_REPO_ROOT>` | `ag` 仓库自身的根目录（若通过源码 `PYTHONPATH=<AG_REPO_ROOT>/src` 方式运行） |
-| `<WORKTREE>` | `ag_start` 生成的当前任务隔离工作树路径（通常位于 `<AG_HOME>/worktrees/<PROJECT_KEY>/<TASK_ID>`） |
-| `<AG_HOME>` | `ag` 状态、审计库与全局配置主目录（默认 `~/.ag`，可通过 `AG_HOME` 环境变量覆盖） |
-| `<PYTHON_EXECUTABLE>` | 当前运行环境的 Python 解释器路径（如 `python` 或虚拟环境解释器路径） |
-
----
-
-## 4. AI 接待新用户的标准动作（AI Onboarding 铁律）
-
-恢复任务先用 `python -m ag delivery <PROJECT_ROOT> --task-id <TASK_ID>` 或 MCP `ag_delivery` 读取共同目标、本票贡献、已验证进展、未完成项及下一动作。完整功能可在一票内跨必要模块分阶段实现；路线调整说明原因即可，减少承诺或改变硬边界须用户决定。真正独立的续作使用明确 `continuation_of`，不自动串联无关票。
-
-`status/delivery` 只读，完整诊断用 `ag_see`，安装修复用 `enroll/config`。`confirm-map` 必须由用户亲自执行，实际解冻完成后才 `ready`。解冻失败保留批准来源并按 `delivery.next_action` 正式重试。交卷选取本票 `.ag-check/check_*.py` 并绑定脚本、候选和审核。历史按时间和容量分卷，先校验发布再回收闭票散档；活动票、准备资料、审计与备份保留。出现 `history-corrupt` 时，按 `history_issues` 报告的文件和行号交给用户人工核对，AI 不得自行删除或改写历史行。
-
-当用户第一次在项目中接入 `ag`，或询问“怎么配置 / 怎么开始 / 为什么报错”时，AI 必须按以下 4 步主动引导：
-
-### 第一步：诊断环境与配置状态
-运行 MCP 工具 `ag_status(root="<PROJECT_ROOT>")` 或 CLI 命令：
-```powershell
-python -m ag config <PROJECT_ROOT>
-```
-读取返回 JSON 中的 `onboarding` 与 `config_guide` 字段，判断项目是否已登记（`enrolled`）、独立审核席位是否就绪（`reviewer_ready`）以及下一步动作（`next_action`）。
-
-### 第二步：零污染登记目标仓库
-若项目尚未登记（`not-enrolled`），执行 `ag_enroll(root="<PROJECT_ROOT>")` 或：
-```powershell
-python -m ag enroll <PROJECT_ROOT>
-```
-该操作会自动把 ag 的本地忽略项写入 `<PROJECT_ROOT>/.git/info/exclude`（**零污染主仓 `.gitignore`**），并在缺少票据时于 ag 家里自动生成初始 `<AG_HOME>/projects/<key>/ticket.md` 模板。票只住在 ag 家里；若旧项目仍把 `ticket.md` / `tickets/` / `redlines.copy` 三样留在项目里，`ag_start` 会先逐份核对 SHA256 后一次性搬进新家并留一份可读的搬家记录，项目里不留任何 ag 门牌。
-
-### 第三步：引导配置独立 DS 审核席位（按需）
-若用户希望启用独立大模型审核（`ticket` 开票审 + `switch` 交卷守门）但 `reviewer_ready: false`：
-1. 读取 `config_guide.global_config_path`（默认 `<AG_HOME>/critic.json`）或 `config_guide.project_config_path`，以及 `config_guide.template` 和 `config_guide.fields`。
-2. 指导用户按标准 JSON 格式填写 `endpoint`、`model`、`api_key_env` 等字段（详见 [`skills/ag-config/SKILL.md`](skills/ag-config/SKILL.md)）。
-3. 检查 `api_key_present` 布尔值，指导用户在终端或 MCP 配置中设置对应的环境变量（**安全铁律：AI 绝不向用户索要、读取或在任何日志中打印 API Key 明文**）。
-
-### 第四步：严格执行 6 步受控交付闭环
-1. **写票**：协助用户编写 `<AG_HOME>/projects/<key>/ticket.md`（包含大白话 `## 意图`、正反完整行为链路 `anchor:` 与窄化红线）。
-2. **开票与审票**：调用 `ag_start`，触发本地预筛与独立三维审票；确认前被打回后修正票面并原地重审，保留失败历史。
-3. **核对授权与就绪**：完整展示 `anchor_preview`、`anchor_preview_path` 和审票结果，等待用户亲自执行 `python -m ag confirm-map <PROJECT_ROOT>`。核对 `delivery` 的授权和真实 `ready`，AI 不得代调确认。
-4. **隔离施工与一次性自检**：仅在 `<WORKTREE>` 内修改代码（复杂任务可用 `ag worker-create` 拆分最多 3 个 Worker），并在 `<WORKTREE>/.ag-check/` 下编写针对本票结果的一次性自检脚本。
-5. **交卷验货**：调用 `ag_verify`（执行本地预筛、历史回归探针 `probes`、`.ag-check/` 验证与单次无状态 `switch` 终审）。
-6. **原子合入或放弃**：验收通过后调用 `ag_finish` 快进合入 `<PROJECT_ROOT>` 并自动清理 `<WORKTREE>` 与 `.ag-check/`；若任务无价值或需推翻重来，调用 `ag_abandon` 安全解冻主仓。
-
-
-## 单票与旧数据
-
-每张票独立审票，由用户本人执行 `confirm-map`，实际解冻并返回 `ready` 后才可施工。`continuation_of` 仅携带前票共同目标、贡献与未完成项作参考，不传递授权。
-
-T4 之前，修改已确认的票须先 `abandon`（候选保存在 `refs/ag/abandoned/<task_id>`），再重新开票；确认前改票可用 `start` 原地重新封存、审票。
-
-遇到 `long-ticket-retired` 时用 `abandon` 关闭活动票。旧长票数据原样留在 `<AG_HOME>`，不迁移；新代码不读取、不改写、不删除旧 `long/`、`long-goals.sqlite3` 和历史记录。归档票查询只提供降级视图，不授予权限。
+| 拒绝码 | 处理方式 |
+|---|---|
+| `ticket-package-missing` | 在项目 ag 家里的 draft/ 填写 ticket.md、spec.json 和 checks/。旧单文件票不再读取。 |
+| `ticket-md-invalid` | 补齐四个非空段落，拍板项可写“无”。 |
+| `spec-invalid` | 按错误给出的字段路径修复 spec；模板必须先填写 origin.user_words。 |
+| `result-uncovered` | 给报出的 result 补一条 target 检查。 |
+| `invalid-continuation` | spec.continuation_of 只能引用已关闭且本人确认的前票，不传递授权。 |
+| `baseline-target-green` | 指出的 target 在基线上已通过，不能证明新结果；重写真实结果检查。 |
+| `baseline-guard-red` | 指出的 guard 在基线上失败，先核对原有行为和检查，不能放宽检查。 |
+| `sealed-check-changed` | 封存区文件被修改、删除或新增；恢复封存原文后重新验货，不改 seal 来掩盖。 |
+| `seal-invalid` | seal.json 损坏或缺少字段；status 显示风险，verify/finish 拒绝，abandon 仍可关闭。 |
+| `legacy-ticket-format` | 旧活动票没有封存包，只能 abandon 关闭后用 draft/ 重新开票。 |

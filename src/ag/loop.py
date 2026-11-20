@@ -587,37 +587,12 @@ def enroll(root: Path, *, test_argv: list[str] | None = None, note: str = "") ->
             _restore_git_gate(root, previous)
             _drop_project(key)
         raise
-    from .ticket_doc import ensure_starter_ticket
+    from .ticket_package import ensure_template
 
-    ensure_starter_ticket(root)
+    ensure_template(root)
     usage_note(root, "ship", 9, "help", "canonical commit refused")
     return status(root)
 
-
-def parse_anchors(portrait: str) -> list[dict[str, Any]]:
-    """Parse anchor lines from a portrait. AI guesses never become hard anchors."""
-    valid_kinds = {"soft", "hard", "discoverable", "blocking", "defaulted", "avoid", "obsolete"}
-    markers = {"!": "hard", "?": "blocking", "~": "discoverable", "=": "defaulted", "-": "avoid", "x": "obsolete"}
-    anchors: list[dict[str, Any]] = []
-    for raw in str(portrait or "").splitlines():
-        line = raw.strip()
-        if not line.lower().startswith("anchor"):
-            continue
-        if ":" in line:
-            prefix, body = line.split(":", 1)
-        elif chr(0xff1a) in line:
-            prefix, body = line.split(chr(0xff1a), 1)
-        else:
-            continue
-        body = body.strip()
-        if not body:
-            continue
-        marker = prefix.strip().lower()[-1:]
-        kind = markers.get(marker, "soft")
-        if kind not in valid_kinds:
-            kind = "soft"
-        anchors.append({"id": f"a{len(anchors) + 1}", "text": body, "kind": kind})
-    return anchors
 
 def _anchor_exam(task: dict[str, Any]) -> str:
     anchors = task.get("anchors") if isinstance(task.get("anchors"), list) else []
@@ -672,13 +647,13 @@ def _onboarding_status(
             guide = {"reviewer_ready": False, "api_key_present": False}
     reviewer_ready = bool(guide.get("reviewer_ready"))
     if not ticket_ready:
-        next_step = "1. 请在 <AG_HOME>/projects/<key>/ticket.md 中编写 ## 意图、正反完整链路 anchor: 与聚焦 ## 红线，然后调用 ag_start。"
+        next_step = "1. 请在 <AG_HOME>/projects/<key>/draft/ 中编写 ticket.md 四段人话、spec.json 和 checks/ 的 target/guard 检查，然后调用 ag_start。"
     elif task is None:
-        next_step = "2. <AG_HOME>/projects/<key>/ticket.md 已就绪；请先核对内容，再调用 ag_start 创建隔离工作树并运行开票审票（如需启用 DS 独立审核，请按 onboarding.config_guide 指引配置 config.json 的 critic 段）。"
+        next_step = "2. <AG_HOME>/projects/<key>/draft/ 已就绪；请先核对内容，再调用 ag_start 创建隔离工作树并运行开票审票（如需启用 DS 独立审核，请按 onboarding.config_guide 指引配置 config.json 的 critic 段）。"
     elif not recorded(task):
         tr = task.get("ticket_review") if isinstance(task.get("ticket_review"), dict) else {}
         if bool(tr.get("configured")) and str(tr.get("outcome") or "").strip().casefold() not in {"passed", "pass", "allow"}:
-            next_step = "3. 开票审票未通过（ticket-review-rejected）：请根据 ticket_review.doubts 修改 <AG_HOME>/projects/<key>/ticket.md，然后再次调用 ag_start 原地重封存并重审。"
+            next_step = "3. 开票审票未通过（ticket-review-rejected）：请根据 ticket_review.doubts 修改 <AG_HOME>/projects/<key>/draft/，然后再次调用 ag_start 原地重封存并重审。"
         else:
             next_step = "3. 展示完整 anchor_preview，由用户本人 confirm-map；具体下一步见 delivery.next_action。"
     elif not task.get("verified_tree"):
@@ -796,6 +771,9 @@ def status(root: Path) -> dict[str, Any]:
     from .delivery import build_delivery_snapshot
 
     out["delivery"] = build_delivery_snapshot(root, str((task or {}).get("id") or ""))
+    for issue in out["delivery"].get("blockers", []):
+        if issue["kind"] in {"seal-invalid", "sealed-check-changed", "legacy-ticket-format"}:
+            out["hazards"].append(issue["kind"])
     out["readiness"] = out["delivery"]["readiness"]
     out["next_action"] = out["delivery"]["next_action"]
     out["authorization"] = out["delivery"].get("authorization") or {}
@@ -860,6 +838,30 @@ def _run_ticket_review(
     )
 
 
+def _review_package(root: Path, task: dict[str, Any], package: dict[str, Any]) -> None:
+    from . import ticket_package as packages
+    from .authorization import bind_ticket
+    from .anchor_map import hard_rules
+
+    spec = package["spec"]
+    task["anchors"] = [{"id": row["id"], "text": row["text"], "kind": "soft"} for row in spec["results"]]
+    task["fixed"] = [row["text"] for row in spec["results"]]
+    task["fixed_rules"] = hard_rules(task["anchors"])
+    task["current_anchor"] = task["anchors"][0]["id"]
+    task["redlines"] = [row["text"] for row in spec.get("redlines", [])]
+    task["package_spec"] = spec
+    task["anchor_preview"] = package["ticket"]
+    path = packages.sealed_dir(root, task["id"]) / "ticket.md"
+    task["anchor_preview_path"] = task["anchor_map_path"] = str(path)
+    seal = packages.seal_package(root, task, Path(task["worktree"]), package)
+    review = _run_ticket_review(root, intent_body=package["ticket"], portrait=task["portrait"],
+                                anchors=task["anchors"], redlines=task["redlines"],
+                                task_id=task["id"], goal_link=task.get("goal_link"))
+    task["ticket_review"] = review
+    packages.complete_review(root, task, seal)
+    bind_ticket(root, task)
+
+
 def start(
     root: Path,
     *,
@@ -868,282 +870,91 @@ def start(
     guards: list[str] | None = None,
     defaults: list[str] | None = None,
     fixed: list[str] | None = None,
-    continuation_of: str = "",
     contribution: str = "",
 ) -> dict[str, Any]:
-    """Open a worktree. Tracked canonical files stay frozen until finish or abandon.
-
-    Windows freeze is a recoverable ACL deny-write entry. Elsewhere it is the
-    user-write bit. Either mechanism is friction, not an absolute security boundary.
-    """
-    from .authorization import recorded, require_single_ticket
-
-    active = load_task(project_key(real_root(root)))
-    if active:
-        require_single_ticket(active)
-    ensure_local_excludes(root)
+    """Validate a draft, seal it, run opening baselines and independently review it."""
+    from . import ticket_package as packages
+    from .authorization import recorded, require_single_ticket, validate_ticket
+    from .delivery import build_delivery_snapshot, task_facts
     from .upgrade import ensure_upgraded
 
+    root = real_root(root)
+    key = project_key(root)
+    existing = load_task(key)
+    if existing:
+        require_single_ticket(existing)
+        packages.load_seal(root, existing)
+    ensure_local_excludes(root)
     ensure_upgraded(root)
     state = status(root)
-    require_intact(Path(state["root"]))
-    root = Path(state["root"])
-    key = str(state["key"])
+    require_intact(root)
     if state["canonical_dirty"]:
-        dirty_list = ", ".join(_dirty_files(root))
-        dirty_hint = f" ({dirty_list})" if dirty_list else ""
-        usage_note(root, "ship", 8, "block", "start canonical dirty")
-        raise ChainBroken(
-            f"canonical checkout is dirty; not a work site{dirty_hint} "
-            "[原因] 主仓存在未提交或未忽略的改动 "
-            "[下一步] 请先 git commit / git stash 清理主仓改动后再调用 ag_start"
-        )
+        raise ChainBroken("canonical-dirty: canonical checkout is dirty; clean it before start")
     if not state["hook_ok"]:
-        usage_note(root, "ship", 8, "block", "start hook missing")
-        raise ChainBroken(
-            "hook is not installed; re-enroll "
-            "[原因] Git 门禁钩子未安装或已失效 "
-            "[下一步] 请重新调用 ag_enroll 修复钩子后再调用 ag_start"
-        )
-    from .anchor_map import attention_anchors, hard_rules, resolve_fixed
-    from .ticket_doc import (
-        collect_redlines,
-        flow_target_warnings,
-        dropped_redlines,
-        merge_anchors,
-        previous_redlines,
-        require_ticket,
-        seal,
-        split_document,
-        ticket_path,
-        write_scene,
-    )
-
-    existing = load_task(key)
-    if existing and Path(str(existing.get("worktree") or "")).is_dir():
-        if recorded(existing):
-            from .authorization import validate_ticket
-
-            validate_ticket(root, existing)
-            if (fixed is not None and list(fixed) != list(existing.get("fixed") or [])) or (portrait and portrait != existing.get("portrait")):
-                raise ChainBroken("await-user-decision: confirmed result changed; preserve the existing goal")
-            return status(root)
-        existing_wt = Path(str(existing.get("worktree") or ""))
-        if not bool(existing.get("intent_map_confirmed")) and ticket_path(root).is_file():
-            document = require_ticket(root)
-            intent_body, redline_body = split_document(document)
-            chosen = str(portrait or existing.get("portrait") or "")
-            caller_anchors = None if anchors is None else [dict(item) for item in anchors if isinstance(item, dict)]
-            doc_anchors = parse_anchors(intent_body)
-            base_anchors = (
-                doc_anchors
-                if doc_anchors
-                else [dict(item) for item in (existing.get("anchors") or []) if isinstance(item, dict)]
-            )
-            task_anchors = merge_anchors(base_anchors, caller_anchors)
-            inferred = existing.get("fixed")
-            task_fixed = resolve_fixed(chosen, fixed if fixed is not None else inferred)
-            task_rules = hard_rules(task_anchors)
-            if not task_fixed and not task_anchors:
-                usage_note(root, "ship", 8, "block", "start without intent anchors")
-                raise ChainBroken(
-                    "intent sync required: provide a locked result or at least one attention anchor "
-                    "[原因] <AG_HOME>/projects/<key>/ticket.md 中缺少 anchor: 意图锚点 "
-                    "[下一步] 请在 <AG_HOME>/projects/<key>/ticket.md 的 ## 意图 下补充至少一条正反行为闭环 anchor: 后重试"
-                )
-            redlines = collect_redlines(redline_body, task_anchors, root)
-            baseline_prev = list(
-                dict.fromkeys(
-                    list(existing.get("redlines") or [])
-                    + list(existing.get("dropped_redlines") or [])
-                    + previous_redlines(root)
-                )
-            )
-            dropped = dropped_redlines(baseline_prev, redlines)
-            route = attention_anchors(task_anchors)
-            current_id = str(route[0].get("id") or "") if route else ""
-            task_id = str(existing.get("id") or "")
-            existing["portrait"] = chosen
-            existing["anchors"] = task_anchors
-            existing["current_anchor"] = current_id
-            existing["fixed"] = task_fixed
-            existing["fixed_rules"] = task_rules
-            if guards is not None:
-                existing["guards"] = [str(item).strip() for item in guards if str(item).strip()]
-            if defaults is not None:
-                existing["defaults"] = [str(item).strip() for item in defaults if str(item).strip()]
-            existing["redlines"] = redlines
-            existing["dropped_redlines"] = dropped
-            flow_warnings = flow_target_warnings(intent_body)
-            if flow_warnings:
-                existing["prescreen_warnings"] = list(dict.fromkeys(list(existing.get("prescreen_warnings") or []) + flow_warnings))
-            preview = seal(
-                root,
-                intent_body=intent_body,
-                redlines=redlines,
-                task=existing,
-                process="active",
-                product="pending",
-            )
-            ticket_review = _run_ticket_review(
-                root,
-                intent_body=intent_body,
-                portrait=chosen,
-                anchors=task_anchors,
-                redlines=redlines,
-                task_id=task_id,
-                goal_link=existing.get("goal_link"),
-            )
-            existing["ticket_review"] = ticket_review
-            preview = write_scene(root, existing, process="active", product="pending") or preview
-            doc_path = str(ticket_path(root).resolve())
-            existing["anchor_map_path"] = doc_path
-            existing["anchor_preview_path"] = doc_path
-            existing["anchor_preview"] = preview
-            from .authorization import bind_ticket
-            from .delivery import task_facts
-
-            bind_ticket(root, existing)
-            save_task(key, existing)
-            append_task_step(
-                root,
-                task_id,
-                "re-seal",
-                ticket_review_outcome=str(ticket_review.get("outcome") or ""),
-                report_id=str(ticket_review.get("report_id") or ""),
-                task=task_facts(existing),
-            )
-        try:
-            freeze_canonical(root)
-            freeze_worktree(existing_wt)
-        except Exception:
-            thaw_worktree(existing_wt)
-            thaw_canonical(root)
-            raise
+        raise ChainBroken("hook-removed: hook is not installed; re-enroll")
+    if existing and recorded(existing):
+        validate_ticket(root, existing)
+        # T4b owns changes after confirmation. Do not silently replace this seal.
+        draft = packages.load_draft(root)
+        if draft["files"] != packages.load_seal(root, existing)["files"]:
+            raise ChainBroken("intent-identity-changed: confirmed draft changed; abandon and open a new ticket")
         return status(root)
+    package = packages.load_draft(root)
     if existing:
-        raise ChainBroken("worktree-missing: task and goal retained; recover the worktree or abandon before starting another ticket")
+        worktree = Path(existing["worktree"])
+        if not worktree.is_dir():
+            raise ChainBroken("worktree-missing: use abandon before starting another ticket")
+        current = packages.load_seal(root, existing)
+        if package["files"] == current["files"]:
+            return status(root)
+        _review_package(root, existing, package)
+        save_task(key, existing)
+        append_task_step(root, existing["id"], "re-seal", task=task_facts(existing))
+        return status(root)
     if not _is_canonical(root):
-        raise ChainBroken(
-            "start from the canonical checkout "
-            "[原因] 当前路径不是主仓根目录 "
-            "[下一步] 请传入主仓根目录 <PROJECT_ROOT> 调用 ag_start"
-        )
+        raise ChainBroken("start from the canonical checkout")
     branch = git(root, "rev-parse", "--abbrev-ref", "HEAD")
     if branch in {"HEAD", ""}:
-        raise ChainBroken(
-            "canonical HEAD is detached "
-            "[原因] 主仓处于游离 HEAD 状态 "
-            "[下一步] 请先切换回具名分支（如 git switch main/master）后再调用 ag_start"
-        )
-    chosen = str(portrait or "")
+        raise ChainBroken("canonical HEAD is detached")
+    chosen = str(portrait or package["ticket"])
     goal_link = None
-    if continuation_of:
-        from .delivery import build_delivery_snapshot
-
-        previous = build_delivery_snapshot(root, continuation_of)
+    continuation = package["spec"].get("continuation_of", "")
+    if continuation:
+        previous = build_delivery_snapshot(root, continuation)
         if not previous.get("found") or previous.get("active") or not previous.get("goal", {}).get("confirmed"):
             raise ChainBroken("invalid-continuation: expected a closed, confirmed predecessor")
-        parent_link = previous.get("goal_link") or {}
-        goal_link = {"task_id": continuation_of, "common_goal": parent_link.get("common_goal") or previous["goal"], "contribution": contribution or chosen, "remaining": previous["remaining"]}
-    document = require_ticket(root)
-    intent_body, redline_body = split_document(document)
-    caller_anchors = None if anchors is None else [dict(item) for item in anchors if isinstance(item, dict)]
-    task_anchors = merge_anchors(parse_anchors(intent_body), caller_anchors)
-    task_fixed = resolve_fixed(chosen, fixed)
-    task_rules = hard_rules(task_anchors)
-    if not task_fixed and not task_anchors:
-        usage_note(root, "ship", 8, "block", "start without intent anchors")
-        raise ChainBroken(
-            "intent sync required: provide a locked result or at least one attention anchor "
-            "[原因] <AG_HOME>/projects/<key>/ticket.md 中缺少 anchor: 意图锚点 "
-            "[下一步] 请在 <AG_HOME>/projects/<key>/ticket.md 的 ## 意图 下补充至少一条正反行为闭环 anchor: 后重试"
-        )
-    redlines = collect_redlines(redline_body, task_anchors, root)
-    prev_redlines = previous_redlines(root)
-    dropped = dropped_redlines(prev_redlines, redlines)
-    task_guards = [str(item).strip() for item in (guards or []) if str(item).strip()]
-    task_defaults = [str(item).strip() for item in (defaults or []) if str(item).strip()]
-    route = attention_anchors(task_anchors)
-    current_id = str(route[0].get("id") or "") if route else ""
+        parent = previous.get("goal_link") or {}
+        goal_link = {"task_id": continuation, "common_goal": parent.get("common_goal") or previous["goal"],
+                     "contribution": contribution or chosen, "remaining": previous["remaining"]}
     task_id = uuid.uuid4().hex[:8]
     worktree = ag_home() / "worktrees" / key / task_id
     worktree.parent.mkdir(parents=True, exist_ok=True)
-    git(root, "worktree", "add", "-b", f"ag/{task_id}", str(worktree), "HEAD")
-    draft = {
-        "id": task_id,
-        "branch": branch,
-        "worktree": str(worktree),
-    }
+    task = {"id": task_id, "branch": branch, "source_head": git(root, "rev-parse", "HEAD"),
+            "worktree": str(worktree), "portrait": chosen, "goal_link": goal_link,
+            "guards": list(guards or []), "defaults": list(defaults or []),
+            "ticket_type": "single", "verified_tree": "", "verify": None,
+            "intent_map_confirmed": False}
     try:
-        flow_warnings = flow_target_warnings(intent_body)
-        if flow_warnings:
-            draft["prescreen_warnings"] = list(dict.fromkeys(list(draft.get("prescreen_warnings") or []) + flow_warnings))
-        preview = seal(
-            root,
-            intent_body=intent_body,
-            redlines=redlines,
-            task=draft,
-            process="active",
-            product="pending",
-        )
-    except Exception:
-        git(root, "worktree", "remove", "--force", str(worktree), check=False)
-        raise
-    ticket_review = _run_ticket_review(
-        root,
-        intent_body=intent_body,
-        portrait=chosen,
-        anchors=task_anchors,
-        redlines=redlines,
-        task_id=task_id,
-        goal_link=goal_link,
-    )
-    doc_path = str(ticket_path(root).resolve())
-    task_blob: dict[str, Any] = {
-        "id": task_id,
-        "branch": branch,
-        "source_head": git(root, "rev-parse", "HEAD"),
-        "worktree": str(worktree),
-        "portrait": chosen,
-        "anchors": task_anchors,
-        "anchor_map_path": doc_path,
-        "anchor_preview_path": doc_path,
-        "anchor_preview": preview,
-        "intent_map_confirmed": False,
-        "current_anchor": current_id,
-        "fixed": task_fixed,
-        "fixed_rules": task_rules,
-        "guards": task_guards,
-        "defaults": task_defaults,
-        "redlines": redlines,
-        "dropped_redlines": dropped,
-        "ticket_review": ticket_review,
-        "verified_tree": "",
-        "verify": None,
-        "goal_link": goal_link,
-    }
-    task_blob["ticket_type"] = "single"
-    preview = write_scene(root, task_blob, process="active", product="pending") or preview
-    task_blob["anchor_preview"] = preview
-    from .authorization import bind_ticket
-    from .delivery import build_delivery_snapshot, task_facts
-
-    bind_ticket(root, task_blob)
-    save_task(key, task_blob)
-    try:
+        git(root, "worktree", "add", "-b", f"ag/{task_id}", str(worktree), task["source_head"])
         freeze_canonical(root)
         freeze_worktree(worktree)
+        _review_package(root, task, package)
+        save_task(key, task)
+        append_task_step(root, task_id, "start", portrait_line=chosen.splitlines()[0][:80],
+                         worktree=str(worktree), task=task_facts(task))
+        return status(root)
     except Exception:
-        thaw_worktree(worktree)
+        # Format errors precede construction; all later failures roll back the new site.
+        if worktree.is_dir():
+            thaw_worktree(worktree)
+            git(root, "worktree", "remove", "--force", str(worktree))
+        git(root, "branch", "-D", f"ag/{task_id}", check=False)
+        save_task(key, None)
+        folder = packages.sealed_dir(root, task_id)
+        if folder.is_dir():
+            shutil.rmtree(folder)
         thaw_canonical(root)
         raise
-    usage_note(root, "ship", 2, "help", "opened")
-    line = (chosen.strip().splitlines() or [""])[0][:80]
-    append_task_step(root, task_id, "start", portrait_line=line, worktree=str(worktree), task=task_facts(task_blob))
-    state = status(root)
-    append_task_step(root, task_id, "anchor-preview", anchor_map_path=str(state.get("anchor_map_path") or ""), audit_anchor_map_path=str((state.get("task") or {}).get("audit_anchor_map_path") or ""), anchor_preview=str(state.get("anchor_preview") or ""), audit_anchor_preview_path=str((state.get("task") or {}).get("audit_anchor_preview_path") or ""))
-    return status(root)
 
 
 def _refuse_dirty_verify(root: Path, key: str, task: dict[str, Any], state: dict[str, Any]) -> None:
@@ -1193,10 +1004,12 @@ def verify(root: Path) -> dict[str, Any]:
         raise ChainBroken(
             "no open task; ag_start first "
             "[原因] 当前没有进行中的票据任务 "
-            "[下一步] 请先编写 <AG_HOME>/projects/<key>/ticket.md 并调用 ag_start"
+            "[下一步] 请先编写 <AG_HOME>/projects/<key>/draft/ 并调用 ag_start"
         )
     from .authorization import recorded, require_single_ticket
     require_single_ticket(task)
+    from .ticket_package import load_seal
+    load_seal(Path(state["root"]), task)
     if not recorded(task):
         reason = (
             "intent-map-unconfirmed: ag_verify refused; no effective authorization "
@@ -1226,7 +1039,7 @@ def verify(root: Path) -> dict[str, Any]:
     ensure_start_step(enrolled, task_id, task.get("portrait"), worktree)
     from .checks import run as run_checks, selection
 
-    chosen_checks = selection(worktree, [str(x) for x in (state.get("test_argv") or [])])
+    chosen_checks = selection(worktree, [str(x) for x in (state.get("test_argv") or [])], root=Path(state["root"]), task=task)
     test_argv = chosen_checks["commands"]
     candidate_before = tree_digest(worktree)
     product_before = product_tree(worktree, candidate_before, write=True)
@@ -1366,7 +1179,7 @@ def verify(root: Path) -> dict[str, Any]:
     record["evidence"]["current_anchor"] = task.get("current_anchor") or ""
     record["evidence"]["timings"] = dict(timings)
     digest = tree_digest(worktree)
-    if digest != candidate_before or selection(worktree, [str(x) for x in (state.get("test_argv") or [])])["sha256"] != chosen_checks["sha256"]:
+    if digest != candidate_before or selection(worktree, [str(x) for x in (state.get("test_argv") or [])], root=Path(state["root"]), task=task)["sha256"] != chosen_checks["sha256"]:
         record["exit"] = 1
         record["stderr"] += "\ncandidate-changed: code or checks changed during verification"
     task["verify"] = record
@@ -1540,7 +1353,7 @@ def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
         raise ChainBroken(
             "no open task; ag_start first "
             "[原因] 当前没有进行中的票据任务 "
-            "[下一步] 请先编写 <AG_HOME>/projects/<key>/ticket.md 并调用 ag_start"
+            "[下一步] 请先编写 <AG_HOME>/projects/<key>/draft/ 并调用 ag_start"
         )
     from .authorization import require_single_ticket, validate_confirmation
     from .delivery import build_delivery_snapshot
@@ -1635,7 +1448,6 @@ def _preserve_close_material(root: Path, task: dict[str, Any], *, process: str) 
 def _close_task(root: Path, key: str, task: dict[str, Any], *, process: str, product: str, head: str = "") -> dict[str, Any]:
     from .delivery import build_delivery_snapshot, task_facts
     from .knowledge import archive_session
-    from .ticket_doc import write_scene
 
     task["process"] = process
     task["close_product"] = product
@@ -1653,7 +1465,6 @@ def _close_task(root: Path, key: str, task: dict[str, Any], *, process: str, pro
             if not task.get("close_evidence_recorded"):
                 _preserve_close_material(root, task, process=process)
                 save_task(key, task)
-                write_scene(root, task, process=process, product=product)
                 archive_session(root, task, verify=verify_blob, touched=touched, check_exit=(verify_blob or {}).get("exit"), process=process, product=product)
                 append_task_step(root, task["id"], "finish" if process == "completed" else "abandon", head=head, product=product, task=task_facts(task), switch_report_id=_switch_report_id(verify_blob))
                 task["close_evidence_recorded"] = True
@@ -1702,6 +1513,8 @@ def finish(root: Path) -> dict[str, Any]:
         )
     from .authorization import require_single_ticket
     require_single_ticket(task)
+    from .ticket_package import load_seal
+    load_seal(root, task)
     if task.get("process") == "completed" and task.get("merged_head"):
         if git(root, "rev-parse", "HEAD") != task["merged_head"]:
             raise ChainBroken("cleanup-pending: canonical moved since merge; inspect before retry")
@@ -1780,7 +1593,7 @@ def finish(root: Path) -> dict[str, Any]:
     if verify_blob and verify_blob.get("check_selection"):
         from .checks import selection
 
-        current_checks = selection(worktree, [str(argument) for argument in state.get("test_argv") or []])
+        current_checks = selection(worktree, [str(argument) for argument in state.get("test_argv") or []], root=root, task=task)
         if current_checks["sha256"] != verify_blob["check_selection"].get("sha256"):
             _no("check-digest-mismatch: current ticket checks changed; run ag_verify again")
     switch_receipt = (verify_blob or {}).get("switch") or {}
@@ -1883,9 +1696,7 @@ def _finish_after_thaw(
     usage_note(root, "ship", 7, "help", "matched")
     portrait = str(task.get("portrait") or "")
     product = _product([str(x) for x in (state.get("test_argv") or [])], task.get("verify") if isinstance(task.get("verify"), dict) else None)
-    from .ticket_doc import write_scene
 
-    write_scene(root, task, process="completed", product=product)
     head = git(root, "rev-parse", "HEAD")
     vblob = task.get("verify") if isinstance(task.get("verify"), dict) else None
     anchors = [dict(item) for item in (task.get("anchors") or []) if isinstance(item, dict)]

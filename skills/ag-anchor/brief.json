@@ -1,11 +1,10 @@
 {
   "write": [
-    "能定下来的结果写成固定：做成之后外面能看到什么。不能自行改变已确认目标、结果范围或硬约束。",
-    "还没定的才写注意力锚点：一句有动词的话，对象、方向、为什么通向终点。",
-    "硬规则放进固定，不要画成路线上的一站。守卫、默认、避开也不进路线。"
+    "在 draft/ 写四段人话 ticket.md、spec.json 和 checks/；origin.user_words 引用用户原话，每条 result 至少由一条 target 覆盖。",
+    "target 基线必须红，guard 必须绿；不把脚本崩溃当作结果证明，不改封存区。"
   ],
   "wait": [
-    "每张票展示完整 anchor_preview，等待用户本人 confirm-map；独立审票、隔离、实际解冻和验货，只有 ready 才施工。",
-    "AI 不代用户跑 confirm-map，不手改状态或绕过门禁；只读展示不授予权限。"
+    "展示封存包、基线和审票结论，等待用户本人 confirm-map；实际 ready 后才施工。",
+    "AI 不代确认，不改状态或绕过门禁；确认后改票尚未实现，abandon 保留 refs/ag/abandoned/<task_id> 后重开。"
   ]
 }

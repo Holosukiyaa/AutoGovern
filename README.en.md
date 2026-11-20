@@ -75,28 +75,19 @@ Critic config lives in `<AG_HOME>/critic.json` (default `~/.ag/critic.json`) or 
 
 ---
 
-## Intent Anchors & Startup Ticket (`<AG_HOME>/projects/<key>/ticket.md`)
+## Ticket packages
 
-Starting a default `single` task requires `<AG_HOME>/projects/<key>/ticket.md` in the ag home - the ticket never lives in the project tree - plus a locked result or at least one anchor. A legacy ticket (ticket.md / tickets/ / redlines.copy) left in the project is sha256-checked and moved into the new home once, with a readable migration record. That file is the single ticket intent authority. `ag_start` reads it and refuses when it is missing; the error names `<AG_HOME>/projects/<key>/ticket.md`. `## 意图` is kept as written. Red lines from `## 红线` and from hard anchors are written back into `## 红线` and sealed into `<AG_HOME>/projects/<key>/redlines.copy`. An empty red-line list still writes that copy. `## 现场` is rewritten at start, verify, and finish, and those writes do not replace `## 意图` or the sealed red lines. `anchor_preview` is this document and `anchor_preview_path` is its absolute path. For a single ticket, show the document and wait for personal `confirm-map`. Actual thaw is required before `ready`; verification and finish refuse missing or invalid authority.
+Write the package under `<AG_HOME>/projects/<key>/draft/`: human `ticket.md`, machine `spec.json` and pre-registered `checks/check_*.py` plus helpers. Enroll scaffolds a template with empty origin.user_words; fill it before start.
 
-```text
-anchor: keep the semantic workbench behavior unchanged
-anchor: do not add a new CSS layer
-```
+The human document requires four non-empty sections: 要做成什么, 怎样算做成, 不做什么, 需要你拍板的事. Results in spec have unique ids and text of at least 20 characters. Every result needs a target check; guards protect existing behavior. Checks must stay inside checks/, refer to declared results (or ["guard"]), and use target/guard kinds. scope.allow is non-empty; budget fields are positive integers. T4a validates their format; T7 owns runtime scope/budget enforcement. continuation_of comes only from spec.json and references a closed, personally confirmed ticket without transferring authority.
 
-`lift-12` reads these lines as attention anchors, not as a step plan. `anchor!:` is a hard anchor when it follows from an explicit user rule such as `必须`, `禁止`, `不要`, `must`, `forbidden`, or `do not`. The AI may propose a hard anchor, but may not invent one from its own guess.
+Start seals exact bytes under tickets/<task_id>/ and atomically writes seal.json with file hashes, source_head, opening baselines and ticket review. Baselines run sealed check paths in the frozen source_head worktree, using Python with cwd=worktree and a 300-second limit per check. Targets must fail, guards must pass. Reviewers receive the complete human document, spec, check sources and baseline tails. The three review dimensions and 7-point threshold remain unchanged.
 
-Anchor kinds:
+The user personally runs confirm-map; AI never calls it. Only ready allows construction. Verify runs sealed checks, additional worktree .ag-check checks and registered project commands, then probes and switch review. Finish rechecks the seal and verified candidate. Sealed ticket.md is never rewritten with status information.
 
-- `anchor:` soft attention; drift is allowed when disclosed.
-- `anchor!:` hard rule from an explicit user/project rule.
-- `anchor~:` discoverable unknown; investigate, then report the answer.
-- `anchor?:` blocking unknown; ask one concise question before starting.
-- `anchor=:` reasonable default chosen by the AI; disclose it.
-- `anchor-:` avoid zone; crossing it requires a user-approved anchor revision.
-- `anchorx:` obsolete anchor; keep the history and stop pursuing it.
+Before confirmation, editing draft and calling start re-seals and reviews the same task. Confirmed-ticket revision is T4b; until then abandon (candidate under refs/ag/abandoned/<task_id>) and open a new package.
 
----
+Refusals: ticket-package-missing, ticket-md-invalid, spec-invalid (with field path), result-uncovered, invalid-continuation, baseline-target-green, baseline-guard-red, sealed-check-changed, seal-invalid, legacy-ticket-format. Legacy active tickets or invalid seals can still be abandoned; legacy ticket data is never migrated.
 
 ## Mandatory Worker Flow
 
@@ -170,15 +161,15 @@ python -m ag install-skill --target grok
 
 ## Ticket Document and One-Front-One-Back Review (`ship-12`, `ship-13`, `see-15`)
 
-The default single ticket intent is `<AG_HOME>/projects/<key>/ticket.md` in the ag home (`ship-12`). `ag_start` seals `## 红线` into `<AG_HOME>/projects/<key>/redlines.copy` and archives each ticket snapshot to `<AG_HOME>/projects/<key>/tickets/<task_id>.md`.
+The default single ticket intent is `<AG_HOME>/projects/<key>/draft/ticket.md` in the ag home (`ship-12`). `ag_start` seals `## 红线` into `<AG_HOME>/projects/<key>/redlines.copy` and archives each ticket snapshot to `<AG_HOME>/projects/<key>/tickets/<task_id>.md`.
 
 AG uses a **0-Token deterministic script pre-screen + one-front-one-back (`ticket` at start, `switch` at verify) stateless DS review** architecture:
-- **Front gate (`ship-13`, `ticket` seat)**: `ag_start` runs `ticket_prescreen` locally and launches a fresh stateless `ticket` thread (`thread_id`) scoring `goal_clarity`, `anchor_chain`, and `redline_focus` (`0-10`, pass `>= 7`) with an independent `understood_goal`. If configured and not `passed`, `confirm-map` soft-blocks worktree thawing; editing `<AG_HOME>/projects/<key>/ticket.md` and re-running `ag_start` while unconfirmed re-seals and re-reviews in place. Deterministic anti-lazy checks trigger one automatic retry on rubber-stamp/copied reviews (`lazy-review`).
+- **Front gate (`ship-13`, `ticket` seat)**: `ag_start` runs `ticket_prescreen` locally and launches a fresh stateless `ticket` thread (`thread_id`) scoring `goal_clarity`, `anchor_chain`, and `redline_focus` (`0-10`, pass `>= 7`) with an independent `understood_goal`. If configured and not `passed`, `confirm-map` soft-blocks worktree thawing; editing `<AG_HOME>/projects/<key>/draft/ticket.md` and re-running `ag_start` while unconfirmed re-seals and re-reviews in place. Deterministic anti-lazy checks trigger one automatic retry on rubber-stamp/copied reviews (`lazy-review`).
 - **Back gate (`see-15`, single `switch` seat)**: `ag_verify` runs `pack_prescreen` (syntax check, redline path/token collision scan, shortcut scan, `.ag-check/` assertion check) and pre-annotates `git diff` and windowed files (`> 12,000` chars slimmed to header + changed hunks) with exact `path:line` numbers. `ag_verify` calls `switch` once (mirroring `verify.critic` for compatibility and planting probes on reject), cutting token usage while preserving `path:line` evidence.
 
 
 ## Confirmed tickets and archived data
 
-Before T4, changing a confirmed ticket requires `abandon` (candidate preserved under `refs/ag/abandoned/<task_id>`) and a new ticket. Edits before confirmation can be sealed and reviewed again in place with `start`.
+Before T4b, changing a confirmed ticket requires `abandon` (candidate preserved under `refs/ag/abandoned/<task_id>`) and a new ticket. Edits before confirmation can be sealed and reviewed again in place with `start`.
 
 For `long-ticket-retired`, use `abandon` to close the active ticket. Legacy long ticket data stays untouched in `<AG_HOME>` without migration: new code does not read, rewrite or delete `long/`, `long-goals.sqlite3` or historical records. Archived ticket queries provide a degraded view without granting authority.

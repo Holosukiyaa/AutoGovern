@@ -43,7 +43,7 @@
 在 v0.4「越用越懂你的项目」与 v0.5 的问题发现、状态治理能力之上，v0.5.1 进一步修复交付、历史迁移和故障恢复缺陷。
 
 - **孤岛清单（see-16）**：结构体检算出的孤岛文件（零入口可达、零引用）过去只埋在考卷 JSON 里看不见，现在 `ag_see` 报告里直接按语言列出每个孤岛的仓内相对路径与总数。只发现、只报告，不拦票、不替你判断该不该删。
-- **复盘不再失忆**：每张票复盘的「想解决什么」过去恒为空（取主题只读 portrait，MCP 开票不传它），现在 portrait 空时自动从票档 `## 意图` 提取人话主题，且所有来源统一先清洗再落盘，顺带根治了一条考卷正文直接落盘的隐私隐患。
+- **复盘不再失忆**：每张票复盘的「想解决什么」过去恒为空（取主题只读 portrait，MCP 开票不传它），现在 portrait 空时自动从票档 `四段人话` 提取人话主题，且所有来源统一先清洗再落盘，顺带根治了一条考卷正文直接落盘的隐私隐患。
 - **状态目录瘦身**：早期 `tasks/index.jsonl` 汇总保持兼容；当前 `prune` 先发布可回读校验的历史分卷再回收旧散档，索引只作可重建视图。
 - **结构体检更准**：仓级版本戳 `layout_version` + 版本驱动迁移链；TS/JS 相对导入补全（`./x`、`../x` 自动补 `.ts/.tsx` 与 `index.*`）；ESM `./x.js` 找不到产物时回退同名 `.ts` 真源码——前端引用链不再断、孤岛不再误判。
 
@@ -53,7 +53,7 @@
 
 `python -m ag delivery <PROJECT_ROOT> --task-id <TASK_ID>`（MCP `ag_delivery`）只读查询活动票或归档票，输出完整目标、本票贡献、已验证结果、未完成项、阻塞、建议、下一动作、授权和解冻状态，以及报告与候选的来源。不存在的票返回 `task-not-found`；失败、访问锚点或施工开始不会变成已完成。相同报告的兼容席位不重复统计，复盘保留本票所有拒绝与通过，不推断所有拒绝都是误报。
 
-完整功能可跨必要模块并在一票内分阶段完成；减少承诺或改变硬边界须等待用户决定。只有真正独立交付的续作才使用 `start --continuation-of <TASK_ID> --contribution "本票贡献"`，明确携带共同目标和剩余结果。
+完整功能可跨必要模块并在一票内分阶段完成；减少承诺或改变硬边界须等待用户决定。只有真正独立交付的续作才在 `spec.json` 中填写 `continuation_of`，开票时可用 `--contribution` 描述本票贡献，明确携带共同目标和剩余结果。
 
 `status` 不再顺带安装、迁移、写票或运行完整体检；诊断用 `ag_see`，修复安装用 `enroll/config`。每张票由用户亲自执行 `confirm-map`，AI 不得代调。命令立即在 stderr 报告阶段，重验当前票、审核、配置、Git 身份与冻结状态；实际恢复全部工作树文件写权限后才 `ready`，解冻失败保留授权并允许重试。交卷按本票实际 `.ag-check/check_*.py` 选择检查，并将脚本摘要、候选和报告绑定。
 
@@ -95,44 +95,30 @@ python -m ag mcp
 
 ---
 
-## single 意图锚点与启动票（`<AG_HOME>/projects/<key>/ticket.md`）
+## 票据文件包与独立审核
 
-开工（`ag_start`）前必须先准备好 `<AG_HOME>/projects/<key>/ticket.md`——票不住在项目里（首次 `enroll` 会在 ag 家里自动生成模板；旧项目里遗留的 `ticket.md` / `tickets/` / `redlines.copy` 会在 `ag_start` 时先逐份核对 SHA256、再一次性搬进新家，并留一份可读的搬家记录）。
+票据文件包放在 `<AG_HOME>/projects/<key>/draft/`：`ticket.md` 给人看，`spec.json` 给机器看，`checks/` 放开票前写好的 Python 检查及辅助文件。enroll 生成起步模板；`origin.user_words` 默认为空，必须按用户原话填写后才可 start。
 
-- `## 意图`：用大白话写明本票业务目标与可观察的完成态，保持原文不变。
-- `## 红线`：`ag_start` 将 `## 红线` 及硬锚点（`anchor!:`）封存到 `<AG_HOME>/projects/<key>/redlines.copy`；闭票后票面归档到项目 `history/` 分卷，兼容旧 `tickets/<TASK_ID>.md`。
-- `## 现场`：由 `start`、`verify`、`finish` 自动刷新任务状态，不覆盖 `## 意图` 与已封存的 `## 红线`。
-- **授权与真实解冻门禁**：每张票由用户亲自 `confirm-map`；AI 不得代确认，实际解冻成功才 `ready`。
+`ticket.md` 必须有四个非空段落：`## 要做成什么`、`## 怎样算做成`、`## 不做什么`、`## 需要你拍板的事`，最后一段可写“无”。不再把机器结果或检查藏在人话标记行中。
 
-### 锚点类型
+start 校验、把 draft 逐字节封存到 `tickets/<task_id>/`，在尚未解冻的 source_head 工地中运行封存检查，cwd 为工地，每条用 Python 执行且限时 300 秒。target 基线必须失败，guard 必须通过，再把完整人话、spec、检查源码和基线交给独立 ticket 席位。seal.json 原子写入，记录全部文件摘要、身份、基线和审核回执。
 
-```text
-anchor: 在目标模块建立登录行为闭环：当输入正确密码时允许登录，若输入错误密码则立即拒绝并提示错误
-anchor!: 严禁修改原有的鉴权中间件签名
-```
+每张票仍须用户本人 confirm-map，AI 不得代调；实际解冻并返回 ready 后才可施工。verify 运行封存检查、工地 `.ag-check/check_*.py` 追加检查及项目登记命令，并调用 switch；finish 复核 seal、候选和审核后快进合入。封存 ticket.md 不回写现场段，现场由 status/delivery 展示。
 
-- `anchor:` 软注意力锚点（至少 20 字的完整行为陈述句，锁住“输入/触发 → 正向结果 + 反向/边界拒绝结果”的完整链路）。
-- `anchor!:` 硬规则锚点（仅当源于用户或项目明确规定如“必须/禁止/不要”时使用，AI 严禁凭空猜测捏造硬锚点）。
-- `anchor~:` 可探索未知项；`anchor?:` 阻塞性未知项（开工前先问清）；`anchor=:` AI 替用户选的合理默认项；`anchor-:` 避开区域；`anchorx:` 已废弃锚点。
+确认前修改 draft 再 start，在同一 task_id 重封存、重跑基线并重新审票；没有改动只恢复现场。确认后改票属于 T4b，本版先 abandon（候选保留在 `refs/ag/abandoned/<task_id>`）再重新开票。不要直接改封存区。
 
----
-
-## 一前一后无状态审核架构（`ship-12`, `ship-13`, `see-15`）
-
-`ag` 采用 **0-Token 本地通用脚本确定性预筛 + 一前一后（`ticket` 开票审 + `switch` 交卷守门）无状态 DS 审核**架构，将大模型注意力 100% 集中在语义判断上：
-
-1. **前门：开票独立审票席（`ship-13`，`ticket` 席位）**
-   - 每次 `ag_start` 先由本地脚本 0 Token 执行 `ticket_prescreen`（检查字数、正反完整链路词、空泛套话红线、连续票序 `ticket_seq` 与跨票重合率），写入 `script_digest`。
-   - 随后启动全新、无上下文历史的独立 `ticket` 审核线程（`thread_id`），从三个维度打分（`0-10`，`>= 7` 通过）：
-     - `goal_clarity`：仅凭本票能否看懂业务目标，并用大白话独立复述 `understood_goal`；导致完成态无法判定的关键缺口拒绝，普通问题与可选建议不单独阻塞。
-     - `anchor_chain`：意图锚点是否锁住包含正向与反向/边界拒绝的完整行为链路。
-     - `redline_focus`：红线是否合理且范围收缩聚焦。
-   - 若已配置审核且未通过，`confirm-map` 会拒绝解冻工作树；此时直接修改 `<AG_HOME>/projects/<key>/ticket.md` 并再次运行 `ag_start` 即可原地重封存、重审。
-2. **后门：交卷单次守门与考卷瘦身（`see-15`，单次 `switch` 席位）**
-   - `ag_verify` 先由本地脚本 0 Token 执行 `pack_prescreen`（Python/JSON 语法校验、红线文件名/反引号标识符碰撞扫描、吞异常/塞 mock 作弊扫描、`.ag-check/` 断言检查）。
-   - 自动为 `git diff` 逐行预标真实源文件行号（`path:line`），并对超过 `12,000` 字符的大文件仅截取文件头 + 改动上下文窗口，只调用 **1 次 `switch`** 完成最终裁决，大幅降低 Token 消耗。
-
----
+| 拒绝码 | 处理方式 |
+|---|---|
+| `ticket-package-missing` | 在项目 ag 家里的 draft/ 填写 ticket.md、spec.json 和 checks/。旧单文件票不再读取。 |
+| `ticket-md-invalid` | 补齐四个非空段落，拍板项可写“无”。 |
+| `spec-invalid` | 按错误给出的字段路径修复 spec；模板必须先填写 origin.user_words。 |
+| `result-uncovered` | 给报出的 result 补一条 target 检查。 |
+| `invalid-continuation` | spec.continuation_of 只能引用已关闭且本人确认的前票，不传递授权。 |
+| `baseline-target-green` | 指出的 target 在基线上已通过，不能证明新结果；重写真实结果检查。 |
+| `baseline-guard-red` | 指出的 guard 在基线上失败，先核对原有行为和检查，不能放宽检查。 |
+| `sealed-check-changed` | 封存区文件被修改、删除或新增；恢复封存原文后重新验货，不改 seal 来掩盖。 |
+| `seal-invalid` | seal.json 损坏或缺少字段；status 显示风险，verify/finish 拒绝，abandon 仍可关闭。 |
+| `legacy-ticket-format` | 旧活动票没有封存包，只能 abandon 关闭后用 draft/ 重新开票。 |
 
 ## 审核配置（项目 `config.json` 的 `critic` 段）
 
@@ -219,6 +205,6 @@ python -m ag worker-create <PROJECT_ROOT> --portrait "做成之后：..." --anch
 
 每张票独立审票，由用户本人执行 `confirm-map`，实际解冻并返回 `ready` 后才可施工。`continuation_of` 仅携带前票共同目标、贡献与未完成项作参考，不传递授权。
 
-T4 之前，修改已确认的票须先 `abandon`（候选保存在 `refs/ag/abandoned/<task_id>`），再重新开票；确认前改票可用 `start` 原地重新封存、审票。
+T4b 落地之前，修改已确认的票须先 `abandon`（候选保存在 `refs/ag/abandoned/<task_id>`），再重新开票；确认前改票可用 `start` 原地重新封存、审票。
 
 遇到 `long-ticket-retired` 时用 `abandon` 关闭活动票。旧长票数据原样留在 `<AG_HOME>`，不迁移；新代码不读取、不改写、不删除旧 `long/`、`long-goals.sqlite3` 和历史记录。归档票查询只提供降级视图，不授予权限。

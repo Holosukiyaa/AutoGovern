@@ -6,11 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from .critic import load_config
-from .delivery import PASS, intent_identity
+from .delivery import PASS
 from .history import digest
 from .managed import ChainBroken, project_key
 from .store import list_llm_events
-from .ticket_doc import copy_path, require_ticket, split_document
+from .ticket_package import load_seal, package_identity, sealed_dir
 
 
 def recorded(task: dict[str, Any]) -> bool:
@@ -32,11 +32,10 @@ def review_identity(intent_body: str, portrait: str, anchors: list[Any], redline
 
 
 def bind_ticket(root: Path, task: dict[str, Any]) -> None:
-    document = require_ticket(root)
-    sealed = copy_path(root).read_text(encoding="utf-8")
-    task["intent_identity"] = intent_identity(task, document, sealed)
-    from .ticket_doc import preserve_original_ticket
-    task["original_ticket"] = preserve_original_ticket(root, task["id"], document)
+    folder = sealed_dir(root, task["id"])
+    seal = load_seal(root, task)
+    task["intent_identity"] = package_identity(seal)
+    task["original_ticket"] = {"task_id": task["id"], "path": str(folder / "ticket.md"), "sha256": seal["files"]["ticket.md"]}
     review = task.get("ticket_review") or {}
     review["task_id"] = task["id"]
     task["ticket_review"] = review
@@ -46,19 +45,14 @@ def bind_ticket(root: Path, task: dict[str, Any]) -> None:
     task["intent_map_confirmed"] = False
 
 
-def _validate_sealed_review(root: Path, task: dict[str, Any], document: str, sealed: str, config: dict[str, Any] | None) -> str:
+def _validate_sealed_review(root: Path, task: dict[str, Any], document: str, sealed: dict[str, Any], config: dict[str, Any] | None) -> str:
     """Match preserved facts. Only live authorization also checks current configuration."""
     review = task.get("ticket_review") or {}
     if review.get("configured") and review.get("outcome") not in PASS:
         raise ChainBroken(f"ticket-review-rejected: {review.get('report_id') or review.get('reason')}; revise ticket and run ag_start")
-    identity = intent_identity(task, document, sealed)
-    expected = task.get("intent_identity")
-    if not expected:
-        original = str(task.get("anchor_preview") or "")
-        original_seal = "\n".join(task.get("redlines") or []) + ("\n" if task.get("redlines") else "")
-        expected = intent_identity(task, original, original_seal)
-    if identity != expected or (task.get("authorization_identity") and task["authorization_identity"] != identity):
-        raise ChainBroken("intent-identity-changed: ticket, fixed result, or hard boundary changed; abandon (candidate kept under refs/ag/abandoned/<task_id>) and start a new ticket")
+    identity = package_identity(sealed)
+    if identity != task.get("intent_identity") or (task.get("authorization_identity") and task["authorization_identity"] != identity):
+        raise ChainBroken("seal-invalid: sealed package identity changed")
     if review.get("task_id", task["id"]) != task["id"]:
         raise ChainBroken("intent-identity-changed: opening report belongs to another task")
     if config is not None and config.get("enabled") and not review.get("configured"):
@@ -71,8 +65,7 @@ def _validate_sealed_review(root: Path, task: dict[str, Any], document: str, sea
         if len(events) != 1 or events[0].get("outcome") != review.get("outcome") or (review.get("configured") and events[0].get("outcome") not in PASS):
             raise ChainBroken("ticket-review-rejected: matching original opening report missing or rejected")
         event = events[0]
-        intent, _redlines = split_document(document)
-        source = review_identity(intent, str(task.get("portrait") or ""), list(task.get("anchors") or []), list(task.get("redlines") or []), task.get("goal_link"))
+        source = review_identity(document, str(task.get("portrait") or ""), list(task.get("anchors") or []), list(task.get("redlines") or []), task.get("goal_link"))
         if event.get("review_identity") and event["review_identity"] != source:
             raise ChainBroken("intent-identity-changed: opening review input changed")
         if event.get("review_config_identity") and review.get("review_config_identity") and event["review_config_identity"] != review["review_config_identity"]:
@@ -92,11 +85,8 @@ def _live_ticket_identity(root: Path, task: dict[str, Any]) -> str:
         raise ChainBroken(f"config-error: {exc}") from exc
     if config.get("error"):
         raise ChainBroken(f"config-error: {config['error']}")
-    document = require_ticket(root)
-    try:
-        sealed = copy_path(root).read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ChainBroken(f"intent-identity-changed: sealed redlines unavailable: {exc}") from exc
+    sealed = load_seal(root, task)
+    document = (sealed_dir(root, task["id"]) / "ticket.md").read_text(encoding="utf-8")
     return _validate_sealed_review(root, task, document, sealed, config)
 
 

@@ -27,7 +27,7 @@ description: >
 | `history-source-error` / 归档写失败 | 原件保留，修复来源或磁盘后重试 `prune`；索引可重建，不手工删分卷。 |
 | `history-close-pending` / `cleanup-pending` | 活动指针保留，排除文件占用后重试原 `finish` 或 `abandon`；已合入的票用 `finish` 恢复清理。 |
 
-确认路径会把检查、授权、解冻和就绪阶段写到 stderr，stdout 保持 JSON。只有 `ready` 代表实际可写；不要因看到“已批准”就开始施工。活动票在 `<AG_HOME>/projects/<key>/ticket.md`，历史事实在 `history/`，旧散档只在核对身份并可靠发布分卷后回收，准备、审计和备份材料保留。
+确认路径会把检查、授权、解冻和就绪阶段写到 stderr，stdout 保持 JSON。只有 `ready` 代表实际可写；不要因看到“已批准”就开始施工。活动票在 `<AG_HOME>/projects/<key>/draft/ticket.md`，历史事实在 `history/`，旧散档只在核对身份并可靠发布分卷后回收，准备、审计和备份材料保留。
 
 当你在执行 `ag_enroll`、`ag_start`、`confirm-map`、`ag_verify` 或 `ag_finish` 遇到报错或拦截时，可按本技能包对照 **`[现象/报错]` → `[原因]` → `[解决办法]`** 快速排障。
 
@@ -57,38 +57,20 @@ description: >
 
 ---
 
-## 2. 找不到票：`ag_start needs a ticket`
+## 2. 文件包校验与基线失败
 
-- **[现象/报错]**：
-  - 调用 `ag_start` 时报错：`ag_start needs a ticket; missing <AG_HOME>/projects/<key>/ticket.md`（附中文原因与下一步），或提示缺少锚点/完成态描述。
-- **[原因]**：
-  - `<AG_HOME>/projects/<key>/ticket.md` 不存在，或者里面只有空模板，没有填写有效的 `做成之后：`（或 `固定:`）完成态意图与至少一条 `anchor:` 锚点。
-- **[解决办法]**：
-  1. 若尚未登记仓库，先运行 `python -m ag enroll <PROJECT_ROOT>`（会自动生成 `<AG_HOME>/projects/<key>/ticket.md` 初始模板）。
-  2. 打开 `<AG_HOME>/projects/<key>/ticket.md`，在 `## 意图` 下填写 `做成之后：...` 及至少一条完整的 `anchor: ...`，在 `## 红线` 下填写聚焦禁令（写法详见 [`skills/ag-anchor/SKILL.md`](../ag-anchor/SKILL.md) 与 [`skills/ag-guide/SKILL.md`](../ag-guide/SKILL.md) 第 2 步），保存后重新运行 `ag_start`。
-
----
-
-## 3. `script-prescreen-rejected` / `ticket-review-rejected`（开票审票未通过）
-
-- **[现象/报错]**：
-  - `ag_start` 返回 `ticket_review.outcome: "rejected"`，且执行 `confirm-map` 时被拦截报错：`ticket-review-rejected`。
-- **[原因]**：
-  - **情况 A（`script-prescreen-rejected` 本地 0-Token 预筛拦截）**：
-    - 意图合并描述少于 20 字，没有用大白话讲清业务结果；
-    - `anchor:` 少于 18 字，或只写正向动作，缺少反向或边界拒绝闭环；
-    - 本票红线为空（包括只有常设条款），或写了“代码要规范”“不能有 bug”等空泛套话。重复率只比较本票条款；可信常设条款始终保留全部义务，单独标记来源。
-  - **情况 B（`ticket-review-rejected` 独立 `ticket` 席位打回）**：
-    - 独立审核模型对 `goal_clarity`（目标清晰度）、`anchor_chain`（锚点链路完整性）、`redline_focus`（红线聚焦度）任一维度打分 `< 7` 或判 `fail`，并有实际违规或关键缺口。`doubts` 中标明非阻塞的普通建议不单独拒绝，先查看 `advisories`。
-- **[解决办法]**：
-  1. 查看 `ag_start` 或 `ag_status` 返回的 `ticket_review.reasons`、`ticket_review.suggestions`、`ticket_review.doubts` 以及 `ticket_review.script_digest.hard_failures`。
-  2. **无需执行 `ag_abandon`！** 在任务尚未 `confirm-map` 前，直接编辑 `<AG_HOME>/projects/<key>/ticket.md`，补齐大白话业务目标、正反向行为链路锚点和聚焦红线，解答 `doubts` 中的疑问。
-  3. 直接再次运行 `ag_start`：系统会用新票据原地更新封存红线（`<AG_HOME>/projects/<key>/redlines.copy`）并开启新一轮无状态 `ticket` 审票；通过后由用户本人确认。
-
-- **完整功能被要求拆成单段代码**：依照 [`ag-anchor` 的完整功能与验据边界](../ag-anchor/SKILL.md#完整功能与验据的边界)，说明共同输入输出、全部完成条件和反向边界；必要跨模块、分阶段施工或运行验据本身不构成拒绝。检查审票输入与提示词是否已更新，不能用删减已承诺结果、添加“只改”口令或强制指定通过来应付审核；无关目标与纯内容生产仍拒绝。
-- **常设条款重复或 `standing-redlines-unreadable`**：检查 `<AG_HOME>/projects/<key>/knowledge/redlines.md` 的明确常设区及读取权限/编码。票面标签不是可信来源；读取失败修复后重审，不删除常设义务、不关闭审核，也不将失败当成无常设条款。
-
----
+| 拒绝码 | 处理方式 |
+|---|---|
+| `ticket-package-missing` | 在项目 ag 家里的 draft/ 填写 ticket.md、spec.json 和 checks/。旧单文件票不再读取。 |
+| `ticket-md-invalid` | 补齐四个非空段落，拍板项可写“无”。 |
+| `spec-invalid` | 按错误给出的字段路径修复 spec；模板必须先填写 origin.user_words。 |
+| `result-uncovered` | 给报出的 result 补一条 target 检查。 |
+| `invalid-continuation` | spec.continuation_of 只能引用已关闭且本人确认的前票，不传递授权。 |
+| `baseline-target-green` | 指出的 target 在基线上已通过，不能证明新结果；重写真实结果检查。 |
+| `baseline-guard-red` | 指出的 guard 在基线上失败，先核对原有行为和检查，不能放宽检查。 |
+| `sealed-check-changed` | 封存区文件被修改、删除或新增；恢复封存原文后重新验货，不改 seal 来掩盖。 |
+| `seal-invalid` | seal.json 损坏或缺少字段；status 显示风险，verify/finish 拒绝，abandon 仍可关闭。 |
+| `legacy-ticket-format` | 旧活动票没有封存包，只能 abandon 关闭后用 draft/ 重新开票。 |
 
 ## 4. `intent-map-unconfirmed` / 工作树 `<WORKTREE>` 文件只读无法写入
 
@@ -187,3 +169,15 @@ description: >
 T4 之前，修改已确认的票须先 `abandon`（候选保存在 `refs/ag/abandoned/<task_id>`），再重新开票；确认前改票可用 `start` 原地重新封存、审票。
 
 遇到 `long-ticket-retired` 时用 `abandon` 关闭活动票。旧长票数据原样留在 `<AG_HOME>`，不迁移；新代码不读取、不改写、不删除旧 `long/`、`long-goals.sqlite3` 和历史记录。归档票查询只提供降级视图，不授予权限。
+
+## 票包与确认前重审
+
+票据文件包放在 `<AG_HOME>/projects/<key>/draft/`：`ticket.md` 给人看，`spec.json` 给机器看，`checks/` 放开票前写好的 Python 检查及辅助文件。enroll 生成起步模板；`origin.user_words` 默认为空，必须按用户原话填写后才可 start。
+
+`ticket.md` 必须有四个非空段落：`## 要做成什么`、`## 怎样算做成`、`## 不做什么`、`## 需要你拍板的事`，最后一段可写“无”。不再把机器结果或检查藏在人话标记行中。
+
+start 校验、把 draft 逐字节封存到 `tickets/<task_id>/`，在尚未解冻的 source_head 工地中运行封存检查，cwd 为工地，每条用 Python 执行且限时 300 秒。target 基线必须失败，guard 必须通过，再把完整人话、spec、检查源码和基线交给独立 ticket 席位。seal.json 原子写入，记录全部文件摘要、身份、基线和审核回执。
+
+每张票仍须用户本人 confirm-map，AI 不得代调；实际解冻并返回 ready 后才可施工。verify 运行封存检查、工地 `.ag-check/check_*.py` 追加检查及项目登记命令，并调用 switch；finish 复核 seal、候选和审核后快进合入。封存 ticket.md 不回写现场段，现场由 status/delivery 展示。
+
+确认前修改 draft 再 start，在同一 task_id 重封存、重跑基线并重新审票；没有改动只恢复现场。确认后改票属于 T4b，本版先 abandon（候选保留在 `refs/ag/abandoned/<task_id>`）再重新开票。不要直接改封存区。

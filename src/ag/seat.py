@@ -484,9 +484,10 @@ def ticket_prescreen(
         hard_failures.append("portrait:意图描述过短，缺少可理解的业务目标")
 
     if anchors is None:
-        from .loop import parse_anchors
+        from .ticket_package import load_draft
 
-        raw_anchors: list[Any] = parse_anchors(combined_text)
+        package = load_draft(repo)
+        raw_anchors: list[Any] = [{"id": row["id"], "text": row["text"], "kind": "soft"} for row in package["spec"]["results"]]
     else:
         raw_anchors = list(anchors)
 
@@ -674,17 +675,17 @@ def ticket_run(
     """Run deterministic ticket_prescreen then stateless 1-shot DS 3D semantic review."""
     spec = _spec("ticket")
     repo = real_root(root)
+    package_material = None
+    if task_id:
+        from .ticket_package import materials, sealed_dir
+        if (sealed_dir(repo, task_id) / "seal.json").is_file():
+            package_material = materials(repo, task_id)
     if not intent_body and not portrait and anchors is None and redlines is None:
-        from .loop import parse_anchors
-        from .ticket_doc import collect_redlines, split_document, ticket_path
-
-        t_path = ticket_path(repo)
-        if t_path.is_file():
-            doc = t_path.read_text(encoding="utf-8")
-            intent_body, red_body = split_document(doc)
-            anchors = parse_anchors(intent_body)
-            redlines = collect_redlines(red_body, anchors, repo)
-            portrait = intent_body
+        from .ticket_package import load_draft
+        package = load_draft(repo)
+        intent_body = portrait = package["ticket"]
+        anchors = [{"id": row["id"], "text": row["text"], "kind": "soft"} for row in package["spec"]["results"]]
+        redlines = [row["text"] for row in package["spec"].get("redlines", [])]
 
     if spec["live"]:
         try:
@@ -717,6 +718,8 @@ def ticket_run(
         "script_digest": prescreen,
         "goal_link": goal_link,
     }
+    if package_material is not None:
+        packed["ticket_package"] = package_material
     cfg = load_config(repo)
     from .authorization import config_identity, review_identity
 
@@ -1169,6 +1172,9 @@ def seat_run(
         from .delivery import build_delivery_snapshot
 
         view = build_delivery_snapshot(root, task_id)
+        from .ticket_package import materials, sealed_dir
+        if (sealed_dir(root, task_id) / "seal.json").is_file():
+            packed["ticket_package"] = materials(root, task_id)
         packed["delivery_context"] = {"goal": view.get("goal"), "goal_link": view.get("goal_link"), "contribution": view.get("contribution"), "remaining": view.get("remaining")}
     from .loop import product_tree, tree_digest
 
@@ -1183,8 +1189,11 @@ def seat_run(
             from .checks import selection
             from .managed import lookup_project
 
+            from .loop import load_task
+            from .managed import project_key
+            active = load_task(project_key(root))
             enrolled = (lookup_project(root) or {}).get("test_argv") or []
-            if selection(candidate_root, list(enrolled))["sha256"] != verification["check_selection"].get("sha256"):
+            if selection(candidate_root, list(enrolled), root=root, task=active)["sha256"] != verification["check_selection"].get("sha256"):
                 raise ChainBroken("check-digest-mismatch: current checks are not bound to the verification")
         packed["verification"] = verification
     cfg = load_config(root)

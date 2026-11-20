@@ -12,7 +12,7 @@ CHECK_TIMEOUT_S = 300
 from typing import Any
 
 
-def selection(worktree: Path, enrolled: list[str]) -> dict[str, Any]:
+def selection(worktree: Path, enrolled: list[str], *, root: Path | None = None, task: dict[str, Any] | None = None) -> dict[str, Any]:
     commands = []
     if enrolled and not any(".ag-check/" in str(argument).replace("\\", "/") for argument in enrolled):
         commands.append(list(enrolled))
@@ -20,8 +20,19 @@ def selection(worktree: Path, enrolled: list[str]) -> dict[str, Any]:
     commands.extend([[sys.executable, "-X", "utf8", str(path.relative_to(worktree)).replace("\\", "/")] for path in files])
     evidence_files = sorted(path for path in (worktree / ".ag-check").rglob("*") if path.is_file() and "__pycache__" not in path.parts and path.suffix not in {".pyc", ".pyo"})
     hashes = {str(path.relative_to(worktree)).replace("\\", "/"): hashlib.sha256(path.read_bytes()).hexdigest() for path in evidence_files}
+    sealed_commands = []
+    sealed_files = {}
+    if root is not None and task is not None:
+        from .ticket_package import load_seal, sealed_dir
+
+        seal = load_seal(root, task)
+        folder = sealed_dir(root, task["id"])
+        sealed_files = {str(folder / rel): sha for rel, sha in seal["files"].items()}
+        sealed_commands = [[sys.executable, "-X", "utf8", str(folder / row["file"])] for row in seal["baseline"]]
+        commands = sealed_commands + commands
+        hashes.update(sealed_files)
     signature = hashlib.sha256(json.dumps({"commands": commands, "files": hashes}, sort_keys=True).encode("utf-8")).hexdigest()
-    return {"commands": commands, "files": hashes, "sha256": signature}
+    return {"commands": commands, "files": hashes, "sha256": signature, "sealed_files": sealed_files, "sealed_commands": sealed_commands}
 
 
 def run(worktree: Path, chosen: dict[str, Any]) -> dict[str, Any]:
@@ -35,11 +46,12 @@ def run(worktree: Path, chosen: dict[str, Any]) -> dict[str, Any]:
     environment = os.environ.copy()
     # Bytecode caches are rebuildable process residue, not a source/check edit.
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment["PYTHONPATH"] = str(worktree) + os.pathsep + environment.get("PYTHONPATH", "")
     if (worktree / "src" / "ag" / "__init__.py").is_file():
         environment["PYTHONPATH"] = str(worktree / "src") + os.pathsep + environment.get("PYTHONPATH", "")
     for command in commands:
         try:
-            completed = subprocess.run(command, cwd=str(worktree), capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, env=environment, timeout=timeout_s)
+            completed = subprocess.run(command, cwd=str(worktree), capture_output=True, text=True, encoding="utf-8", errors="replace", check=False, env=environment, timeout=CHECK_TIMEOUT_S if command in chosen.get("sealed_commands", []) else timeout_s)
             exits.append(completed.returncode)
             outputs.append(completed.stdout or "")
             errors.append(completed.stderr or "")
