@@ -814,119 +814,6 @@ def lift_17(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     return {"new_modules": report}
 
 
-def lift_18(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    from .store import project_dir
-    from .ticket_doc import archived_ticket_entries, tickets_dir
-
-    repo = _repo(root)
-    pdir = project_dir(repo)
-    tdir = tickets_dir(repo)
-    archived_files = (
-        sorted(
-            (p for p in tdir.glob("*.md") if p.is_file()),
-            key=lambda p: (p.stat().st_mtime, p.name),
-        )
-        if tdir.is_dir()
-        else []
-    )
-    archived_ids = {entry["task_id"] for entry in archived_ticket_entries(repo)}
-    tasks_dir = pdir / "tasks"
-    timeline_files = [p for p in tasks_dir.glob("*.json") if p.is_file()] if tasks_dir.is_dir() else []
-    timeline_ids = {p.stem for p in timeline_files}
-    # merged residues live in tasks/index.jsonl now; fold their task ids in so the
-    # ticket-sequence base does not shrink after prune folds loose files away.
-    index_path = tasks_dir / "index.jsonl" if tasks_dir.is_dir() else None
-    if index_path and index_path.is_file():
-        try:
-            for ln in index_path.read_text(encoding="utf-8").splitlines():
-                ln = ln.strip()
-                if not ln:
-                    continue
-                try:
-                    row = json.loads(ln)
-                except ValueError:
-                    continue
-                tid = str(row.get("task_id") or "").strip()
-                if tid:
-                    timeline_ids.add(tid)
-        except OSError:
-            pass
-
-    task = _task(root) or {}
-    active_id = str(task.get("id") or "").strip()
-    union_ids = set(archived_ids) | set(timeline_ids)
-    if active_id:
-        union_ids.add(active_id)
-
-    ticket_last = _read_json(pdir / "ticket-last.json", {})
-    if not isinstance(ticket_last, dict):
-        ticket_last = {}
-    active_review = task.get("ticket_review") if isinstance(task.get("ticket_review"), dict) else {}
-    if ticket_last.get("report_id") != active_review.get("report_id") or ticket_last.get("task_id") != active_id:
-        ticket_last = {}
-    pack_blob = ticket_last.get("pack") if isinstance(ticket_last.get("pack"), dict) else {}
-    digest = (
-        pack_blob.get("script_digest")
-        if isinstance(pack_blob.get("script_digest"), dict)
-        else (
-            ticket_last.get("script_digest")
-            if isinstance(ticket_last.get("script_digest"), dict)
-            else (
-                active_review.get("script_digest")
-                if isinstance(active_review.get("script_digest"), dict)
-                else {}
-            )
-        )
-    )
-
-    digest_seq = int(
-        digest.get("ticket_seq")
-        or active_review.get("ticket_seq")
-        or ticket_last.get("ticket_seq")
-        or 0
-    )
-    base_seq = max(len(archived_files), len(timeline_files), len(union_ids), digest_seq)
-    from .ticket_doc import active_ticket_path
-
-    if base_seq == 0 and active_ticket_path(repo).is_file():
-        base_seq = 1
-    ticket_seq = base_seq
-    strict_round_mode = False
-
-    last_thread_id = str(
-        active_review.get("thread_id")
-        or ticket_last.get("thread_id")
-        or pack_blob.get("thread_id")
-        or ""
-    )
-    retried_lazy = bool(
-        active_review.get("retried_lazy")
-        or ticket_last.get("retried_lazy")
-        or (ticket_last.get("timings") or {}).get("retried_lazy")
-    )
-    raw_scores = (
-        active_review.get("scores")
-        if isinstance(active_review.get("scores"), dict) and active_review.get("scores")
-        else (ticket_last.get("scores") if isinstance(ticket_last.get("scores"), dict) else {})
-    )
-    scores = dict(raw_scores)
-
-    from .seat import ticket_redline_context
-
-    redline_context = ticket_redline_context(repo, _current_redlines(root, task), active_id)
-    redline_overlap_ratio = redline_context["redline_overlap_ratio"]
-
-    summary = {
-        "ticket_seq": ticket_seq,
-        "strict_round_mode": strict_round_mode,
-        "last_thread_id": last_thread_id,
-        "thread_id": last_thread_id,
-        "retried_lazy": retried_lazy,
-        "scores": scores,
-        "redline_overlap_ratio": redline_overlap_ratio,
-    }
-    _write_json(plug_dir(root, "lift", 18) / "anti_lazy.json", {"t": time.time(), **summary})
-    return summary
 
 
 _THERM_SUFFIXES = {".py", ".ts", ".tsx", ".js", ".mjs", ".css", ".rs", ".go"}
@@ -1571,7 +1458,6 @@ HANDLERS = {
     ("lift", 15): lift_15,
     ("lift", 16): lift_16,
     ("lift", 17): lift_17,
-    ("lift", 18): lift_18,
     ("see", 1): see_1,
     ("see", 2): see_2,
     ("see", 3): see_3,

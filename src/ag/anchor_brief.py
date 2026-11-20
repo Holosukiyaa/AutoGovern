@@ -1,4 +1,4 @@
-"""Anchor guidance only; start validates long inheritance and grants readiness."""
+"""Anchor guidance only; human confirmation grants construction readiness."""
 from __future__ import annotations
 
 import json
@@ -39,7 +39,7 @@ def load_skill() -> str:
 
 
 def anchor_guidance(template_issued: bool) -> dict[str, object]:
-    """Return writing and authorization guidance; views never grant inheritance."""
+    """Return writing and authorization guidance; views never grant authorization."""
     if not template_issued:
         return {"anchor_brief": load_brief()}
     return {"skill": load_skill()}

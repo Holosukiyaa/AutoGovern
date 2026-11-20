@@ -8,9 +8,7 @@ Current version: **v0.5.2**.
 
 ## What's New in v0.5.2
 
-- **Single tickets and Markdown long tickets**: CLI and MCP default to `single`; ongoing goals explicitly select `long`, with a directly readable and editable `long.md` as the intent authority. Each round keeps its own original child ticket and sources.
-- **One parent approval and verified delivery**: a long goal is approved once as a whole; later children within its approved scope inherit traceable parent authority without repeated human confirmation. Material changes need a new decision. Single tickets retain personal confirmation per ticket; independent review, isolation, verification and archiving remain required.
-- **Explicit legacy migration**: legacy SQLite long tickets and historical exports remain available for read-only inspection. Only explicit migration creates the Markdown authority; the old HTML panel is no longer the default ticket creation or reading interface.
+- **Standard single-ticket delivery**: each ticket retains independent review, personal confirmation, isolation and verification. `continuation_of` carries reference information without granting authority.
 
 Three orthogonal lanes that must never mix: **ship (交货)** · **lift (抬正确率)** · **see (看见)**.
 
@@ -46,7 +44,7 @@ After v0.3 (delivery guardrails + stateless review foundation), v0.4 makes ag le
 The canonical checkout (`<PROJECT_ROOT>`) is never a work site. All edits happen inside an isolated task worktree (`<WORKTREE>`):
 
 ```text
-ag_status → ag_start → personal ticket approval (single) / first parent approval or inheritance (long) → ready → write only in <WORKTREE> → ag_verify → ag_finish
+ag_status → ag_start → personal confirm-map → ready → write only in <WORKTREE> → ag_verify → ag_finish
 ```
 
 While a task is open, AG freezes tracked files on the canonical checkout. Windows adds a recoverable ACL deny-write entry for the current user; other systems clear the user-write bit. `ag_verify` refuses immediately when that checkout is dirty during an open task, records `canonical-dirty`, and does not run tests, probes, critic, or the switch.
@@ -79,7 +77,7 @@ Critic config lives in `<AG_HOME>/critic.json` (default `~/.ag/critic.json`) or 
 
 ## Intent Anchors & Startup Ticket (`<AG_HOME>/projects/<key>/ticket.md`)
 
-Starting a default `single` task requires `<AG_HOME>/projects/<key>/ticket.md` in the ag home - the ticket never lives in the project tree - plus a locked result or at least one anchor. A legacy ticket (ticket.md / tickets/ / redlines.copy) left in the project is sha256-checked and moved into the new home once, with a readable migration record. That file is the single ticket intent authority. Explicit `long` tickets instead use the editable Markdown returned by `long read`; each round produces a sealed child review snapshot. `ag_start` reads it and refuses when it is missing; the error names `<AG_HOME>/projects/<key>/ticket.md`. `## 意图` is kept as written. Red lines from `## 红线` and from hard anchors are written back into `## 红线` and sealed into `<AG_HOME>/projects/<key>/redlines.copy`. An empty red-line list still writes that copy. `## 现场` is rewritten at start, verify, and finish, and those writes do not replace `## 意图` or the sealed red lines. `anchor_preview` is this document and `anchor_preview_path` is its absolute path. For a single ticket, show the document and wait for personal `confirm-map`. For a long goal, show the complete parent goal, promised results and applicable constraints for its first personal approval, with the reviewed `--preview <TOKEN>`. Later children within the approved scope inherit verified parent authority without another human confirmation. Each child still requires independent review, isolation and actual thaw before `ready`; verification and finish refuse missing or invalid authority.
+Starting a default `single` task requires `<AG_HOME>/projects/<key>/ticket.md` in the ag home - the ticket never lives in the project tree - plus a locked result or at least one anchor. A legacy ticket (ticket.md / tickets/ / redlines.copy) left in the project is sha256-checked and moved into the new home once, with a readable migration record. That file is the single ticket intent authority. `ag_start` reads it and refuses when it is missing; the error names `<AG_HOME>/projects/<key>/ticket.md`. `## 意图` is kept as written. Red lines from `## 红线` and from hard anchors are written back into `## 红线` and sealed into `<AG_HOME>/projects/<key>/redlines.copy`. An empty red-line list still writes that copy. `## 现场` is rewritten at start, verify, and finish, and those writes do not replace `## 意图` or the sealed red lines. `anchor_preview` is this document and `anchor_preview_path` is its absolute path. For a single ticket, show the document and wait for personal `confirm-map`. Actual thaw is required before `ready`; verification and finish refuse missing or invalid authority.
 
 ```text
 anchor: keep the semantic workbench behavior unchanged
@@ -128,7 +126,7 @@ Configured critic and switch chats stream their incremental reasoning/content in
 
 ## Change-Aware Advice & Observation (`lift` & `see`)
 
-- **Advice (`lift`)**: `lift-4` / `lift-11` run `AG_LIFT_CMD` through the shell, decode its output as UTF-8, and stop the whole process tree after `AG_LIFT_TIMEOUT` seconds (an integer from 1 to 1800; unset or invalid means 300), marking that finding `timed_out=true`; the `lift-2` linter uses the same limit. `lift-13` summarizes the task signal. `lift-14` stores an out-of-tree task snapshot. `lift-15` compares sealed red lines against the previous ticket (`dropped_redlines`). `lift-16` scans added diff lines for silent exception swallowing, production mock/fixture references, and placeholder stubs. `lift-17` suggests converging multi-touchpoint imports of new modules into a single mount point. `lift-18` tracks consecutive ticket sequence (`ticket_seq`) and enables strict anti-lazy review mode on round 3+ (`ticket_seq >= 3`).
+- **Advice (`lift`)**: `lift-4` / `lift-11` run `AG_LIFT_CMD` through the shell, decode its output as UTF-8, and stop the whole process tree after `AG_LIFT_TIMEOUT` seconds (an integer from 1 to 1800; unset or invalid means 300), marking that finding `timed_out=true`; the `lift-2` linter uses the same limit. `lift-13` summarizes the task signal. `lift-14` stores an out-of-tree task snapshot. `lift-15` compares sealed red lines against the previous ticket (`dropped_redlines`). `lift-16` scans added diff lines for silent exception swallowing, production mock/fixture references, and placeholder stubs. `lift-17` suggests converging multi-touchpoint imports of new modules into a single mount point.
 - **Observation (`see`)**: `see-10` and `see-11` track repeated CSS selectors and ownership. `see-12` tracks suppression directive deltas (`suppression_delta`) and upward/reverse imports. `see-13` reports seat/pack health. `see-14` aggregates ticket history and recurring red lines from `<AG_HOME>/projects/<key>/tickets/`. `see-15` records the one-front-one-back (`ticket` + single `switch`) review token ledger (`saved_chars`, `script_digest`). `see-17` counts how often each review seat actually ran, and `see-18` reconciles the jsonl master against the `-last.json` caches and any legacy `ag.sqlite` rows.
 
 ---
@@ -170,50 +168,17 @@ python -m ag install-skill --target grok
 
 ---
 
-## Ticket Document and One-Front-One-Back Review (`ship-12`, `ship-13`, `lift-18`, `see-15`)
+## Ticket Document and One-Front-One-Back Review (`ship-12`, `ship-13`, `see-15`)
 
 The default single ticket intent is `<AG_HOME>/projects/<key>/ticket.md` in the ag home (`ship-12`). `ag_start` seals `## 红线` into `<AG_HOME>/projects/<key>/redlines.copy` and archives each ticket snapshot to `<AG_HOME>/projects/<key>/tickets/<task_id>.md`.
 
 AG uses a **0-Token deterministic script pre-screen + one-front-one-back (`ticket` at start, `switch` at verify) stateless DS review** architecture:
-- **Front gate (`ship-13`, `ticket` seat)**: `ag_start` runs `ticket_prescreen` locally and launches a fresh stateless `ticket` thread (`thread_id`) scoring `goal_clarity`, `anchor_chain`, and `redline_focus` (`0-10`, pass `>= 7`) with an independent `understood_goal`. If configured and not `passed`, `confirm-map` soft-blocks worktree thawing; editing `<AG_HOME>/projects/<key>/ticket.md` and re-running `ag_start` while unconfirmed re-seals and re-reviews in place. On round 3+ (`lift-18`, `ticket_seq >= 3`), deterministic anti-lazy checks trigger one automatic retry on rubber-stamp/copied reviews (`lazy-review`).
+- **Front gate (`ship-13`, `ticket` seat)**: `ag_start` runs `ticket_prescreen` locally and launches a fresh stateless `ticket` thread (`thread_id`) scoring `goal_clarity`, `anchor_chain`, and `redline_focus` (`0-10`, pass `>= 7`) with an independent `understood_goal`. If configured and not `passed`, `confirm-map` soft-blocks worktree thawing; editing `<AG_HOME>/projects/<key>/ticket.md` and re-running `ag_start` while unconfirmed re-seals and re-reviews in place. Deterministic anti-lazy checks trigger one automatic retry on rubber-stamp/copied reviews (`lazy-review`).
 - **Back gate (`see-15`, single `switch` seat)**: `ag_verify` runs `pack_prescreen` (syntax check, redline path/token collision scan, shortcut scan, `.ag-check/` assertion check) and pre-annotates `git diff` and windowed files (`> 12,000` chars slimmed to header + changed hunks) with exact `path:line` numbers. `ag_verify` calls `switch` once (mirroring `verify.critic` for compatibility and planting probes on reject), cutting token usage while preserving `path:line` evidence.
 
-## Single tickets and Markdown long tickets
 
-Omitting the type keeps the existing `single` workflow. Choose `long` explicitly for delivery across multiple rounds. A new long ticket uses an editable `long.md` as its intent authority: open and maintain the Markdown directly, without writing JSON or starting an HTML panel.
+## Confirmed tickets and archived data
 
-The first screen states the deliverable, completion criteria, current progress, blocker and next action, followed by a Mermaid main line. Folded sections retain applicable constraints, field evidence, round contributions, changes and pending proposals. Each opened child links to its own original `.md`; unopened work is labeled accordingly. Closed originals preserve their commitments, the user's words and sources, independently of later summaries.
+Before T4, changing a confirmed ticket requires `abandon` (candidate preserved under `refs/ag/abandoned/<task_id>`) and a new ticket. Edits before confirmation can be sealed and reviewed again in place with `start`.
 
-At the start of each round, the AI reads the outline, relevant original ticket and real `delivery` receipts to recover unfinished commitments, branch reasons, return points and regression requirements. It updates only the necessary progress sections. The whole long goal needs approval only once. In-scope children inherit valid parent authorization while retaining independent ticket review and delivery checks. Routine progress, non-intent formatting, restarts and in-scope contribution decomposition preserve it; changed child contributions require renewed independent review. Material changes to the goal, constraints or approved result scope retain old→new, decision maker, reason, impact, return point and the scope of older evidence, then require independent review and a new personal decision. A thaw failure preserves approval and its source; retry through the formal recovery entry indicated by `delivery.next_action` without repeating business approval. A pending proposal stays pending; a passing child does not complete its parent.
-
-Record file edits, business events and actual verification separately. Unverified changes remain unverified; reading or reformatting does not refresh verification time. Reload after an external edit. Stale tokens, invalid links, malformed documents and intent conflicts must be reported without overwriting external edits or silently dropping unknown sections.
-
-Existing single tickets remain compatible. Legacy `long-goals.sqlite3` data and exports remain readable history. Explicit migration creates the new Markdown authority and marks the old authority as historical; failure preserves the original text and history. Never edit both authorities or inherit authorization that was never granted. The old HTML panel is no longer the default opening or reading path.
-
-Use `python -m ag start <PROJECT_ROOT>` (MCP `ag_start(root="<PROJECT_ROOT>")`) to recover an active long ticket, retaining its task_id; inherited thaw failures retry this entry without another `confirm-map`. Check `delivery.authorization.mode`, `source_task_id`, `parent_proof` and actual readiness. `mode=inherited-long` identifies inheritance, while `approved` means valid authority. The child `long_authorization` receipt binds its parent proof to the current review; `intent_map_confirmed=false` continues to mean that the user did not personally confirm this child. `start-long-inheritance` directs activation and `recover-long-authorization` directs recovery; both use the same formal `start` entry. A first approval is still `user-confirm-map`. Status and delivery remain read-only.
-
-CLI entry examples (single retains personal approval per ticket; long uses first parent approval followed by verified inheritance, with independent review for every child):
-
-```powershell
-# Omission keeps single; --ticket-type single is also explicit
-python -m ag start <PROJECT_ROOT> --portrait "This round's independent delivery"
-
-# Create the long ticket, read document_path and result IDs, then open that .md directly
-python -m ag long create <PROJECT_ROOT> --goal-id department-report --title "Department expense report" --original "Deliver a reconcilable report from the expense CSV" --source-ref "user request source" --result "Read CSV without changing it; reject invalid input" --result "Reconcile department totals with the source" --result "Deliver the report using the confirmed template"
-python -m ag long read <PROJECT_ROOT> department-report
-python -m ag start <PROJECT_ROOT> --ticket-type long --goal-id department-report --result-id <RESULT_ID> --contribution "Contribution to the parent goal"
-# An existing document can instead be selected with --long-file <LONG_MD>
-
-# The user personally approves the whole parent goal once, using the displayed preview
-python -m ag confirm-map <PROJECT_ROOT> --preview <TOKEN>
-# After independently verifying and closing that child, open another in-scope child: no new confirm-map
-python -m ag start <PROJECT_ROOT> --ticket-type long --goal-id department-report --result-id <NEXT_RESULT_ID> --contribution "Next contribution within the approved parent scope"
-# Retry inherited authority/thaw on an active long ticket without creating a new task or asking for approval
-python -m ag start <PROJECT_ROOT>
-
-# Inspect legacy SQLite history, then explicitly migrate it
-python -m ag long migration-candidate <PROJECT_ROOT> <LEGACY_GOAL_ID>
-python -m ag long migrate <PROJECT_ROOT> <LEGACY_GOAL_ID> --expected-legacy-sha256 <SOURCE_SHA256>
-```
-
-CLI `long create/read/update/history/diff/package` and MCP `ag_long` share the same document, source checks and validation. MCP `ag_start` uses `ticket_type`, `goal_id`/`long_file`, `result_ids` and `contribution`. Incremental operations carry the freshly read `expected_revision` and, when needed, `expected_document_sha256`; reload and inspect the diff after conflicts. Direct Markdown prose editing does not require JSON.
+For `long-ticket-retired`, use `abandon` to close the active ticket. Legacy long ticket data stays untouched in `<AG_HOME>` without migration: new code does not read, rewrite or delete `long/`, `long-goals.sqlite3` or historical records. Archived ticket queries provide a degraded view without granting authority.

@@ -196,9 +196,6 @@ def append_log(
         if timings:
             row["timings"] = timings
         if isinstance(pack, dict):
-            long_inputs = (pack.get("verification") or {}).get("long_goal_inputs")
-            if long_inputs:
-                row["long_goal_inputs"] = long_inputs
             for name in ("candidate", "product_tree", "review_identity", "review_config_identity"):
                 if pack.get(name):
                     row[name] = pack[name]
@@ -1172,9 +1169,7 @@ def seat_run(
         from .delivery import build_delivery_snapshot
 
         view = build_delivery_snapshot(root, task_id)
-        packed["delivery_context"] = {"goal": view.get("goal"), "goal_link": view.get("goal_link"), "contribution": view.get("contribution"), "remaining": view.get("remaining"), "route_changes": (view.get("progress") or {}).get("route_changes") or []}
-    if verification is not None and verification.get("long_goal_inputs"):
-        packed.setdefault("delivery_context", {})["long_goal_inputs"] = verification["long_goal_inputs"]
+        packed["delivery_context"] = {"goal": view.get("goal"), "goal_link": view.get("goal_link"), "contribution": view.get("contribution"), "remaining": view.get("remaining")}
     from .loop import product_tree, tree_digest
 
     candidate_root = Path(tree) if tree is not None else root

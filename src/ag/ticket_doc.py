@@ -1,7 +1,6 @@
 """The task intent document lives in the ag home, never in the project.
 
-`<AG_HOME>/projects/<key>/ticket.md` is the legacy single_md master. Structured
-long goals own their record; this file is only their sealed exam projection. `## 意图` stays as written;
+`<AG_HOME>/projects/<key>/ticket.md` is the authoritative ticket. `## 意图` stays as written;
 start seals red lines into `## 红线` and `redlines.copy`. Start, verify, and finish
 rewrite only `## 现场`. The project keeps no copy: delete the ag home and the repo
 still builds, commits, and releases.

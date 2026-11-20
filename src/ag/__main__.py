@@ -85,24 +85,12 @@ def main(argv: list[str] | None = None) -> int:
     delivery_p = sub.add_parser("delivery", help="read active or archived task facts without side effects")
     delivery_p.add_argument("root")
     delivery_p.add_argument("--task-id", default="")
-    route_p = sub.add_parser("route", help="record why the implementation route changes")
-    route_p.add_argument("root")
-    route_p.add_argument("--reason", required=True)
-    route_p.add_argument("--requires-decision", action="store_true")
-    resume_p = sub.add_parser("resume", help="prepare a scoped decision, re-review, and wait for human confirm-map")
-    resume_p.add_argument("root")
-    resume_p.add_argument("--change-id", action="append", required=True, dest="change_ids", help="pending change identity from delivery; repeat for every pending change")
-    resume_p.add_argument("--decision", required=True, help="the user's explicit decision; preparation never grants construction authority")
     start_p = sub.add_parser(
         "start",
-        help="open/resume a reviewed worktree; approved long scope inherits once, start retries long thaw; single needs human confirm-map",
+        help="open or revisit a reviewed worktree; each ticket needs human confirm-map",
     )
     start_p.add_argument("root")
     start_p.add_argument("--portrait", default="")
-    start_p.add_argument("--ticket-type", choices=("single", "long"), default=None, help="ticket type; omitted keeps single compatibility")
-    start_p.add_argument("--long-file", default="", help="authoritative editable long Markdown path")
-    start_p.add_argument("--goal-id", default="", help="long Markdown goal identity")
-    start_p.add_argument("--result-id", action="append", default=[], help="long goal result included in this contribution; repeatable")
     start_p.add_argument("--continuation-of", default="")
     start_p.add_argument("--contribution", default="")
     start_p.add_argument("--fixed", action="append", default=[], help="locked done-state line; repeatable; not rewritten before confirm-map")
@@ -111,9 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     start_p.add_argument("--default", action="append", default=[], help="negotiable default shown beside the route; repeatable")
     start_p.add_argument("--hard-anchor", action="append", default=[], help="hard anchor only from explicit user/project rule; repeatable")
     sub.add_parser("verify", help="run enrolled tests and pin the tree").add_argument("root")
-    confirm_p = sub.add_parser("confirm-map", help="human approval: each single ticket, first long parent or changed parent intent; in-scope long children inherit via start")
+    confirm_p = sub.add_parser("confirm-map", help="human approval of the reviewed ticket before construction")
     confirm_p.add_argument("root")
-    confirm_p.add_argument("--preview", default="", help="exact long-goal preview token shown by start/resume; required for structured goals")
     confirm_p.add_argument(
         "--by",
         default="",
@@ -275,58 +262,8 @@ def main(argv: list[str] | None = None) -> int:
     run_s.add_argument("--head", default="", help="diff head ref; requires --base")
     sub.add_parser("switch-prompt", help="print the switch startup prompt")
     sub.add_parser("hook", help="git pre-commit helper")
-    long_p = sub.add_parser("long", help="editable long Markdown: create, inspect and update; explicit legacy conversion")
-    long_sub = long_p.add_subparsers(dest="long_cmd", required=True)
-    for action in ("list", "read", "history", "diff", "package", "export", "update", "create", "import", "migrate", "migration-candidate", "legacy-read", "legacy-history", "panel"):
-        lp = long_sub.add_parser(action)
-        lp.add_argument("root")
-        if action not in {"list", "create", "import"}:
-            lp.add_argument("goal_id")
-        if action in {"history", "diff", "legacy-history"}:
-            lp.add_argument("--since-revision", type=int, default=0)
-        if action in {"package", "export"}:
-            lp.add_argument("--result-id", action="append", default=[])
-            lp.add_argument("--contribution", default="")
-        if action == "update":
-            lp.add_argument("--expected-revision", type=int, required=True)
-            lp.add_argument("--operation", required=True, help="one JSON incremental operation; edit the Markdown file directly for prose")
-            lp.add_argument("--expected-document-sha256", default="", help="reject a write after external Markdown edits")
-        if action in {"create", "import"}:
-            lp.add_argument("--goal-id", default="")
-            lp.add_argument("--title", required=True)
-            lp.add_argument("--source-ref", required=True)
-            if action == "create":
-                lp.add_argument("--original", required=True)
-                lp.add_argument("--result", action="append", default=[])
-                lp.add_argument("--constraint", action="append", default=[])
-            else:
-                lp.add_argument("--ticket-file", required=True, help="explicit legacy import; existing authorization is never inherited")
-        if action == "migrate":
-            lp.add_argument("--expected-legacy-sha256", default="", help="optional byte identity of the read-only SQLite source")
-        if action == "panel":
-            lp.add_argument("--port", type=int, default=0)
-            lp.add_argument("--open-browser", action="store_true")
     args = parser.parse_args(argv)
     try:
-        if args.cmd == "long":
-            from .ship import long_call
-
-            values = vars(args).copy()
-            action = values.pop("long_cmd")
-            if action == "panel":
-                raise ChainBroken("long-panel-deprecated: use long read to locate and edit authoritative Markdown; legacy SQLite requires explicit long migrate, no HTML panel is started")
-            values["action"] = action
-            if action == "update":
-                values["operation"] = json.loads(args.operation)
-            if action == "create":
-                values["results"] = [{"text": text} for text in args.result]
-                values["constraints"] = [{"text": text, "scope": ["*"]} for text in args.constraint]
-            result = long_call(Path(args.root), values)
-            if action == "export":
-                print(result["markdown"], end="")
-            else:
-                print(json.dumps(result, ensure_ascii=False, indent=2))
-            return 0
         if args.cmd == "mcp":
             from .mcp import serve
 
@@ -549,24 +486,13 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(read_result(worktree, args.worker_id), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "confirm-map":
-            print(json.dumps(confirm_map(Path(args.root), by=str(args.by or ""), preview=str(args.preview or "")), ensure_ascii=False, indent=2))
+            print(json.dumps(confirm_map(Path(args.root), by=str(args.by or "")), ensure_ascii=False, indent=2))
             return 0
         root = Path(args.root)
         if args.cmd == "delivery":
             from .delivery import build_delivery_snapshot
 
             result = build_delivery_snapshot(root, args.task_id)
-            print(json.dumps(result, ensure_ascii=False, indent=2))
-            return 1 if result.get("error") else 0
-        if args.cmd == "route":
-            from .delivery import record_route
-
-            print(json.dumps(record_route(root, args.reason, requires_decision=args.requires_decision), ensure_ascii=False, indent=2))
-            return 0
-        if args.cmd == "resume":
-            from .decisions import prepare_resume
-
-            result = prepare_resume(root, change_ids=args.change_ids, decision=args.decision)
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 1 if result.get("error") else 0
         if args.cmd == "enroll":
@@ -594,10 +520,6 @@ def main(argv: list[str] | None = None) -> int:
                         guards=args.guard,
                         defaults=args.default,
                         fixed=args.fixed or None,
-                        goal_id=args.goal_id,
-                        ticket_type=args.ticket_type,
-                        long_file=args.long_file,
-                        result_ids=args.result_id or None,
                         continuation_of=args.continuation_of,
                         contribution=args.contribution,
                     ),

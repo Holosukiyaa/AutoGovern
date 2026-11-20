@@ -11,7 +11,7 @@
 它通过 **主仓冻结（Canonical Freeze）+ 独立工作树（`<WORKTREE>`）隔离施工 + 启动票意图锚点与红线封存（`<AG_HOME>/projects/<key>/ticket.md`）+ 0-Token 本地脚本预筛 + 一前一后（`ticket` 开票审 + `switch` 交卷守门）无状态 DS 审核 + 一次性验证（`<WORKTREE>` 内现场生成的一次性自检脚本）**，从物理机制上解决 AI 编程的三大核心痛点：
 
 1. **防止改乱主仓与半途污染**：主分支检出区（`<PROJECT_ROOT>`）在任务期间物理只读冻结；所有修改强制发生在隔离工作树 `<WORKTREE>`，验收通过后才以 `--ff-only` 原子合入主仓。
-2. **防止目标漂移与偷删红线**：默认 `single` 在 `<AG_HOME>/projects/<key>/ticket.md` 锁定业务意图、正反向行为链路锚点（`anchor:`）与聚焦红线（`## 红线`）；显式 `long` 以可直接维护的 Markdown 长票保存持续目标与来源。single 逐票本人确认；long 的完整父目标首次本人确认一次，已批准范围内子票继承可追溯父授权，不再逐票确认。每张子票仍独立审票并实际解冻后才 ready；首次或实质变更确认携带所见 `--preview`。旧 SQLite 长票只读保留，显式迁移后才切换权威。
+2. **防止目标漂移与偷删红线**：在 `<AG_HOME>/projects/<key>/ticket.md` 锁定业务意图、正反向行为链路锚点（`anchor:`）与聚焦红线（`## 红线`）；每张票独立审票、用户本人确认、实际解冻后才可施工。
 3. **防止“自己考自己”写假测试凑分**：废除常驻 `tests/` 答案库，每张票在 `<WORKTREE>/.ag-check/` 现场编写针对本票结果的一次性自检脚本（合入即销毁），配合异构/无状态的 `ticket`（开票三维审票）与 `switch`（交卷代码终审 + 自动种回归探针 `probes`）守住交付底线。
 
 ---
@@ -46,7 +46,7 @@
 
 恢复任务先用 `python -m ag delivery <PROJECT_ROOT> --task-id <TASK_ID>` 或 MCP `ag_delivery` 读取共同目标、本票贡献、已验证进展、未完成项及下一动作。完整功能可在一票内跨必要模块分阶段实现；路线调整说明原因即可，减少承诺或改变硬边界须用户决定。真正独立的续作使用明确 `continuation_of`，不自动串联无关票。
 
-`status/delivery` 只读，完整诊断用 `ag_see`，安装修复用 `enroll/config`。`confirm-map` 必须由用户亲自执行；long 范围内子票由系统核验父授权继承，实际解冻完成后才 `ready`。解冻失败保留批准来源并按 `delivery.next_action` 正式重试，不重复业务授权。交卷选取本票 `.ag-check/check_*.py` 并绑定脚本、候选和审核。历史按时间和容量分卷，先校验发布再回收闭票散档；活动票、准备资料、审计与备份保留。出现 `history-corrupt` 时，按 `history_issues` 报告的文件和行号交给用户人工核对，AI 不得自行删除或改写历史行。
+`status/delivery` 只读，完整诊断用 `ag_see`，安装修复用 `enroll/config`。`confirm-map` 必须由用户亲自执行，实际解冻完成后才 `ready`。解冻失败保留批准来源并按 `delivery.next_action` 正式重试。交卷选取本票 `.ag-check/check_*.py` 并绑定脚本、候选和审核。历史按时间和容量分卷，先校验发布再回收闭票散档；活动票、准备资料、审计与备份保留。出现 `history-corrupt` 时，按 `history_issues` 报告的文件和行号交给用户人工核对，AI 不得自行删除或改写历史行。
 
 当用户第一次在项目中接入 `ag`，或询问“怎么配置 / 怎么开始 / 为什么报错”时，AI 必须按以下 4 步主动引导：
 
@@ -71,23 +71,18 @@ python -m ag enroll <PROJECT_ROOT>
 3. 检查 `api_key_present` 布尔值，指导用户在终端或 MCP 配置中设置对应的环境变量（**安全铁律：AI 绝不向用户索要、读取或在任何日志中打印 API Key 明文**）。
 
 ### 第四步：严格执行 6 步受控交付闭环
-1. **写票**：默认 single 协助用户编写 `<AG_HOME>/projects/<key>/ticket.md`（包含大白话 `## 意图`、正反完整行为链路 `anchor:` 与窄化红线）；跨轮目标显式 long，通过 `long create` 创建并直接维护 Markdown 权威。
-2. **开票与审票**：调用 `ag_start`（long 显式 `ticket_type="long"` 加 `goal_id` 或 `long_file`），触发本地预筛与独立三维审票；被打回后修正相应权威 Markdown 再原地重审，保留失败历史。
-3. **核对授权与就绪**：single 新票或 long 首次父目标确认时，完整展示 `anchor_preview`、`anchor_preview_path` 和审票结果，等待用户亲自执行 `python -m ag confirm-map <PROJECT_ROOT>`；long 携带所见 `--preview <TOKEN>`。long 已批准范围内后续子票由 `start` 核验继承，不再请求用户确认；实质变更须用户决定。核对 `delivery` 的授权来源、当前审查和真实 `ready`，AI 不得代调确认。
+1. **写票**：协助用户编写 `<AG_HOME>/projects/<key>/ticket.md`（包含大白话 `## 意图`、正反完整行为链路 `anchor:` 与窄化红线）。
+2. **开票与审票**：调用 `ag_start`，触发本地预筛与独立三维审票；确认前被打回后修正票面并原地重审，保留失败历史。
+3. **核对授权与就绪**：完整展示 `anchor_preview`、`anchor_preview_path` 和审票结果，等待用户亲自执行 `python -m ag confirm-map <PROJECT_ROOT>`。核对 `delivery` 的授权和真实 `ready`，AI 不得代调确认。
 4. **隔离施工与一次性自检**：仅在 `<WORKTREE>` 内修改代码（复杂任务可用 `ag worker-create` 拆分最多 3 个 Worker），并在 `<WORKTREE>/.ag-check/` 下编写针对本票结果的一次性自检脚本。
 5. **交卷验货**：调用 `ag_verify`（执行本地预筛、历史回归探针 `probes`、`.ag-check/` 验证与单次无状态 `switch` 终审）。
 6. **原子合入或放弃**：验收通过后调用 `ag_finish` 快进合入 `<PROJECT_ROOT>` 并自动清理 `<WORKTREE>` 与 `.ag-check/`；若任务无价值或需推翻重来，调用 `ag_abandon` 安全解冻主仓。
 
-## 单票与 Markdown 长票
 
-long 的正式继承/恢复入口为 `python -m ag start <PROJECT_ROOT>`（MCP：`ag_start(root="<PROJECT_ROOT>")`）；活动长票保留同一 task_id，解冻失败也重试该入口，不代调 `confirm-map`。核对 `delivery.authorization` 的 `mode`、`source_task_id`、`parent_proof` 与实际 `readiness`；`mode=inherited-long` 表示继承，`approved` 表示有效授权。子票 `long_authorization` 保存父证明及当前审票绑定，`intent_map_confirmed=false` 仍表示用户没有亲自确认当前子票，不应伪造为 true。`next_action=start-long-inheritance` 表示可继承待激活，`recover-long-authorization` 表示继承恢复；两者均经同一 `start` 核验；首次缺少批准仍是 `user-confirm-map`。`status/delivery` 只读，不会授予权限。
+## 单票与旧数据
 
-未指定类型时使用 `single`，保留现有单票工作流；需要跨多轮持续交付时显式选择 `long`。新长票以可直接编辑的 `long.md` 为意图权威。直接打开该文件即可阅读和维护目标，不需要手写 JSON，也不需要启动 HTML 面板。
+每张票独立审票，由用户本人执行 `confirm-map`，实际解冻并返回 `ready` 后才可施工。`continuation_of` 仅携带前票共同目标、贡献与未完成项作参考，不传递授权。
 
-长票首屏先说明交什么、怎样算完成、现在到哪、当前卡点和下一步，再用 Mermaid 展示主线。适用约束、现场依据、各轮贡献、变更与待定提案放在折叠段中。每轮已开子票链接到独立原票 `.md`；尚未开票的剩余节点明确标为未开。完结原票保留当时的承诺、用户原话和来源，后续进度摘要不能覆盖原票。
+T4 之前，修改已确认的票须先 `abandon`（候选保存在 `refs/ag/abandoned/<task_id>`），再重新开票；确认前改票可用 `start` 原地重新封存、审票。
 
-AI 每轮先读长票大纲，再读本轮原票和真实 `delivery` 回执，恢复未完成承诺、分支原因、返回节点和回归要求；收尾时只更新所需进度段。长票整体只需要同意一次，已批准范围内的后续子票继承有效父授权，不再逐票请求人类确认；每张子票仍独立审票、隔离施工和验货。普通进度、非意图排版、进程重启与范围内贡献分解保留有效授权；当前贡献变化须重新审票。目标、约束或批准结果范围实质变化时，记录旧→新、决定者、原因、影响、回归点和旧证据适用范围，再经独立复审和用户本人决定。解冻失败保留批准来源，通过同一 `python -m ag start <PROJECT_ROOT>` 保留原票重试，不重复业务授权。待定提案保持待定，不能自动变成必做承诺。子票通过也不表示父目标已完成。
-
-文件编辑时间与业务事件时间、实际核验时间分别记录。未核验变化标为待核验；读取文件或调整排版不会刷新核验时间。外部直接编辑后先重读，陈旧 token、坏引用、格式错误和意图冲突必须明确处理；不能覆盖外部改动、静默删除未知段落或把旧证据说成当前已验证。
-
-旧 single 票保持兼容。旧 `long-goals.sqlite3` 及其历史导出仍可只读追查，显式迁移才创建新的 Markdown 权威，并标明旧数据的历史地位；转换失败保留原文与原史，不能新旧双改或继承不存在的授权。旧 HTML 面板退出默认开票和阅读指导。
+遇到 `long-ticket-retired` 时用 `abandon` 关闭活动票。旧长票数据原样留在 `<AG_HOME>`，不迁移；新代码不读取、不改写、不删除旧 `long/`、`long-goals.sqlite3` 和历史记录。归档票查询只提供降级视图，不授予权限。

@@ -20,7 +20,7 @@ from .history import history_issues, require_intact
 from .hook import hook_main
 from .switch import block_message as _switch_block_message
 from .switch import report_id_from_verify as _switch_report_id
-from .store import append_project_jsonl, append_task_step, ensure_start_step, latest_timeline_path, replace_file
+from .store import append_project_jsonl, append_task_step, ensure_start_step, latest_timeline_path, load_task_timeline, replace_file
 from .managed import ChainBroken, ag_home, lookup_project, project_key, real_root, load_managed, save_managed
 from .see import note as usage_note
 
@@ -395,8 +395,6 @@ def _product(test_argv: list[str], verify: dict[str, Any] | None) -> str:
 def _process(task: dict[str, Any] | None) -> str:
     if not task:
         return "idle"
-    if task.get("resume_preparation") and (task.get("verify") or {}).get("intent_identity") != task.get("intent_identity"):
-        return "active"
     if task.get("verified_tree"):
         return "verified"
     return "active"
@@ -641,7 +639,7 @@ def _onboarding_status(
     exclude_info: dict[str, Any],
 ) -> dict[str, Any]:
     from .ticket_doc import active_ticket_path
-    from .long_authorization import recorded
+    from .authorization import recorded
 
     t_path = active_ticket_path(root)
     ticket_ready = t_path.is_file()
@@ -682,7 +680,7 @@ def _onboarding_status(
         if bool(tr.get("configured")) and str(tr.get("outcome") or "").strip().casefold() not in {"passed", "pass", "allow"}:
             next_step = "3. 开票审票未通过（ticket-review-rejected）：请根据 ticket_review.doubts 修改 <AG_HOME>/projects/<key>/ticket.md，然后再次调用 ag_start 原地重封存并重审。"
         else:
-            next_step = "3. 长票整体批准一次；已批准父范围由 start 核验继承。首次长票或 single 展示完整 anchor_preview，由用户本人 confirm-map；具体下一步见 delivery.next_action。"
+            next_step = "3. 展示完整 anchor_preview，由用户本人 confirm-map；具体下一步见 delivery.next_action。"
     elif not task.get("verified_tree"):
         next_step = "4. 工作树已解冻：请仅在 worktree 目录内修改代码，并在 worktree/.ag-check/ 下编写本票一次性自检脚本，完成后调用 ag_verify。"
     else:
@@ -722,7 +720,7 @@ def status(root: Path) -> dict[str, Any]:
     exclude_info: dict[str, Any] = {}
     test_argv = [str(x) for x in (item.get("test_argv") or [])]
     task = load_task(key)
-    from .long_authorization import recorded
+    from .authorization import recorded
     verify = task.get("verify") if isinstance(task, dict) else None
     hook_ok = _hook_ok(root, key)
     dirty = _dirty(root)
@@ -731,6 +729,8 @@ def status(root: Path) -> dict[str, Any]:
         hazards.append("hook-removed")
     if dirty:
         hazards.append("canonical-dirty")
+    if task and "long_goal" in task:
+        hazards.append("long-ticket-retired")
     if task and not recorded(task):
         hazards.append("intent-map-unconfirmed")
     corrupt = history_issues(root)
@@ -759,7 +759,7 @@ def status(root: Path) -> dict[str, Any]:
         "product": product,
         "reminder": "process complete is not product passed",
         "worker_note": "After ag_verify cite critic.report_id and switch.report_id. No report bodies. Switch is the finish gate; critic is not.",
-        "intent_gate": "Long parents need one human approval; run start to inherit an approved scope. First approval and single require human confirm-map." if task and not recorded(task) else "Continue the effectively authorized goal in the active worktree.",
+        "intent_gate": "long-ticket-retired: use abandon to close the active ticket." if task and "long_goal" in task else "Each ticket requires human confirm-map before construction." if task and not recorded(task) else "Continue the effectively authorized goal in the active worktree.",
         "task": task,
         "ticket_review": (task or {}).get("ticket_review") if task else None,
         "portrait": (task or {}).get("portrait") if task else "",
@@ -812,8 +812,7 @@ def status(root: Path) -> dict[str, Any]:
         out["onboarding"]["next_step"] = {
             "user-confirm-map": "展示完整票面，由用户亲自执行 confirm-map；AI 不得代调。",
             "recover-thaw": "已批准尚未有成功解冻记录，核对权限后由用户重试原票 confirm-map。",
-            "start-long-inheritance": "长票整体只需批准一次；运行 start 核验父原始证明和本轮独立审票，继承后真实解冻。",
-            "recover-long-authorization": "保留原票与授权来源；修复报告的问题后重试 start，不重复索要相同父意图的同意。",
+            "abandon": "用 abandon 关闭本票（候选保存在 refs/ag/abandoned/<task_id>），再重新开票；旧长票数据原样保留。",
             "revise-ticket-and-start": "按本票拒绝证据修票，再 start 原地重审。",
             "await-user-decision": "保留完整目标和未完成项，承诺或硬边界变化等待用户决定。",
             "implement-and-verify": "在批准工作树继续完整功能，完成本票 .ag-check 检查后 verify。",
@@ -871,33 +870,17 @@ def start(
     fixed: list[str] | None = None,
     continuation_of: str = "",
     contribution: str = "",
-    goal_id: str = "",
-    ticket_type: str | None = None,
-    long_file: str = "",
-    result_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Open a worktree. Tracked canonical files stay frozen until finish or abandon.
 
     Windows freeze is a recoverable ACL deny-write entry. Elsewhere it is the
     user-write bit. Either mechanism is friction, not an absolute security boundary.
     """
-    if ticket_type is not None and ticket_type not in {"single", "long"}:
-        raise ChainBroken("ticket-type-invalid: expected single or long")
-    if ticket_type == "single" and (goal_id or long_file):
-        raise ChainBroken("ticket-type-conflict: single cannot bind a long goal")
-    if long_file:
-        from .long_tasks import list_goals
+    from .authorization import recorded, require_single_ticket
 
-        requested_path = Path(long_file).expanduser().resolve()
-        matches = [row["goal_id"] for row in list_goals(root) if row.get("format") == "markdown" and row.get("document_path") and Path(row["document_path"]).resolve() == requested_path]
-        if len(matches) != 1:
-            raise ChainBroken("long-document-not-found: --long-file must identify this project's authoritative long.md")
-        resolved = matches[0]
-        if goal_id and resolved != goal_id:
-            raise ChainBroken("long-goal-binding-changed: goal ID and Markdown path differ")
-        goal_id = resolved
-    if ticket_type == "long" and not goal_id:
-        raise ChainBroken("long-goal-required: provide --goal-id or --long-file")
+    active = load_task(project_key(real_root(root)))
+    if active:
+        require_single_ticket(active)
     ensure_local_excludes(root)
     from .upgrade import ensure_upgraded
 
@@ -937,67 +920,15 @@ def start(
     )
 
     existing = load_task(key)
-    if existing and ticket_type and ticket_type != existing.get("ticket_type", "long" if existing.get("long_goal") else "single"):
-        raise ChainBroken("ticket-type-conflict: close the active ticket before changing its type")
-    if existing and goal_id and goal_id != (existing.get("long_goal") or {}).get("goal_id"):
-        raise ChainBroken("long-goal-binding-changed: close the existing ticket before choosing another goal")
-    from .long_authorization import recorded
-    if existing and existing.get("long_goal") and (contribution or result_ids is not None):
-        binding = existing["long_goal"]
-        next_contribution = contribution or binding["contribution"]
-        next_results = result_ids if result_ids is not None else binding["result_ids"]
-        if next_contribution != binding["contribution"] or next_results != binding["result_ids"]:
-            from .authorization import long_goal_link, new_long_binding
-            from .decisions import pending_decisions
-            from .long_authorization import parent_proof
-            from .long_tasks import read_goal
-            if existing.get("resume_preparation") or pending_decisions(root, existing["id"]):
-                raise ChainBroken("await-user-decision: resolve the prepared change before changing child contribution")
-            parent_proof(root, read_goal(root, binding["goal_id"]))
-            fresh = new_long_binding(root, binding["goal_id"], result_ids=next_results, contribution=next_contribution)
-            freeze_worktree(Path(existing["worktree"]))
-            existing["long_goal"] = fresh
-            existing["goal_link"] = long_goal_link(fresh)
-            existing["portrait"] = next_contribution
-            existing["intent_map_confirmed"] = False
-            existing["worktree_ready"] = False
-            existing.pop("authorization_identity", None)
-            existing.pop("long_authorization", None)
-            existing.pop("thaw_error", None)
-            ticket_path(root).write_text(fresh["projection"], encoding="utf-8")
-            save_task(key, existing)
-    if existing and existing.get("long_goal") and not recorded(existing):
-        from .authorization import prepare_long_projection
-
-        prepare_long_projection(root, existing, pending=True)
     if existing and Path(str(existing.get("worktree") or "")).is_dir():
         if recorded(existing):
             from .authorization import validate_ticket
 
-            from .long_authorization import activation_complete
-            if existing.get("long_goal") and (existing.get("thaw_error") or not existing.get("worktree_ready") or not activation_complete(root, existing)):
-                _resume_long_activation(root, existing)
-            else:
-                validate_ticket(root, existing)
-                if existing.get("long_goal"):
-                    from .authorization import assert_live_construction
-                    try:
-                        assert_live_construction(root, existing)
-                    except ChainBroken:
-                        _resume_long_activation(root, existing)
+            validate_ticket(root, existing)
             if (fixed is not None and list(fixed) != list(existing.get("fixed") or [])) or (portrait and portrait != existing.get("portrait")):
                 raise ChainBroken("await-user-decision: confirmed result changed; preserve the existing goal")
             return status(root)
         existing_wt = Path(str(existing.get("worktree") or ""))
-        if existing.get("resume_preparation"):
-            from .decisions import _preparation, _steps, pending_decisions
-
-            preparation = _preparation(root, existing)
-            if any(step.get("phase") == "decision-reviewed" and step.get("resume_id") == preparation["resume_id"] for step in _steps(root, existing["id"])):
-                raise ChainBroken("resume-already-reviewed: use ag resume to retry review or user confirm-map to approve")
-            if set(preparation["change_ids"]) != {row["change_id"] for row in pending_decisions(root, existing["id"])}:
-                raise ChainBroken("await-user-decision: resume does not cover all pending changes")
-            freeze_worktree(existing_wt)
         if not bool(existing.get("intent_map_confirmed")) and ticket_path(root).is_file():
             document = require_ticket(root)
             intent_body, redline_body = split_document(document)
@@ -1010,7 +941,7 @@ def start(
                 else [dict(item) for item in (existing.get("anchors") or []) if isinstance(item, dict)]
             )
             task_anchors = merge_anchors(base_anchors, caller_anchors)
-            inferred = [row["text"] for row in task_anchors if row.get("kind") != "hard"] if existing.get("long_goal") else existing.get("fixed")
+            inferred = existing.get("fixed")
             task_fixed = resolve_fixed(chosen, fixed if fixed is not None else inferred)
             task_rules = hard_rules(task_anchors)
             if not task_fixed and not task_anchors:
@@ -1074,10 +1005,6 @@ def start(
 
             bind_ticket(root, existing)
             save_task(key, existing)
-            if existing.get("resume_preparation"):
-                from .decisions import record_resume_review
-
-                record_resume_review(root, existing)
             append_task_step(
                 root,
                 task_id,
@@ -1090,13 +1017,9 @@ def start(
             freeze_canonical(root)
             freeze_worktree(existing_wt)
         except Exception:
-            if not existing.get("resume_preparation"):
-                thaw_worktree(existing_wt)
-                thaw_canonical(root)
+            thaw_worktree(existing_wt)
+            thaw_canonical(root)
             raise
-        from .authorization import refresh_long_views
-        refresh_long_views(root, existing, preview=True)
-        _resume_long_activation(root, existing)
         return status(root)
     if existing:
         raise ChainBroken("worktree-missing: task and goal retained; recover the worktree or abandon before starting another ticket")
@@ -1123,20 +1046,11 @@ def start(
             raise ChainBroken("invalid-continuation: expected a closed, confirmed predecessor")
         parent_link = previous.get("goal_link") or {}
         goal_link = {"task_id": continuation_of, "common_goal": parent_link.get("common_goal") or previous["goal"], "contribution": contribution or chosen, "remaining": previous["remaining"]}
-    long_goal = None
-    if goal_id:
-        from .authorization import long_goal_link, new_long_binding
-
-        long_goal = new_long_binding(root, goal_id, result_ids=result_ids, contribution=contribution or chosen, pending=True)
-        chosen = chosen or long_goal["contribution"]
-        goal_link = long_goal_link(long_goal)
-        document = long_goal["projection"]
-    else:
-        document = require_ticket(root)
+    document = require_ticket(root)
     intent_body, redline_body = split_document(document)
     caller_anchors = None if anchors is None else [dict(item) for item in anchors if isinstance(item, dict)]
     task_anchors = merge_anchors(parse_anchors(intent_body), caller_anchors)
-    task_fixed = resolve_fixed(chosen, fixed if fixed is not None else ([row["text"] for row in task_anchors if row.get("kind") != "hard"] if long_goal else None))
+    task_fixed = resolve_fixed(chosen, fixed)
     task_rules = hard_rules(task_anchors)
     if not task_fixed and not task_anchors:
         usage_note(root, "ship", 8, "block", "start without intent anchors")
@@ -1209,11 +1123,7 @@ def start(
         "verify": None,
         "goal_link": goal_link,
     }
-    task_blob["ticket_type"] = "long" if long_goal else "single"
-    if long_goal and ticket_type is None:
-        task_blob["ticket_type_notice"] = "legacy-goal-id-alias: new long tasks use explicit --ticket-type long; omission without long scope defaults to single"
-    if long_goal:
-        task_blob["long_goal"] = long_goal
+    task_blob["ticket_type"] = "single"
     preview = write_scene(root, task_blob, process="active", product="pending") or preview
     task_blob["anchor_preview"] = preview
     from .authorization import bind_ticket
@@ -1233,9 +1143,6 @@ def start(
     append_task_step(root, task_id, "start", portrait_line=line, worktree=str(worktree), task=task_facts(task_blob))
     state = status(root)
     append_task_step(root, task_id, "anchor-preview", anchor_map_path=str(state.get("anchor_map_path") or ""), audit_anchor_map_path=str((state.get("task") or {}).get("audit_anchor_map_path") or ""), anchor_preview=str(state.get("anchor_preview") or ""), audit_anchor_preview_path=str((state.get("task") or {}).get("audit_anchor_preview_path") or ""))
-    from .authorization import refresh_long_views
-    refresh_long_views(root, task_blob, preview=True)
-    _resume_long_activation(root, task_blob)
     return status(root)
 
 
@@ -1288,12 +1195,13 @@ def verify(root: Path) -> dict[str, Any]:
             "[原因] 当前没有进行中的票据任务 "
             "[下一步] 请先编写 <AG_HOME>/projects/<key>/ticket.md 并调用 ag_start"
         )
-    from .long_authorization import recorded
+    from .authorization import recorded, require_single_ticket
+    require_single_ticket(task)
     if not recorded(task):
         reason = (
             "intent-map-unconfirmed: ag_verify refused; no effective authorization "
             "[原因] 本票尚无有效授权或工地仍冻结 "
-            "[下一步] 已批准长票通过 start 核验继承；首次长票或 single 展示完整预览，由用户本人 confirm-map；AI 不得代调"
+            "[下一步] 展示完整预览，由用户本人 confirm-map；AI 不得代调"
         )
         task["verify"] = {"exit": 1, "stderr": reason, "refused": "intent-map-unconfirmed"}
         task["verified_tree"] = ""
@@ -1327,19 +1235,10 @@ def verify(root: Path) -> dict[str, Any]:
         for ln in git(worktree, "ls-files", "-o", "--exclude-standard", check=False).splitlines()
         if ln.strip()
     ]
-    long_goal_inputs = None
-    if task.get("long_goal"):
-        from .long_tasks import work_package
-
-        binding = task["long_goal"]
-        package = work_package(enrolled, binding["goal_id"], binding["result_ids"], contribution=binding["contribution"], task_id=task_id)
-        long_goal_inputs = {"goal_id": binding["goal_id"], "revision": package["revision"], "intent_revision": package["intent_revision"], "reviewed_intent_revision": binding["intent_revision"], "result_ids": binding["result_ids"], "package_fingerprint": package["fingerprint"], "input_fingerprints": package["input_fingerprints"], "candidate": candidate_before, "check_id": chosen_checks["sha256"]}
     timings: dict[str, float] = {}
     t0 = time.perf_counter()
     t_tests = time.perf_counter()
     record = {**run_checks(worktree, chosen_checks), "untracked": untracked[:50], "task_id": task_id, "candidate": candidate_before, "product_tree": product_before, "intent_identity": task.get("intent_identity")}
-    if long_goal_inputs:
-        record["long_goal_inputs"] = long_goal_inputs
     timings["tests_s"] = round(time.perf_counter() - t_tests, 3)
     append_task_step(enrolled, task_id, "verify-tests", seconds=timings["tests_s"])
     paths = _ticket_paths(worktree, str(task.get("source_head") or ""))
@@ -1430,7 +1329,7 @@ def verify(root: Path) -> dict[str, Any]:
         probe_red=probe_red,
         critic=None,
         tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
-        verification={"task_id": task_id, "candidate": candidate_before, "product_tree": product_before, "check_selection": chosen_checks, **({"long_goal_inputs": long_goal_inputs} if long_goal_inputs else {}), **record["evidence"]},
+        verification={"task_id": task_id, "candidate": candidate_before, "product_tree": product_before, "check_selection": chosen_checks, **record["evidence"]},
         redlines=sealed_redlines,
         source_head=str(task.get("source_head") or ""),
     )
@@ -1487,8 +1386,6 @@ def verify(root: Path) -> dict[str, Any]:
     from .delivery import task_facts
 
     append_task_step(enrolled, task_id, "verify-result", verify=record, task=task_facts(task))
-    from .authorization import refresh_long_views
-    refresh_long_views(enrolled, task)
     if record.get("undeclared"):
         usage_note(root, "ship", 1, "help", "verify without tests")
     elif record["exit"] == 0:
@@ -1555,8 +1452,8 @@ def verify(root: Path) -> dict[str, Any]:
     return out
 
 
-def _activation_site(root: Path, task: dict[str, Any], preparation: dict[str, Any] | None = None) -> tuple[Path, list[Path]]:
-    """No approval is created here. Validate the same real site for either source."""
+def _activation_site(root: Path, task: dict[str, Any]) -> tuple[Path, list[Path]]:
+    """No approval is created here. Validate the actual confirmation site."""
     from .freeze import _tracked_files, assert_frozen
     from .store import load_task_timeline
 
@@ -1576,8 +1473,8 @@ def _activation_site(root: Path, task: dict[str, Any], preparation: dict[str, An
     if worktree.resolve() != expected or not worktree.is_dir():
         raise ChainBroken("intent-identity-changed: worktree identity changed or missing")
     registered = git(root, "worktree", "list", "--porcelain")
-    expected_head = preparation["worktree_head"] if preparation else task["source_head"]
-    if not any(block.splitlines()[0] == "worktree " + _posix(worktree.resolve()) and f"branch refs/heads/ag/{task['id']}" in block.splitlines() and ((allow_candidate and not preparation) or f"HEAD {expected_head}" in block.splitlines()) for block in registered.strip().split("\n\n")):
+    expected_head = task["source_head"]
+    if not any(block.splitlines()[0] == "worktree " + _posix(worktree.resolve()) and f"branch refs/heads/ag/{task['id']}" in block.splitlines() and (allow_candidate or f"HEAD {expected_head}" in block.splitlines()) for block in registered.strip().split("\n\n")):
         raise ChainBroken("intent-identity-changed: worktree registration changed")
     canonical_files = _tracked_files(root)
     try:
@@ -1587,42 +1484,30 @@ def _activation_site(root: Path, task: dict[str, Any], preparation: dict[str, An
     return worktree, _tracked_files(worktree)
 
 
-def _complete_activation(root: Path, task: dict[str, Any], identity: str, preparation: dict[str, Any] | None = None) -> None:
+def _complete_activation(root: Path, task: dict[str, Any], identity: str) -> None:
     """Thaw recorded authority. Failures keep its source and remain retryable."""
-    from .authorization import record_long_authorization, validate_ticket
-    from .decisions import resolve_after_thaw
     from .delivery import task_facts
-    from .long_authorization import recorded
+    from .authorization import recorded
 
     if not recorded(task):
         raise ChainBroken("intent-map-unconfirmed: activation requires recorded authority")
     key = project_key(root)
-    worktree, files = _activation_site(root, task, preparation)
-    resume_id = preparation["resume_id"] if preparation else None
+    worktree, files = _activation_site(root, task)
     try:
-        # Recheck reviewed parent scope immediately before changing permissions.
-        if task.get("long_authorization"):
-            validate_ticket(root, task)
         thaw_worktree(worktree, files=files)
         from .freeze import _tracked_files
         for path in _tracked_files(worktree):
             descriptor = os.open(path, os.O_WRONLY)
             os.close(descriptor)
-        append_task_step(root, task["id"], "worktree-ready", intent_identity=identity, resume_id=resume_id)
-        resolve_after_thaw(root, task, preparation)
+        append_task_step(root, task["id"], "worktree-ready", intent_identity=identity)
         task["worktree_ready"] = True
         task.pop("thaw_error", None)
         save_task(key, task)
-        if task.get("long_authorization"):
-            from .long_tasks import record_inherited_iteration
-            record_inherited_iteration(root, task)
-        elif task.get("long_goal"):
-            record_long_authorization(root, task)
         append_task_step(root, task["id"], "authorization-activated", task=task_facts(task))
     except (OSError, ChainBroken) as exc:
         task["worktree_ready"] = False
         task["thaw_error"] = str(exc)
-        recovery = "start" if task.get("long_goal") else "human confirm-map"
+        recovery = "human confirm-map"
         extra = ""
         try:
             freeze_worktree(worktree)
@@ -1637,28 +1522,7 @@ def _complete_activation(root: Path, task: dict[str, Any], identity: str, prepar
         raise ChainBroken(f"thaw-failed: approval retained; repair the failure and retry {recovery}: {exc}{extra}") from exc
 
 
-def _resume_long_activation(root: Path, task: dict[str, Any]) -> bool:
-    """Start may consume existing long authority; it never manufactures a human event."""
-    from .authorization import validate_confirmation, validate_ticket
-    from .decisions import confirmation_preparation
-    from .long_authorization import inherit
-
-    if not task.get("long_goal"):
-        return False
-    if task.get("intent_map_confirmed"):
-        from .long_authorization import validate_human_record
-        validate_human_record(root, task)
-        identity = validate_confirmation(root, task)
-        preparation = confirmation_preparation(root, task)
-    elif inherit(root, task):
-        identity, preparation = validate_ticket(root, task), None
-    else:
-        return False
-    _complete_activation(root, task, identity, preparation)
-    return True
-
-
-def confirm_map(root: Path, *, by: str = "", preview: str = "") -> dict[str, Any]:
+def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
     started = time.perf_counter()
     stages = []
     def stage(name: str) -> None:
@@ -1678,17 +1542,12 @@ def confirm_map(root: Path, *, by: str = "", preview: str = "") -> dict[str, Any
             "[原因] 当前没有进行中的票据任务 "
             "[下一步] 请先编写 <AG_HOME>/projects/<key>/ticket.md 并调用 ag_start"
         )
-    from .authorization import validate_confirmation
-    from .decisions import confirmation_preparation
+    from .authorization import require_single_ticket, validate_confirmation
     from .delivery import build_delivery_snapshot
 
-    if task.get("long_goal"):
-        from .authorization import validate_long_preview
-
-        validate_long_preview(root, task, preview)
+    require_single_ticket(task)
     identity = validate_confirmation(root, task)
-    preparation = confirmation_preparation(root, task)
-    worktree, _ = _activation_site(root, task, preparation)
+    worktree, _ = _activation_site(root, task)
     if not task.get("intent_map_confirmed"):
         task["intent_map_confirmed_at"] = datetime.now(timezone.utc).isoformat()
         task["intent_map_confirmed_by"] = str(by or "user-cli")
@@ -1697,15 +1556,12 @@ def confirm_map(root: Path, *, by: str = "", preview: str = "") -> dict[str, Any
         task["intent_identity"] = identity
         task["worktree_ready"] = False
         save_task(key, task)
-    from .decisions import _steps
-
-    resume_id = preparation["resume_id"] if preparation else None
-    if not any(step.get("phase") == "intent-map-confirmed" and step.get("intent_identity") == identity and step.get("resume_id") == resume_id for step in _steps(root, task["id"])):
+    if not any(step.get("phase") == "intent-map-confirmed" and step.get("intent_identity") == identity for step in load_task_timeline(root, task["id"])["steps"]):
         from .delivery import task_facts
-        append_task_step(root, task["id"], "intent-map-confirmed", by=task.get("intent_map_confirmed_by") or "user-cli", intent_identity=identity, resume_id=resume_id, task=task_facts(task))
+        append_task_step(root, task["id"], "intent-map-confirmed", by=task.get("intent_map_confirmed_by") or "user-cli", intent_identity=identity, task=task_facts(task))
     stage("approval-recorded")
     stage("thawing-worktree")
-    _complete_activation(root, task, identity, preparation)
+    _complete_activation(root, task, identity)
     stage("ready")
     return {"schema": "ag.confirm-map.v2", "root": str(root), "key": key, "intent_map_confirmed": True, "readiness": "ready", "worktree": str(worktree), "task": task, "delivery": build_delivery_snapshot(root, task["id"]), "stages": stages}
 
@@ -1755,11 +1611,11 @@ def _cleanup(root: Path, task: dict[str, Any]) -> None:
 def _preserve_close_material(root: Path, task: dict[str, Any], *, process: str) -> None:
     """Preserve a recoverable candidate and the actual sealed ticket before cleanup."""
     from .history import append_fact
-    from .long_authorization import recorded
+    from .authorization import recorded
     from .ticket_doc import preserve_original_ticket
 
     # anchor_preview is the reviewed original. A live authority edit must not
-    # rewrite what this child actually promised or imply that it was authorized.
+    # rewrite what this ticket actually promised or imply that it was authorized.
     text = str(task.get("anchor_preview") or "")
     if not text:
         from .ticket_doc import require_ticket
@@ -1799,15 +1655,9 @@ def _close_task(root: Path, key: str, task: dict[str, Any], *, process: str, pro
                 save_task(key, task)
                 write_scene(root, task, process=process, product=product)
                 archive_session(root, task, verify=verify_blob, touched=touched, check_exit=(verify_blob or {}).get("exit"), process=process, product=product)
-                if task.get("long_goal"):
-                    from .authorization import record_long_close
-
-                    record_long_close(root, task, process=process, product=product)
                 append_task_step(root, task["id"], "finish" if process == "completed" else "abandon", head=head, product=product, task=task_facts(task), switch_report_id=_switch_report_id(verify_blob))
                 task["close_evidence_recorded"] = True
                 save_task(key, task)
-            from .authorization import refresh_long_views
-            refresh_long_views(root, task)
             task["close_recorded"] = True
             task.pop("archive_error", None)
             save_task(key, task)
@@ -1850,6 +1700,8 @@ def finish(root: Path) -> dict[str, Any]:
             "[原因] 当前没有进行中的票据任务 "
             "[下一步] 请先调用 ag_start"
         )
+    from .authorization import require_single_ticket
+    require_single_ticket(task)
     if task.get("process") == "completed" and task.get("merged_head"):
         if git(root, "rev-parse", "HEAD") != task["merged_head"]:
             raise ChainBroken("cleanup-pending: canonical moved since merge; inspect before retry")
@@ -1862,12 +1714,12 @@ def finish(root: Path) -> dict[str, Any]:
         append_task_step(root, str(task.get("id") or ""), "finish-refused", reason=reason)
         raise ChainBroken(reason)
 
-    from .long_authorization import recorded
+    from .authorization import recorded
     if not recorded(task):
         _no(
             "intent map has no effective authorization "
             "[原因] 本票尚无有效授权 "
-            "[下一步] 已批准长票通过 start 继承；首次长票或 single 由用户本人 confirm-map，再 verify -> finish；AI 不得代调",
+            "[下一步] 由用户本人 confirm-map，再 verify -> finish；AI 不得代调",
             8,
             "finish intent map unconfirmed",
         )
@@ -1922,8 +1774,6 @@ def finish(root: Path) -> dict[str, Any]:
     verify_blob = task.get("verify") if isinstance(task.get("verify"), dict) else None
     if verify_blob and verify_blob.get("task_id", task["id"]) != task["id"]:
         _no("wrong-task: verification receipt belongs to another ticket")
-    if task.get("resume_preparation") and (verify_blob or {}).get("intent_identity") != task.get("intent_identity"):
-        _no("intent-identity-changed: old verification does not cover the resumed boundary; run ag_verify again")
     expected_product = product_tree(worktree, digest)
     if verify_blob and verify_blob.get("product_tree", expected_product) != expected_product:
         _no("wrong-product-tree: product does not match the verified candidate; run ag_verify again")

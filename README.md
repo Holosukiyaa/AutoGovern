@@ -8,9 +8,7 @@
 
 ## v0.5.2 新能力
 
-- **单票与 Markdown 长票**：CLI 与 MCP 默认使用 `single`；持续目标显式选择 `long`，以可直接阅读和编辑的 `long.md` 为意图权威，每轮保留独立原始子票与来源。
-- **一次父授权与真实交付**：long 的完整父目标首次本人确认一次，范围内子票继承有效父授权，不再逐票确认；实质变更再决定。single 逐票本人确认，独立审票、工作树隔离、验证与归档均保留；普通文档整理不会刷新实际核验时间。
-- **旧长票显式迁移**：旧 SQLite 长票与历史导出保留只读追查，显式迁移才创建 Markdown 权威；旧 HTML 面板退出默认开票和阅读指导。
+- **标准单票交付**：每张票独立审票、本人确认、隔离施工与验货；`continuation_of` 仅携带前票参考信息，不传递授权。
 
 三条绝不混用的正交轨道：**ship（交货）** · **lift（抬正确率）** · **see（看见）**。
 只有 `ship` 可以设置 `product` 状态或拒绝 `finish`；`lift` 与 `see` 仅提供建议或客观观测，绝不越权拦门。
@@ -32,7 +30,7 @@
 继 v0.3（交付护栏 + 独立审核底座）之后，v0.4 让 ag「越用越懂你的项目」，并把状态目录管得不膨胀、可回溯。
 
 - **结构体检**：通用内核发现孤岛文件、假装配依赖、反向引用；多语言适配器表（Python / TS / Go / Rust / Java），仓里有什么语言就自动用哪套规则；只出事实不拦截。
-- **一根配置 `config.json`**：项目所有开关汇到一份根配置——审核席位、体检适配器、防膨胀闸、49 条策略清单（带中文名 / 开关 / 可否关）；`python -m ag config-show <PROJECT_ROOT>` 一键看人读版。
+- **一根配置 `config.json`**：项目所有开关汇到一份根配置——审核席位、体检适配器、防膨胀闸、48 条策略清单（带中文名 / 开关 / 可否关）；`python -m ag config-show <PROJECT_ROOT>` 一键看人读版。
 - **跨会话复盘**：每张票归档「想解决什么 / 发现什么 / 做对 / 做错 + 教训」四段；项目红线册随票累积、开票自动喂给 AI；`python -m ag retro <PROJECT_ROOT>` 出人读复盘报告。新会话的 AI 不再从零开始。
 - **防膨胀闸**：席位过程日志跑完即清、usage 计数滚动截断、`python -m ag prune <PROJECT_ROOT>` 压旧残留留索引——留结论、砍流水。
 - **项目状态版本化**：`<AG_HOME>/projects/<key>` 是本地 git 仓，只跟踪结论与配置，误删可恢复。
@@ -55,28 +53,9 @@
 
 `python -m ag delivery <PROJECT_ROOT> --task-id <TASK_ID>`（MCP `ag_delivery`）只读查询活动票或归档票，输出完整目标、本票贡献、已验证结果、未完成项、阻塞、建议、下一动作、授权和解冻状态，以及报告与候选的来源。不存在的票返回 `task-not-found`；失败、访问锚点或施工开始不会变成已完成。相同报告的兼容席位不重复统计，复盘保留本票所有拒绝与通过，不推断所有拒绝都是误报。
 
-完整功能可跨必要模块并在一票内分阶段完成。合理换路线可以用 `python -m ag route <PROJECT_ROOT> --reason "原因"` 留痕；减少承诺或改变硬边界加 `--requires-decision` 等待用户决定。只有真正独立交付的续作才使用 `start --continuation-of <TASK_ID> --contribution "本票贡献"`，明确携带共同目标和剩余结果。
+完整功能可跨必要模块并在一票内分阶段完成；减少承诺或改变硬边界须等待用户决定。只有真正独立交付的续作才使用 `start --continuation-of <TASK_ID> --contribution "本票贡献"`，明确携带共同目标和剩余结果。
 
-### 待决变更在原票恢复
-
-用户对具体待决事项作出明确决定后，先读 `delivery` 的 `pending_decisions`，逐一核对其中的 `change_id`、原因和任务身份。若需要调整票面，先按用户决定修改 `<AG_HOME>/projects/<key>/ticket.md`，保留目标及未完成项，再准备恢复：
-
-```powershell
-python -m ag delivery <PROJECT_ROOT> --task-id <TASK_ID>
-python -m ag resume <PROJECT_ROOT> --change-id <CHANGE_ID_1> --change-id <CHANGE_ID_2> --decision "用户对这些变更作出的明确决定"
-```
-
-只剩一个待决事项时只传一次 `--change-id`。必须显式列出当前全部未决身份；错票、未知身份、重复身份、已决重放或只处理部分未决事项都会拒绝。普通 `route` 文本或 `requires_decision=false` 不构成决定，也不会覆盖旧待决记录。
-
-MCP 对应 `ag_resume(root="<PROJECT_ROOT>", change_ids=["<CHANGE_ID>"], decision="用户的明确决定")`；Python API 为 `from ag.decisions import prepare_resume`，调用 `prepare_resume(root, change_ids=["<CHANGE_ID>"], decision="用户的明确决定")`。这些入口只在同一票和工作树上追加审计事实、重新封存并独立重审，实质变更恢复须重审和人工确认；已有产品修改、候选、失败验据与旧待决历史保留。准备成功不授予施工权。
-
-实质变更重审通过后，AI 展示完整新 `anchor_preview` 与票面路径，再由用户本人执行 `python -m ag confirm-map <PROJECT_ROOT>`。只有确认和实际解冻成功、没有其它未决事项时才可继续施工。审核失败、不可用、票面再变更或解冻失败时保留原票并按返回阶段处理；不得删历史、放弃重建或由 AI 代调真实项目确认来解锁。
-
-重审失败或不可用时，修复票面或审核配置后，用同组 `change_id` 与明确决定再次执行 `resume` 重审。实质变更确认前重复准备允许安全重试，仍须该变更的人工确认；已经完成确认并解决的身份再次提交属于已决重放，会拒绝。
-
-恢复必须取得 `ticket_review.configured=true` 的独立通过记录；未配置审核、审核不可用或被拒绝都会保持待决和冻结，不能套用普通初次开票中“未启用审核”的确认路径。命令返回准备记录也不代表已通过审核，应检查返回的 `ticket_review` 与 `delivery`。重审失败后重试 `resume`；若批准后发生 `thaw-failed`，保留该批准与来源，修复权限或占用后按 `delivery.next_action` 正式恢复；long 不重复业务授权，不重新准备同一决定。
-
-`status` 不再顺带安装、迁移、写票或运行完整体检；诊断用 `ag_see`，修复安装用 `enroll/config`。single 本票、long 首次父目标或实质变更的确认由用户亲自执行 `confirm-map`，AI 不得代调；long 范围内子票由系统核验继承，不再索取确认。命令立即在 stderr 报告阶段，重验当前票、审核、配置、Git 身份与冻结状态；实际恢复全部工作树文件写权限后才 `ready`，解冻失败保留授权并允许重试。交卷按本票实际 `.ag-check/check_*.py` 选择检查，并将脚本摘要、候选和报告绑定。
+`status` 不再顺带安装、迁移、写票或运行完整体检；诊断用 `ag_see`，修复安装用 `enroll/config`。每张票由用户亲自执行 `confirm-map`，AI 不得代调。命令立即在 stderr 报告阶段，重验当前票、审核、配置、Git 身份与冻结状态；实际恢复全部工作树文件写权限后才 `ready`，解冻失败保留授权并允许重试。交卷按本票实际 `.ag-check/check_*.py` 选择检查，并将脚本摘要、候选和报告绑定。
 
 验货和终审使用包含当前产品代码与 `.ag-check` 的同一候选快照；回执同时记录不含临时检查的 `product_tree`，用于核对最终提交。候选计算不修改实际暂存区；误暂存或跟踪的 `.ag-check` 会被拒绝，临时检查不会进入产品提交。
 
@@ -89,7 +68,7 @@ MCP 对应 `ag_resume(root="<PROJECT_ROOT>", change_ids=["<CHANGE_ID>"], decisio
 主仓（`<PROJECT_ROOT>`）永远不是施工现场，所有代码修改必须在隔离工作树（`<WORKTREE>`）中完成：
 
 ```text
-ag_status → ag_start → 本票本人确认(single) / 首次父目标确认或继承(long) → ready → 仅在 <WORKTREE> 内施工 → ag_verify → ag_finish
+ag_status → ag_start → 用户本人 confirm-map → ready → 仅在 <WORKTREE> 内施工 → ag_verify → ag_finish
 ```
 
 - **主仓只读冻结（Canonical Freeze）**：当任务开启时，`ag` 会自动冻结主仓（`<PROJECT_ROOT>`）中受 Git 跟踪的文件（Windows 下添加当前用户可恢复的 ACL 拒绝写入项，其他系统清除用户写权限位）。若主仓在任务期间变脏，`ag_verify` 会立即拒绝并记录 `canonical-dirty`，不再执行后续测试、探针与审核。
@@ -123,7 +102,7 @@ python -m ag mcp
 - `## 意图`：用大白话写明本票业务目标与可观察的完成态，保持原文不变。
 - `## 红线`：`ag_start` 将 `## 红线` 及硬锚点（`anchor!:`）封存到 `<AG_HOME>/projects/<key>/redlines.copy`；闭票后票面归档到项目 `history/` 分卷，兼容旧 `tickets/<TASK_ID>.md`。
 - `## 现场`：由 `start`、`verify`、`finish` 自动刷新任务状态，不覆盖 `## 意图` 与已封存的 `## 红线`。
-- **授权与真实解冻门禁**：single 逐票亲自 `confirm-map`；long 首次展示完整父目标并本人确认一次，后续范围内子票经当前独立审票和父授权核验后自动继承，不再逐票要求确认。实质变更才重新决定；AI 不得代确认，实际解冻成功才 `ready`。
+- **授权与真实解冻门禁**：每张票由用户亲自 `confirm-map`；AI 不得代确认，实际解冻成功才 `ready`。
 
 ### 锚点类型
 
@@ -138,7 +117,7 @@ anchor!: 严禁修改原有的鉴权中间件签名
 
 ---
 
-## 一前一后无状态审核架构（`ship-12`, `ship-13`, `lift-18`, `see-15`）
+## 一前一后无状态审核架构（`ship-12`, `ship-13`, `see-15`）
 
 `ag` 采用 **0-Token 本地通用脚本确定性预筛 + 一前一后（`ticket` 开票审 + `switch` 交卷守门）无状态 DS 审核**架构，将大模型注意力 100% 集中在语义判断上：
 
@@ -149,7 +128,6 @@ anchor!: 严禁修改原有的鉴权中间件签名
      - `anchor_chain`：意图锚点是否锁住包含正向与反向/边界拒绝的完整行为链路。
      - `redline_focus`：红线是否合理且范围收缩聚焦。
    - 若已配置审核且未通过，`confirm-map` 会拒绝解冻工作树；此时直接修改 `<AG_HOME>/projects/<key>/ticket.md` 并再次运行 `ag_start` 即可原地重封存、重审。
-   - **每票独立审查（`lift-18`）**：核对当前目标、来源与证据，不因累计票数自动加严；同票重审及明确同目标续作不因目标相似就判照抄，无关旧票套话仍须核查。
 2. **后门：交卷单次守门与考卷瘦身（`see-15`，单次 `switch` 席位）**
    - `ag_verify` 先由本地脚本 0 Token 执行 `pack_prescreen`（Python/JSON 语法校验、红线文件名/反引号标识符碰撞扫描、吞异常/塞 mock 作弊扫描、`.ag-check/` 断言检查）。
    - 自动为 `git diff` 逐行预标真实源文件行号（`path:line`），并对超过 `12,000` 字符的大文件仅截取文件头 + 改动上下文窗口，只调用 **1 次 `switch`** 完成最终裁决，大幅降低 Token 消耗。
@@ -195,7 +173,7 @@ python -m ag install-skill --target grok
 
 ## 多 Worker 隔离协作流
 
-在已有有效本人授权或已核验父授权继承、且实际 `ready` 的活跃工作树中，可创建最多 3 个与厂商无关的 Worker 任务档案：
+在已有有效本人授权、且实际 `ready` 的活跃工作树中，可创建最多 3 个与厂商无关的 Worker 任务档案：
 
 ```powershell
 python -m ag worker-create <PROJECT_ROOT> --portrait "做成之后：..." --anchor "保持原有鉴权行为不变" --hard-anchor "严禁运行 ag finish" --write-allow src/auth --write-allow src/core
@@ -226,7 +204,7 @@ python -m ag worker-create <PROJECT_ROOT> --portrait "做成之后：..." --anch
   - `lift-15`（红线回声）：对比上一票与本票红线，提醒被删减的旧红线。
   - `lift-16`（捷径嗅探）：扫描新增代码中的吞异常、引 mock、占位符等应试假实现信号。
   - `lift-17`（可拔除建议）：检测新增子模块的跨文件引用触点数，引导单点挂载。
-  - `lift-18`（审票观察）：展示本票分数、条款重合线索与报告身份，票数不改变审核标准。
+  -。
 - **`see`（客观观测）**：
   - `see-10` / `see-11`：重复样式症状与所有权归属透视。
   - `see-12`（强推与反向引用）：统计跨语言类型/Lint 压制符净增与反向 import。
@@ -236,46 +214,11 @@ python -m ag worker-create <PROJECT_ROOT> --portrait "做成之后：..." --anch
   - `see-17`（评审跑没跑）：现算开票审 / 批改 / 开关三席各跑过多少次、通过 / 拒绝 / 没审各多少、没审的原因与次数，以及每席最近一条结论与时间。
   - `see-18`（正本对账）：把评审历史的正本 jsonl 与 `-last.json` 缓存逐字段对上，报出不一致字段、坏行数，以及旧 `ag.sqlite` 里还剩多少行镜像。
 
-## 单票与 Markdown 长票
 
-未指定类型时使用 `single`，保留现有单票工作流；需要跨多轮持续交付时显式选择 `long`。新长票以可直接编辑的 `long.md` 为意图权威。直接打开该文件即可阅读和维护目标，不需要手写 JSON，也不需要启动 HTML 面板。
+## 单票与旧数据
 
-长票首屏先说明交什么、怎样算完成、现在到哪、当前卡点和下一步，再用 Mermaid 展示主线。适用约束、现场依据、各轮贡献、变更与待定提案放在折叠段中。每轮已开子票链接到独立原票 `.md`；尚未开票的剩余节点明确标为未开。完结原票保留当时的承诺、用户原话和来源，后续进度摘要不能覆盖原票。
+每张票独立审票，由用户本人执行 `confirm-map`，实际解冻并返回 `ready` 后才可施工。`continuation_of` 仅携带前票共同目标、贡献与未完成项作参考，不传递授权。
 
-AI 每轮先读长票大纲，再读本轮原票和真实 `delivery` 回执，恢复未完成承诺、分支原因、返回节点和回归要求；收尾时只更新所需进度段。长票整体只需要同意一次，已批准范围内的后续子票继承有效父授权，不再逐票请求人类确认；每张子票仍独立审票、隔离施工和验货。普通进度、非意图排版、进程重启与范围内贡献分解保留有效授权；当前贡献变化须重新审票。目标、约束或批准结果范围实质变化时，记录旧→新、决定者、原因、影响、回归点和旧证据适用范围，再经独立复审和用户本人决定。解冻失败保留批准来源，通过同一 `python -m ag start <PROJECT_ROOT>` 保留原票重试，不重复业务授权。待定提案保持待定，不能自动变成必做承诺。子票通过也不表示父目标已完成。
+T4 之前，修改已确认的票须先 `abandon`（候选保存在 `refs/ag/abandoned/<task_id>`），再重新开票；确认前改票可用 `start` 原地重新封存、审票。
 
-文件编辑时间与业务事件时间、实际核验时间分别记录。未核验变化标为待核验；读取文件或调整排版不会刷新核验时间。外部直接编辑后先重读，陈旧 token、坏引用、格式错误和意图冲突必须明确处理；不能覆盖外部改动、静默删除未知段落或把旧证据说成当前已验证。
-
-旧 single 票保持兼容。旧 `long-goals.sqlite3` 及其历史导出仍可只读追查，显式迁移才创建新的 Markdown 权威，并标明旧数据的历史地位；转换失败保留原文与原史，不能新旧双改或继承不存在的授权。旧 HTML 面板退出默认开票和阅读指导。
-
-**长票整体只需要同意一次**：用户首次审阅完整父目标、结果承诺和适用约束后，亲自执行带所见 `--preview <TOKEN>` 的 `confirm-map`。已批准范围内的后续子票继承可追溯父授权，不再逐票请求人类确认；每张子票仍须独立审票、隔离施工、实际解冻、真实检查与 `switch` 验货。目标、约束或批准结果范围实质变化、存在待决提案时阻塞继承，记录差异并经独立复审和用户决定。默认 `single` 仍逐票本人确认。
-
-已批准但冻结或 `thaw-failed` 时保留原批准来源与失败事实，修复权限或占用后按 `delivery.next_action` 经正式入口重试（long 使用同一 `python -m ag start <PROJECT_ROOT>`，保留 task_id；single 沿原确认恢复流程）；解冻重试不重复业务授权，真实解冻成功前不可施工。AI 不得代用户调用 `confirm-map`、手改状态或绕过门禁。
-
-long 的正式继承/恢复入口为 `python -m ag start <PROJECT_ROOT>`（MCP：`ag_start(root="<PROJECT_ROOT>")`）；活动长票保留同一 task_id，解冻失败也重试该入口，不代调 `confirm-map`。核对 `delivery.authorization` 的 `mode`、`source_task_id`、`parent_proof` 与实际 `readiness`；`mode=inherited-long` 表示继承，`approved` 表示有效授权。子票 `long_authorization` 保存父证明及当前审票绑定，`intent_map_confirmed=false` 仍表示用户没有亲自确认当前子票，不应伪造为 true。`next_action=start-long-inheritance` 表示可继承待激活，`recover-long-authorization` 表示继承恢复；两者均经同一 `start` 核验；首次缺少批准仍是 `user-confirm-map`。`status/delivery` 只读，不会授予权限。
-
-开票入口示例（single 逐票本人确认；long 首次父目标确认，后续范围内子票继承；每票独立审查）：
-
-```powershell
-# 省略类型使用单票；也可显式 --ticket-type single
-python -m ag start <PROJECT_ROOT> --portrait "本轮独立交付"
-
-# 先创建长票，read 返回 document_path 和结果节点身份；直接打开该 .md 维护正文
-python -m ag long create <PROJECT_ROOT> --goal-id department-report --title "部门报销报告" --original "从报销CSV得到可核对的部门报告" --source-ref "用户本轮原话来源" --result "只读导入CSV并拒绝非法输入" --result "部门汇总与原表对账" --result "按已确认模板交付报告"
-python -m ag long read <PROJECT_ROOT> department-report
-python -m ag start <PROJECT_ROOT> --ticket-type long --goal-id department-report --result-id <RESULT_ID> --contribution "本轮对父目标的贡献"
-# 已有长票也可用 --long-file <LONG_MD> 指定，由同一解析与授权链路处理
-
-# 由用户本人执行一次：审阅并批准完整父目标（不是只批准本轮选中的结果）
-python -m ag confirm-map <PROJECT_ROOT> --preview <TOKEN>
-# 首子票独立验货并正常关闭后，下一张范围内子票不再执行 confirm-map
-python -m ag start <PROJECT_ROOT> --ticket-type long --goal-id department-report --result-id <NEXT_RESULT_ID> --contribution "已批准父范围内的下一轮贡献"
-# 活动 long 的继承/解冻恢复保留原 task_id，不新索批准
-python -m ag start <PROJECT_ROOT>
-
-# 旧 SQLite 只读核对后，显式准备并迁移；失败不得改变原历史
-python -m ag long migration-candidate <PROJECT_ROOT> <LEGACY_GOAL_ID>
-python -m ag long migrate <PROJECT_ROOT> <LEGACY_GOAL_ID> --expected-legacy-sha256 <SOURCE_SHA256>
-```
-
-CLI `long create/read/update/history/diff/package` 与 MCP `ag_long` 使用同一文档、来源和校验；MCP `ag_start` 对应 `ticket_type`、`goal_id`／`long_file`、`result_ids` 和 `contribution`。增量操作须携带刚读到的 `expected_revision`，必要时同时携带 `expected_document_sha256`；冲突后重读并核对差异。直接编辑 Markdown 正文不要求 JSON。
+遇到 `long-ticket-retired` 时用 `abandon` 关闭活动票。旧长票数据原样留在 `<AG_HOME>`，不迁移；新代码不读取、不改写、不删除旧 `long/`、`long-goals.sqlite3` 和历史记录。归档票查询只提供降级视图，不授予权限。
