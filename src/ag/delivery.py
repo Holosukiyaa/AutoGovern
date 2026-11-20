@@ -2,11 +2,8 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -65,28 +62,11 @@ def _candidate_current(root: Path, task: dict[str, Any], verify: dict[str, Any])
     if not candidate or not tree.is_dir():
         return False
     product = str(verify.get("product_tree") or candidate)
-    git = ["git", "--no-optional-locks", "-C", str(tree)]
-    located = subprocess.run([*git, "rev-parse", "--git-path", "index"], capture_output=True, text=True)
-    if located.returncode:
-        raise ChainBroken("history-source-error: cannot read candidate working state")
-    index = Path(located.stdout.strip())
-    if not index.is_absolute():
-        index = tree / index
-    # A read-only view: compare on a scratch copy of the index, so refreshing
-    # stale stat data never rewrites (or locks) the builder's real index.
-    with tempfile.TemporaryDirectory(prefix="ag-view-") as scratch:
-        environment = {**os.environ, "GIT_INDEX_FILE": str(Path(scratch) / "index")}
-        if index.is_file():
-            shutil.copyfile(index, environment["GIT_INDEX_FILE"])
-        diff = subprocess.run([*git, "diff", "--quiet", product, "--"], capture_output=True, env=environment)
-        if diff.returncode not in {0, 1}:
-            raise ChainBroken("history-source-error: verification candidate is unavailable")
-        if diff.returncode:
-            return False
-        untracked = subprocess.run([*git, "ls-files", "--others", "--exclude-standard", "-z"], capture_output=True, env=environment)
-    if untracked.returncode:
-        raise ChainBroken("history-source-error: cannot read candidate working state")
-    if untracked.stdout:
+    from .loop import product_tree, tree_digest
+
+    # Both helpers use a disposable index/projection, exactly as verify does.
+    # Untracked product files count; the temporary .ag-check tree does not.
+    if product_tree(tree, tree_digest(tree)) != product:
         return False
     if verify.get("check_selection"):
         from .checks import selection

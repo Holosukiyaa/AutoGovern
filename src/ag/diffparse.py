@@ -34,12 +34,17 @@ def parse(text: str) -> Iterator[Line]:
     """Yield every input line; add/delete/context consume the two hunk counts.
 
     Paths refer to the new file, or the old file for a deletion. Metadata and
-    no-newline markers never advance line numbers. No file header is inspected
-    while there are hunk lines left to consume.
+    no-newline markers never advance line numbers. A diff --git header can
+    resynchronize a truncated hunk; ---/+++ inside a counted hunk remain content.
     """
     path = old_path = ""
     old = new = old_left = new_left = 0
     for raw in str(text or "").splitlines():
+        if raw.startswith("diff --git "):
+            path = old_path = ""
+            old_left = new_left = 0
+            yield Line(raw, "meta")
+            continue
         if raw.startswith("\\ No newline at end of file"):
             yield Line(raw, "meta", path)
             continue
@@ -65,9 +70,7 @@ def parse(text: str) -> Iterator[Line]:
             # Truncated/malformed hunks do not license new file-header parsing.
             yield Line(raw, "meta", path)
             continue
-        if raw.startswith("diff --git "):
-            path = old_path = ""
-        elif raw.startswith("--- "):
+        if raw.startswith("--- "):
             old_path = _path(raw[4:])
         elif raw.startswith("+++ "):
             path = _path(raw[4:]) or old_path

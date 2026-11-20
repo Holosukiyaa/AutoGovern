@@ -1687,8 +1687,17 @@ def _finish_after_thaw(
     if git(worktree, "write-tree") != expected_product:
         raise ChainBroken("candidate-changed: staged product differs from the verified candidate")
     if git(worktree, "status", "--porcelain", check=False):
-        first_line = (str(task.get("portrait") or "").strip().splitlines() or [""])[0][:70]
-        title = first_line or f"ag {task.get('id')}"
+        goal_lines = []
+        in_goal = False
+        for line in str(task.get("anchor_preview") or "").splitlines():
+            if line.startswith("## "):
+                if in_goal:
+                    break
+                in_goal = line.strip() == "## 要做成什么"
+            elif in_goal and line.strip():
+                goal_lines.append(line.strip())
+                break
+        title = goal_lines[0][:72] if goal_lines else f"ag {task.get('id')}"
         token_path = _deliver_token_path(key)
         token = uuid.uuid4().hex
         token_path.parent.mkdir(parents=True, exist_ok=True)

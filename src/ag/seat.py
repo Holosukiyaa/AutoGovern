@@ -169,11 +169,12 @@ def append_log(
     thinking: str = "",
     timings: dict[str, Any] | None = None,
     prompt_version: str = "",
+    ts: str = "",
 ) -> str:
     spec = _spec(kind)
     try:
         row: dict[str, Any] = {
-            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "ts": ts or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "outcome": outcome,
             "reason": reason,
             "configured": bool(configured),
@@ -314,6 +315,7 @@ def seat_result(
     if retried_lazy:
         merged_timings["retried_lazy"] = True
     blob: dict[str, Any] = {
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "schema": spec["schema"],
         "outcome": outcome,
         "reason": reason,
@@ -354,6 +356,7 @@ def seat_result(
             allow_same_family=bool(allow_same_family),
             thinking=thinking,
             timings=merged_timings if merged_timings else None,
+            ts=blob["ts"],
         )
     except ChainBroken as exc:
         # The review log is damaged, so this verdict cannot be recorded: it must not count.

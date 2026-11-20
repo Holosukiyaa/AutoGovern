@@ -428,10 +428,12 @@ def see_7(_root: Path, _item: dict[str, Any]) -> dict[str, Any]:
 
 
 def see_8(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
-    prev = _read_json(plug_dir(root, "see", 2) / "zone.json", {})
-    now = see_2(root, _item)
-    old = int(prev.get("undeclared_n") or now["count"])
-    return {"was": old, "now": now["count"], "delta": now["count"] - old}
+    path = plug_dir(root, "see", 8) / "counts.json"
+    prev = _read_json(path, {})
+    now = see_2(root, _item)["count"]
+    old = int(prev.get("count", now))
+    _write_json(path, {"count": now})
+    return {"was": old, "now": now, "delta": now - old}
 
 
 def see_9(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
