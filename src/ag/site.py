@@ -117,6 +117,82 @@ def snapshot(root: Path, task: dict[str, Any]) -> dict[str, Any] | None:
             "reminders": reminders, "stop": task.get("site_stop") or None}
 
 
+def product_files(tree: Path, revision: str) -> dict[str, str]:
+    """Read blob identities from a saved tree, including untracked product files."""
+    files = {}
+    for entry in _git(tree, "ls-tree", "-rz", revision).split(b"\0"):
+        if entry:
+            meta, name = entry.split(b"\t", 1)
+            path = os.fsdecode(name)
+            if _product(path):
+                files[path] = meta.split()[-1].decode("ascii")
+    return files
+
+
+def _trail_path(root: Path, task_id: str) -> Path:
+    return sealed_dir(root, task_id).with_name(task_id + ".trail.jsonl")
+
+
+def _trail_rows(root: Path, task_id: str) -> list[dict[str, Any]]:
+    path = _trail_path(root, task_id)
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def record_trail(root: Path, task: dict[str, Any], command: str, view: dict[str, Any] | None = None) -> None:
+    """Append only on product changes; never touch the real index or history."""
+    from .loop import product_tree, tree_digest
+
+    tree = Path(task["worktree"])
+    digest = product_tree(tree, tree_digest(tree), write=True)
+    rows = _trail_rows(root, task["id"])
+    if rows and rows[-1]["tree"] == digest:
+        return
+    changed = []
+    for entry in _git(tree, "diff", "--no-renames", "--numstat", "-z", task["source_head"], digest).split(b"\0"):
+        if entry:
+            added, deleted, name = entry.split(b"\t", 2)
+            if _product(os.fsdecode(name)):
+                changed.append({"path": os.fsdecode(name), "added": int(added) if added.isdigit() else 0,
+                                "deleted": int(deleted) if deleted.isdigit() else 0})
+    view = view if view is not None else snapshot(root, task)
+    row = {"at": datetime.now(timezone.utc).isoformat(), "command": command, "tree": digest,
+           "changed": changed, "out_of_scope": (view or {}).get("out_of_scope", [])}
+    path = _trail_path(root, task["id"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", newline="\n") as stream:
+        stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def trajectory(root: Path, task: dict[str, Any], tree: Path, candidate: str) -> dict[str, Any]:
+    """Summarize observed content transitions, not line-count coincidences."""
+    from .store import load_task_timeline
+
+    rows = _trail_rows(root, task["id"])
+    original = product_files(tree, task["source_head"])
+    final = product_files(tree, candidate)
+    previous = original
+    files: dict[str, Any] = {}
+    created, outside = set(), set()
+    for index, row in enumerate(rows, 1):
+        current = product_files(tree, row["tree"])
+        touched = {p for p in previous.keys() | current.keys() if previous.get(p) != current.get(p)}
+        # A first observation may already equal the base (an unchanged opening snapshot).
+        for path in sorted(touched):
+            entry = files.setdefault(path, {"rewrites": 0, "first_seen": index})
+            entry["rewrites"] += 1
+        created.update(current.keys() - original.keys())
+        outside.update(row.get("out_of_scope", []))
+        previous = current
+    span = (datetime.fromisoformat(rows[-1]["at"]) - datetime.fromisoformat(rows[0]["at"])).total_seconds() if rows else 0
+    final_changed = {p for p in original.keys() | final.keys() if original.get(p) != final.get(p)}
+    return {"snapshots": len(rows), "span_seconds": span, "files": files,
+            "created_then_deleted": sorted(created - final.keys()),
+            "out_of_scope_seen": sorted(outside - final_changed),
+            "stops": sum(step.get("phase") == "site-stopped" for step in load_task_timeline(root, task["id"])["steps"])}
+
+
 def require_running(task: dict[str, Any]) -> None:
     if task.get("site_stop"):
         raise ChainBroken("site-stopped: 工地已停工；先 handoff，再 backbrief，或者改 draft/ 后 start 并由用户重新 confirm-map")
@@ -174,6 +250,7 @@ def before_command(root: Path, command: str) -> dict[str, Any] | None:
     elif view["budget"]["ratio"] > 1.5:
         stop(root, task, "budget", "改动量超过预算 150%", view["budget"])
     view["stop"] = task.get("site_stop") or None
+    record_trail(root, task, command, view)
     if command in {"verify", "finish"} or command.startswith("worker-"):
         require_running(task)
     return view

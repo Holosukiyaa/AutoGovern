@@ -428,3 +428,32 @@ def _check_with_cfg(root: Path, cfg: dict[str, Any]) -> dict[str, Any]:
         f"反向引用 {len(reverse_edges)} · 未识别 {unrecognized}"
     )
     return result
+
+def extraneous(root: Path, tree: Path, source_head: str, candidate: str) -> dict[str, Any]:
+    """New-file evidence using the configured reference rules, without entry reachability."""
+    from .site import product_files
+
+    known = set(product_files(tree, candidate))
+    new = known - product_files(tree, source_head).keys()
+    adapter = load_adapter(root)
+    configs = list(adapter.get("adapters", {}).values()) if adapter.get("multi") else [adapter.get("config")]
+    sources, referenced = set(), set()
+    for cfg in configs:
+        if not isinstance(cfg, dict):
+            continue
+        exts = {str(ext).lower() for ext in cfg.get("source_exts", [])}
+        language_files = {p for p in known if Path(p).suffix.lower() in exts}
+        sources.update(language_files)
+        try:
+            patterns = [re.compile(str(p)) for p in cfg.get("ref_patterns", [])]
+        except re.error:
+            continue  # The existing structure diagnostic reports invalid adapter patterns.
+        for path in sorted(language_files):
+            refs, _ = _extract_refs(tree, path, patterns)
+            for ref in refs:
+                target = _resolve_ref(tree, path, ref, known)
+                if target and target != path:
+                    referenced.add(target)
+    draft = [p for p in sorted(new) if any(word in Path(p).name.lower() for word in ("notes", "scratch", "draft", "tmp", "todo"))
+             or Path(p).suffix.lower() in {".bak", ".orig", ".tmp"}]
+    return {"new_files": sorted(new), "new_islands": sorted((new & sources) - referenced), "draft_like": draft}

@@ -1052,6 +1052,8 @@ def verify(root: Path) -> dict[str, Any]:
     task_id = str(task.get("id") or "")
     enrolled = Path(state["root"])
     ensure_start_step(enrolled, task_id, task.get("portrait"), worktree)
+    from .site import record_trail
+    record_trail(enrolled, task, "verify")
     from .checks import run as run_checks, selection
 
     chosen_checks = selection(worktree, [str(x) for x in (state.get("test_argv") or [])], root=Path(state["root"]), task=task)

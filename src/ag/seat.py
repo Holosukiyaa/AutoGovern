@@ -1177,6 +1177,16 @@ def seat_run(
     candidate_root = Path(tree) if tree is not None else root
     packed["candidate"] = tree_digest(candidate_root)
     packed["product_tree"] = product_tree(candidate_root, packed["candidate"])
+    if kind == "switch" and task_id:
+        from .loop import load_task
+        from .managed import project_key
+        from .site import trajectory
+        from .structure import extraneous
+
+        active = load_task(project_key(root)) or {}
+        if active.get("id") == task_id:
+            packed["trajectory"] = trajectory(root, active, candidate_root, packed["candidate"])
+            packed["extraneous"] = extraneous(root, candidate_root, active["source_head"], packed["candidate"])
     if verification is not None:
         if (verification.get("task_id") != task_id or verification.get("candidate") != packed["candidate"]
                 or verification.get("product_tree", packed["product_tree"]) != packed["product_tree"]):

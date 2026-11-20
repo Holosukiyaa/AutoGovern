@@ -34,6 +34,12 @@ verdict 只能是 pass 或 reject。pass = 放行 finish。reject = 拒绝 finis
    - 吃不准某条有没有被违反：verdict 用 reject。evidence 写 `portrait:` 加上那条红线原文。
 3. **本票检查是否真验货**：对照 `this_ticket_checks` 与 `script_digest.check_quality`，检查 `.ag-check/` 是否验证了真实的正向与反向/拒绝边界，而非假通过桩代码。禁止把长期 `tests/` 当已经正确；本仓不应靠 `tests/` 入学绿灯放行。
 
+## 多余物
+
+桌上的 `extraneous` 是本票新增产品文件（new_files）、没有其他候选文件引用的新增源文件（new_islands）和名称像草稿的新增文件（draft_like），仅提供证据。
+每个新增文件和新增函数都必须指出服务于 `spec.results` 中哪条 results；指不出来就判 fail，附精确证据，按原有放行规则裁决。
+`trajectory` 是调用 ag 时观察到的快照、改写次数、建了又删和越界后撤回的文件、停工次数摘要；两次调用之间的过程不可见。轨迹只作参考，单独不构成拒绝理由。
+
 ## 禁止与证据硬约束
 
 - 每一个 `status="fail"` 的项，其 `evidence` 必须带精确的 `path:line`（直接取自 `annotated_diff` 或 `changed_files` 预标注行号）、`portrait:某句` 或 `probe:id`。

@@ -60,10 +60,16 @@ start 校验、把 draft 逐字节封存到 `tickets/<task_id>/`，在尚未解�
 
 要拉安灯（andon），不要绕路。走不通时主动说明原因是正常协作，不应越过票面范围硬做。
 
-有活动且 ready 的票，每次 CLI 命令或 MCP 工具调用前检查工地；status 也会收回施工权，但从不授予权限。只记录本次 site.changed、out_of_scope、budget 和 reminders，不写施工轨迹（T8）。改动相对 source_head，含未跟踪文件、排除 .ag-check/；deny 优先，allow/docs 支持精确文件名和 ** 跨目录 glob。预算取文件数比例和增删行数比例的较大者：低于 70% 记录，达到 70% 提醒，超过 100% 加重提醒，超过 150% 停工；越界立即停工。
+有活动且 ready 的票，每次 CLI 命令或 MCP 工具调用前检查工地；status 也会收回施工权，但从不授予权限。记录本次 site.changed、out_of_scope、budget 和 reminders，并保留产品树变化的施工轨迹。改动相对 source_head，含未跟踪文件、排除 .ag-check/；deny 优先，allow/docs 支持精确文件名和 ** 跨目录 glob。预算取文件数比例和增删行数比例的较大者：低于 70% 记录，达到 70% 提醒，超过 100% 加重提醒，超过 150% 停工；越界立即停工。
 
 `andon <root> --reason "走不通的原因"` 主动停工。ag 复用冻结机制，记录 site-stopped 事件和 task.site_stop。readiness=stopped、next_action=handoff、hazards 含 site-stopped；verify、finish 和 worker 拒绝施工。abandon、andon、handoff、backbrief、confirm-map 不触发现场检查。
 
 停工后有两条路：① `handoff <root>` 生成客观简报，保存在 tickets/<id>.handoff/，包含原票、结果、改动与越界清单、预算、原因和给新会话的提示词；建议交给新会话。接手会话写 JSON `{ "out_of_scope": ["实际越界文件"], "goal": "至少二十字的目标复述", "next": "处理计划" }`，用 `backbrief <root> --file <json>` 回述。清单必须与现场完全一致，goal 至少 20 字，next 非空，否则 backbrief-mismatch 并保持冻结。通过后仍先核对 T5 既有授权证明，才解冻并记录 site-resumed；AI 可以执行 backbrief，但不能借此取得新授权。越界或超预算未解决，下一次调用仍会再次停工。② 修改 draft/ 后 start，重新审票，由用户本人 confirm-map；确认成功清除 site_stop，保留已有代码。
 
 MCP 提供 ag_andon、ag_handoff、ag_backbrief。没有调用 ag 就不会触发检查，这是已知局限；verify 前一定检查。不能通过改状态、改封存或绕过 T5 解锁。遇到 `site-stopped` 先交接；遇到 `backbrief-mismatch` 按客观事实修正回述。
+
+## 工地轨迹与多余物
+
+现场检查之后及 verify 开始时，在 `<AG_HOME>/projects/<key>/tickets/<id>.trail.jsonl` 追加产品快照，关票后保留。记录时间、命令、产品树、各文件增删行数，包含未跟踪产品文件、排除 `.ag-check`；产品树未变不追加。只在调用 ag 时观察，两次调用之间的中间过程看不到。使用临时 index，不动真实暂存区，快照不进入 history。
+
+终审收到 `trajectory`：快照数、时间跨度、各文件改写次数与首次出现序号、建了又删和越界后撤回的文件、停工次数；轨迹只作参考，单独不构成拒绝理由。`extraneous` 列出新增文件、按适配器引用规则判定的无人引用新增源文件，以及像草稿的名称。终审会审查多余物：每个新增文件和新增函数必须说明服务于 `spec.results` 哪一条，新增文件须有出处，无法说明就判 fail。原有审核和 T7 停工规则继续适用，走不通要拉安灯，不要绕路。
