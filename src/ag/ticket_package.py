@@ -8,6 +8,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
+from contextlib import contextmanager, nullcontext
 import time
 import uuid
 from datetime import datetime, timezone
@@ -94,6 +96,13 @@ def file_hashes(folder: Path) -> dict[str, str]:
         if path.is_file() and rel != "seal.json":
             hashes[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
     return hashes
+
+
+def draft_changed(root: Path, seal: dict[str, Any]) -> bool:
+    try:
+        return file_hashes(draft_dir(root)) != seal["files"]
+    except (OSError, ChainBroken):
+        return True
 
 
 def load_draft(root: Path) -> dict[str, Any]:
@@ -241,20 +250,30 @@ def load_seal(root: Path, task: dict[str, Any], *, check_files: bool = True) -> 
     return seal
 
 
-def seal_package(root: Path, task: dict[str, Any], worktree: Path, package: dict[str, Any]) -> dict[str, Any]:
-    folder = sealed_dir(root, task["id"])
-    if folder.exists():
-        # Pre-confirmation retries retain the earlier package outside the current seal.
-        revisions = folder.with_name(folder.name + ".revisions")
-        revisions.mkdir(exist_ok=True)
-        previous = revisions / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8])
-        shutil.copytree(folder, previous)
-        shutil.rmtree(folder)
-    folder.mkdir(parents=True)
-    for rel in package["files"]:
-        atomic_write(folder / rel, (draft_dir(root) / rel).read_bytes())
-    if file_hashes(folder) != package["files"]:
-        raise ChainBroken("sealed-check-changed: draft changed while sealing; retry start")
+def _git(root: Path, *args: str) -> None:
+    result = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if result.returncode:
+        raise ChainBroken(f"baseline-source-error: {result.stderr.strip()}")
+
+
+@contextmanager
+def _source_copy(root: Path, source_head: str):
+    """A detached, frozen opening checkout; always remove its worktree registration."""
+    from .freeze import freeze_worktree, thaw_worktree
+
+    with tempfile.TemporaryDirectory(prefix="ag-baseline-") as scratch:
+        tree = Path(scratch) / "source"
+        try:
+            _git(root, "worktree", "add", "--detach", str(tree), source_head)
+            freeze_worktree(tree)
+            yield tree
+        finally:
+            if tree.exists():
+                thaw_worktree(tree)
+                _git(root, "worktree", "remove", "--force", str(tree))
+
+
+def _baseline(folder: Path, worktree: Path, package: dict[str, Any]) -> list[dict[str, Any]]:
     environment = os.environ.copy()
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     environment["PYTHONPATH"] = str(worktree / "src") + os.pathsep + str(worktree)
@@ -272,9 +291,75 @@ def seal_package(root: Path, task: dict[str, Any], worktree: Path, package: dict
             raise ChainBroken(f"baseline-target-green: {check['file']}")
         if check["kind"] == "guard" and code != 0:
             raise ChainBroken(f"baseline-guard-red: {check['file']}: {tail}")
-    seal = {"schema": "ag.seal.v1", "task_id": task["id"], "source_head": task["source_head"], "sealed_at": datetime.now(timezone.utc).isoformat(), "files": package["files"], "baseline": baseline, "ticket_review": {}}
-    write_json(folder / "seal.json", seal)
-    return seal
+    return baseline
+
+
+@contextmanager
+def prepare_package(root: Path, task: dict[str, Any], package: dict[str, Any], *, opening_tree: Path | None = None):
+    """Prepare exact bytes, baseline and seal without changing any live ticket state."""
+    folder = sealed_dir(root, task["id"])
+    folder.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=f".{task['id']}.pending-", dir=folder.parent) as scratch:
+        pending = Path(scratch) / "package"
+        pending.mkdir()
+        for rel in package["files"]:
+            atomic_write(pending / rel, (draft_dir(root) / rel).read_bytes())
+        if file_hashes(pending) != package["files"]:
+            raise ChainBroken("sealed-check-changed: draft changed while preparing; retry start")
+        source = nullcontext(opening_tree) if opening_tree is not None else _source_copy(root, task["source_head"])
+        with source as tree:
+            baseline = _baseline(pending, tree, package)
+        if file_hashes(pending) != package["files"]:
+            raise ChainBroken("sealed-check-changed: baseline altered the prepared package")
+        seal = {"schema": "ag.seal.v1", "task_id": task["id"], "source_head": task["source_head"],
+                "sealed_at": datetime.now(timezone.utc).isoformat(), "files": package["files"],
+                "baseline": baseline, "ticket_review": {}}
+        write_json(pending / "seal.json", seal)
+        yield pending, seal
+
+
+@contextmanager
+def install_prepared(root: Path, task: dict[str, Any], pending: Path):
+    """Rollback until begin_review: package swap, task pointer and live permissions."""
+    from .freeze import freeze_worktree, thaw_worktree
+
+    folder = sealed_dir(root, task["id"])
+    revisions = folder.with_name(folder.name + ".revisions")
+    previous = revisions / (datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8])
+    task_path = project_dir(root) / "task.json"
+    original_task = task_path.read_bytes() if task_path.exists() else None
+    restore_writes = bool(task.get("intent_map_confirmed") and task.get("worktree_ready") and not task.get("thaw_error"))
+    moved_old = installed = review_started = False
+
+    def begin_review() -> None:
+        nonlocal review_started
+        review_started = True
+
+    try:
+        freeze_worktree(Path(task["worktree"]))
+        if folder.exists():
+            revisions.mkdir(exist_ok=True)
+            folder.rename(previous)
+            moved_old = True
+        pending.rename(folder)
+        installed = True
+        yield begin_review
+    except BaseException:
+        if not review_started:
+            if installed:
+                folder.rename(pending)
+            if moved_old:
+                previous.rename(folder)
+            if revisions.is_dir() and not any(revisions.iterdir()):
+                revisions.rmdir()
+            if original_task is not None:
+                if task_path.read_bytes() != original_task:
+                    atomic_write(task_path, original_task)
+            else:
+                task_path.unlink(missing_ok=True)
+            if restore_writes:
+                thaw_worktree(Path(task["worktree"]))
+        raise
 
 
 def complete_review(root: Path, task: dict[str, Any], seal: dict[str, Any]) -> None:

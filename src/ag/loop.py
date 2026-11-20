@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+from copy import deepcopy
 import inspect
 import json
 import os
@@ -791,7 +792,7 @@ def status(root: Path) -> dict[str, Any]:
             "user-confirm-map": "展示完整票面，由用户亲自执行 confirm-map；AI 不得代调。",
             "recover-thaw": "已批准尚未有成功解冻记录，核对权限后由用户重试原票 confirm-map。",
             "abandon": "用 abandon 关闭本票（候选保存在 refs/ag/abandoned/<task_id>），再重新开票；旧长票数据原样保留。",
-            "revise-ticket-and-start": "按本票拒绝证据修票，再 start 原地重审。",
+            "revise-ticket-and-start": "修改 draft/ 后 start 原地改票；干净 source_head 基线通过后冻结工地并重审，再由用户 confirm-map，之后重新 verify。",
             "await-user-decision": "保留完整目标和未完成项，承诺或硬边界变化等待用户决定。",
             "implement-and-verify": "在批准工作树继续完整功能，完成本票 .ag-check 检查后 verify。",
             "finish": "本候选有成功验据，核对完整结果后 finish。",
@@ -838,28 +839,43 @@ def _run_ticket_review(
     )
 
 
-def _review_package(root: Path, task: dict[str, Any], package: dict[str, Any]) -> None:
+def _review_package(root: Path, task: dict[str, Any], package: dict[str, Any], *, revising: bool = False) -> None:
     from . import ticket_package as packages
     from .authorization import bind_ticket
     from .anchor_map import hard_rules
 
+    candidate = deepcopy(task)
     spec = package["spec"]
-    task["anchors"] = [{"id": row["id"], "text": row["text"], "kind": "soft"} for row in spec["results"]]
-    task["fixed"] = [row["text"] for row in spec["results"]]
-    task["fixed_rules"] = hard_rules(task["anchors"])
-    task["current_anchor"] = task["anchors"][0]["id"]
-    task["redlines"] = [row["text"] for row in spec.get("redlines", [])]
-    task["package_spec"] = spec
-    task["anchor_preview"] = package["ticket"]
+    candidate["anchors"] = [{"id": row["id"], "text": row["text"], "kind": "soft"} for row in spec["results"]]
+    candidate["fixed"] = [row["text"] for row in spec["results"]]
+    candidate["fixed_rules"] = hard_rules(candidate["anchors"])
+    candidate["current_anchor"] = candidate["anchors"][0]["id"]
+    candidate["redlines"] = [row["text"] for row in spec.get("redlines", [])]
+    candidate["package_spec"] = spec
+    candidate["anchor_preview"] = package["ticket"]
+    if revising:
+        candidate["portrait"] = package["ticket"]
     path = packages.sealed_dir(root, task["id"]) / "ticket.md"
-    task["anchor_preview_path"] = task["anchor_map_path"] = str(path)
-    seal = packages.seal_package(root, task, Path(task["worktree"]), package)
-    review = _run_ticket_review(root, intent_body=package["ticket"], portrait=task["portrait"],
-                                anchors=task["anchors"], redlines=task["redlines"],
-                                task_id=task["id"], goal_link=task.get("goal_link"))
-    task["ticket_review"] = review
-    packages.complete_review(root, task, seal)
-    bind_ticket(root, task)
+    candidate["anchor_preview_path"] = candidate["anchor_map_path"] = str(path)
+    candidate["verify"], candidate["verified_tree"] = None, ""
+    for name in ("intent_identity", "authorization_identity", "intent_map_confirmed_at", "intent_map_confirmed_by", "check_argv", "verified_executor_src"):
+        candidate.pop(name, None)
+    # Persist a fail-closed pending review before contacting the independent seat.
+    candidate["ticket_review"] = {"configured": True, "outcome": "unavailable", "reason": "review-pending"}
+    opening_tree = None if revising else Path(task["worktree"])
+    with packages.prepare_package(root, task, package, opening_tree=opening_tree) as (pending, seal):
+        with packages.install_prepared(root, task, pending) as begin_review:
+            bind_ticket(root, candidate)
+            save_task(project_key(root), candidate)
+            begin_review()
+            candidate["ticket_review"] = _run_ticket_review(root, intent_body=package["ticket"], portrait=candidate["portrait"],
+                                                            anchors=candidate["anchors"], redlines=candidate["redlines"],
+                                                            task_id=task["id"], goal_link=candidate.get("goal_link"))
+            packages.complete_review(root, candidate, seal)
+            bind_ticket(root, candidate)
+            save_task(project_key(root), candidate)
+    task.clear()
+    task.update(candidate)
 
 
 def start(
@@ -892,23 +908,16 @@ def start(
         raise ChainBroken("canonical-dirty: canonical checkout is dirty; clean it before start")
     if not state["hook_ok"]:
         raise ChainBroken("hook-removed: hook is not installed; re-enroll")
-    if existing and recorded(existing):
-        validate_ticket(root, existing)
-        # T4b owns changes after confirmation. Do not silently replace this seal.
-        draft = packages.load_draft(root)
-        if draft["files"] != packages.load_seal(root, existing)["files"]:
-            raise ChainBroken("intent-identity-changed: confirmed draft changed; abandon and open a new ticket")
-        return status(root)
     package = packages.load_draft(root)
     if existing:
-        worktree = Path(existing["worktree"])
-        if not worktree.is_dir():
-            raise ChainBroken("worktree-missing: use abandon before starting another ticket")
+        if not Path(existing["worktree"]).is_dir():
+            raise ChainBroken("worktree-missing: recover the worktree before revising the ticket")
         current = packages.load_seal(root, existing)
         if package["files"] == current["files"]:
+            if recorded(existing):
+                validate_ticket(root, existing)
             return status(root)
-        _review_package(root, existing, package)
-        save_task(key, existing)
+        _review_package(root, existing, package, revising=True)
         append_task_step(root, existing["id"], "re-seal", task=task_facts(existing))
         return status(root)
     if not _is_canonical(root):

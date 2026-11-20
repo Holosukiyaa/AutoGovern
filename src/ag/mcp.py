@@ -20,7 +20,7 @@ INSTRUCTIONS = (
     "the ticket never lives in the project tree. "
     "Single tickets require personal confirm-map per ticket. "
     "AI must never call ag_confirm_map or edit approval state. "
-    "Before T4, changing a confirmed ticket requires ag_abandon (candidate preserved under refs/ag/abandoned/<task_id>) and a new ticket. "
+    "To revise any ticket, edit draft/ then ag_start: validate and baseline on clean source_head before freezing construction, archiving the old seal and independently reviewing the new one. revise-ticket-and-start is the guidance; human confirm-map is required again, followed by a fresh verify. Rejected preparation leaves the current ticket unchanged. "
     "For long-ticket-retired use ag_abandon; archived long data stays untouched in AG_HOME without migration. "
     "ag_delivery is a read-only task query shared with CLI delivery, including archived tasks. "
     "Keep the complete goal and remaining outcomes; internal phases do not require new tickets. "

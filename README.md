@@ -105,7 +105,7 @@ start 校验、把 draft 逐字节封存到 `tickets/<task_id>/`，在尚未解�
 
 每张票仍须用户本人 confirm-map，AI 不得代调；实际解冻并返回 ready 后才可施工。verify 运行封存检查、工地 `.ag-check/check_*.py` 追加检查及项目登记命令，并调用 switch；finish 复核 seal、候选和审核后快进合入。封存 ticket.md 不回写现场段，现场由 status/delivery 展示。
 
-确认前修改 draft 再 start，在同一 task_id 重封存、重跑基线并重新审票；没有改动只恢复现场。确认后改票属于 T4b，本版先 abandon（候选保留在 `refs/ag/abandoned/<task_id>`）再重新开票。不要直接改封存区。
+确认前或确认后需要改票，都修改 draft/ 后执行 start；status/delivery 的 `revise-ticket-and-start` 提示走这条路径。先校验新包，在 source_head 的干净副本上跑基线并准备新封存；全部成功才冻结现有工地，把旧包移到 `tickets/<task_id>.revisions/<时间戳>/`，换上新包并重新审票。工地代码保留，旧确认和旧验货作废，用户必须再次 confirm-map 后重新 verify。格式、基线或送审前失败保持原封存、确认和权限，不增加修订；审票拒绝则保留已提交的新包，工地冻结，可继续改 draft/ 再 start。未改 draft 的 start 只恢复现场，不重审、不产生修订。不要直接改封存区。
 
 | 拒绝码 | 处理方式 |
 |---|---|
@@ -118,7 +118,7 @@ start 校验、把 draft 逐字节封存到 `tickets/<task_id>/`，在尚未解�
 | `baseline-guard-red` | 指出的 guard 在基线上失败，先核对原有行为和检查，不能放宽检查。 |
 | `sealed-check-changed` | 封存区文件被修改、删除或新增；恢复封存原文后重新验货，不改 seal 来掩盖。 |
 | `seal-invalid` | seal.json 损坏或缺少字段；status 显示风险，verify/finish 拒绝，abandon 仍可关闭。 |
-| `legacy-ticket-format` | 旧活动票没有封存包，只能 abandon 关闭后用 draft/ 重新开票。 |
+| `legacy-ticket-format` | 旧活动票没有封存包时仅支持关闭：使用 abandon；后续使用 draft/ 文件包。 |
 
 ## 审核配置（项目 `config.json` 的 `critic` 段）
 
@@ -205,6 +205,6 @@ python -m ag worker-create <PROJECT_ROOT> --portrait "做成之后：..." --anch
 
 每张票独立审票，由用户本人执行 `confirm-map`，实际解冻并返回 `ready` 后才可施工。`continuation_of` 仅携带前票共同目标、贡献与未完成项作参考，不传递授权。
 
-T4b 落地之前，修改已确认的票须先 `abandon`（候选保存在 `refs/ag/abandoned/<task_id>`），再重新开票；确认前改票可用 `start` 原地重新封存、审票。
+修改已确认的票时，按 `revise-ticket-and-start` 编辑 draft/ 并运行 start；同票重审后由用户再次 confirm-map，然后重新 verify。
 
 遇到 `long-ticket-retired` 时用 `abandon` 关闭活动票。旧长票数据原样留在 `<AG_HOME>`，不迁移；新代码不读取、不改写、不删除旧 `long/`、`long-goals.sqlite3` 和历史记录。归档票查询只提供降级视图，不授予权限。

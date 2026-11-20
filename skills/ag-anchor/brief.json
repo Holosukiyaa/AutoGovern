@@ -5,6 +5,6 @@
   ],
   "wait": [
     "展示封存包、基线和审票结论，等待用户本人 confirm-map；实际 ready 后才施工。",
-    "AI 不代确认，不改状态或绕过门禁；确认后改票尚未实现，abandon 保留 refs/ag/abandoned/<task_id> 后重开。"
+    "AI 不代确认，不改状态或绕过门禁；改票按 revise-ticket-and-start 修改 draft/，start 同票重审后由用户再次 confirm-map，并重新 verify。"
   ]
 }

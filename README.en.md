@@ -85,7 +85,7 @@ Start seals exact bytes under tickets/<task_id>/ and atomically writes seal.json
 
 The user personally runs confirm-map; AI never calls it. Only ready allows construction. Verify runs sealed checks, additional worktree .ag-check checks and registered project commands, then probes and switch review. Finish rechecks the seal and verified candidate. Sealed ticket.md is never rewritten with status information.
 
-Before confirmation, editing draft and calling start re-seals and reviews the same task. Confirmed-ticket revision is T4b; until then abandon (candidate under refs/ag/abandoned/<task_id>) and open a new package.
+For changes before or after confirmation, edit draft/ and call start on the same ticket. revise-ticket-and-start directs this flow. Validate, run the new baseline on a clean source_head copy and prepare the seal first; only then freeze construction, archive the old seal in tickets/<id>.revisions/ and re-review. Preparation failures preserve the current seal, confirmation, permissions and code; a reviewer rejection keeps the new seal and construction frozen. Personal confirm-map and a fresh verify are required again. Unchanged drafts only resume; no revision or review is created.
 
 Refusals: ticket-package-missing, ticket-md-invalid, spec-invalid (with field path), result-uncovered, invalid-continuation, baseline-target-green, baseline-guard-red, sealed-check-changed, seal-invalid, legacy-ticket-format. Legacy active tickets or invalid seals can still be abandoned; legacy ticket data is never migrated.
 
@@ -170,6 +170,6 @@ AG uses a **0-Token deterministic script pre-screen + one-front-one-back (`ticke
 
 ## Confirmed tickets and archived data
 
-Before T4b, changing a confirmed ticket requires `abandon` (candidate preserved under `refs/ag/abandoned/<task_id>`) and a new ticket. Edits before confirmation can be sealed and reviewed again in place with `start`.
+To change a confirmed ticket, edit draft/ and run start, obtain independent review and personal confirm-map again, then verify the revised package. Existing construction stays in place; old verification is invalidated.
 
 For `long-ticket-retired`, use `abandon` to close the active ticket. Legacy long ticket data stays untouched in `<AG_HOME>` without migration: new code does not read, rewrite or delete `long/`, `long-goals.sqlite3` or historical records. Archived ticket queries provide a degraded view without granting authority.

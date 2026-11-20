@@ -260,10 +260,12 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
             advisories.append(issue("historical-review", row["ref"], "retain-original-conclusion", outcome=row.get("outcome"), items=row.get("items") or []))
     identity_changed = False
     package_error = ""
+    draft_changed = False
     if is_active and "long_goal" not in task:
-        from .ticket_package import load_seal
+        from .ticket_package import load_seal, draft_changed as changed_draft
         try:
-            load_seal(root, task)
+            seal = load_seal(root, task)
+            draft_changed = current_confirmation and changed_draft(root, seal)
         except ChainBroken as exc:
             package_error = str(exc).split(":", 1)[0]
             blockers.append(issue(package_error, str(exc), "abandon" if package_error == "legacy-ticket-format" else "restore-sealed-package"))
@@ -284,9 +286,11 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
             live_error = str(exc)
             blockers.append(issue("live-construction-unavailable", live_error, "recover-thaw"))
     readiness = "ready" if ready else "thaw-failed" if task.get("thaw_error") or live_error else "approved-but-frozen" if approved else "await-confirmation"
-    if identity_changed:
+    if draft_changed:
+        action = "revise-ticket-and-start"
+    elif identity_changed:
         readiness = "await-user-decision" if current_confirmation else "await-confirmation"
-        action = "abandon" if current_confirmation else "revise-ticket-and-start"
+        action = "revise-ticket-and-start"
     elif task.get("cleanup_error"):
         readiness, action = "cleanup-pending", "retry-cleanup"
         blockers.append(issue("cleanup-pending", task["cleanup_error"], action))
