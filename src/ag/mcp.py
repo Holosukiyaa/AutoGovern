@@ -19,7 +19,7 @@ INSTRUCTIONS = (
     "ag_start reads <AG_HOME>/projects/<key>/draft/: ticket.md (four human sections), spec.json and checks/. target baselines must fail and guard baselines must pass before review; tickets/<id>/ is sealed with seal.json. verify runs sealed and added checks; altered packages refuse sealed-check-changed, invalid seals refuse seal-invalid, missing active seals refuse legacy-ticket-format. "
     "the ticket never lives in the project tree. "
     "Single tickets require personal confirm-map per ticket. "
-    "AI must never call ag_confirm_map or edit approval state. "
+    "ag_confirm_map has been removed. Only the user runs confirm-map or approve-self in their own terminal; AI hands over the CLI command and waits, without editing approval state. Non-console callers are refused human-console-required; three wrong codes give human-code-mismatch; an unproven confirmation gives authorization-unproven. "
     "To revise any ticket, edit draft/ then ag_start: validate and baseline on clean source_head before freezing construction, archiving the old seal and independently reviewing the new one. revise-ticket-and-start is the guidance; human confirm-map is required again, followed by a fresh verify. Rejected preparation leaves the current ticket unchanged. "
     "For long-ticket-retired use ag_abandon; archived long data stays untouched in AG_HOME without migration. "
     "ag_delivery is a read-only task query shared with CLI delivery, including archived tasks. "

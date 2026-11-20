@@ -18,7 +18,7 @@ description: >
 
 项目配置正本为 `<AG_HOME>/projects/<key>/config.json` 的 `critic` 区，旧 `critic.json` 保持兼容；全局席位仍可从 `<AG_HOME>/critic.json` 读取：项目 `config.json` 没有 `critic` 段时继承全局配置（升级不会再写入默认段），只要有 `critic` 段（无论内容）就由项目段覆盖全局。`confirm-map` 只读配置并重验审核身份：配置损坏报 `config-error`，审核配置变化报 `intent-identity-changed`，修复后重审；每张票按本人确认流程执行。API Key 只检查环境变量是否存在，始终不索要、不打印明文。
 
-票包包括 draft/ticket.md、draft/spec.json 和 draft/checks/。人话票位于 `<AG_HOME>/projects/<key>/draft/ticket.md`，完整展示后用户亲自执行 `python -m ag confirm-map <PROJECT_ROOT>`。AI 不得代调确认 CLI/MCP。进程会即时输出阶段，真实解冻成功才 `ready`；解冻重试保留批准。MCP 暴露只读 `ag_delivery`；更新软件后重启宿主中的旧 MCP 进程以加载新工具。用 `python -m ag install-skill --target codex` 或 `grok` 同步四套自带技能；安装保留旧版备份。
+票包包括 draft/ticket.md、draft/spec.json 和 draft/checks/。人话票位于 `<AG_HOME>/projects/<key>/draft/ticket.md`，完整展示后用户亲自执行 `python -m ag confirm-map <PROJECT_ROOT>`。AI 只交出 CLI 确认命令并等待用户本人执行；确认用 MCP 工具已删除。进程会即时输出阶段，真实解冻成功才 `ready`；解冻重试保留批准。MCP 暴露只读 `ag_delivery`；更新软件后重启宿主中的旧 MCP 进程以加载新工具。用 `python -m ag install-skill --target codex` 或 `grok` 同步四套自带技能；安装保留旧版备份。
 
 - **返回项目总入口**：[`AGENTS.md`](../../AGENTS.md)
 - **查看 6 步使用流程**：[`skills/ag-guide/SKILL.md`](../ag-guide/SKILL.md)
@@ -204,3 +204,19 @@ start 校验、把 draft 逐字节封存到 `tickets/<task_id>/`，在尚未解�
 每张票仍须用户本人 confirm-map，AI 不得代调；实际解冻并返回 ready 后才可施工。verify 运行封存检查、工地 `.ag-check/check_*.py` 追加检查及项目登记命令，并调用 switch；finish 复核 seal、候选和审核后快进合入。封存 ticket.md 不回写现场段，现场由 status/delivery 展示。
 
 确认前或确认后需要改票，都修改 draft/ 后执行 start；status/delivery 的 `revise-ticket-and-start` 提示走这条路径。先校验新包，在 source_head 的干净副本上跑基线并准备新封存；全部成功才冻结现有工地，把旧包移到 `tickets/<task_id>.revisions/<时间戳>/`，换上新包并重新审票。工地代码保留，旧确认和旧验货作废，用户必须再次 confirm-map 后重新 verify。格式、基线或送审前失败保持原封存、确认和权限，不增加修订；审票拒绝则保留已提交的新包，工地冻结，可继续改 draft/ 再 start。未改 draft 的 start 只恢复现场，不重审、不产生修订。不要直接改封存区。
+
+## 真人确认与授权证明
+
+确认只能由用户本人在自己的终端执行。AI 负责展示票包、把 `python -m ag confirm-map <PROJECT_ROOT>` 命令交给用户并等待，不代为执行。自治放行 `approve-self` 同样需要人在场。MCP 的 `ag_confirm_map` 已删除。
+
+先核对原有状态，再在 stderr 展示封存票面四段原文、一行机器摘要和 4 位短码；用户最多输入 3 次，忽略大小写与首尾空白。stdout 只输出 JSON 回执。Windows 仅凭 stdin 的 GetConsoleMode 成功判断真控制台；其他系统要求 os.isatty(0) 和 termios.tcgetattr(0) 均成功。Git Bash/mintty、Windows Terminal 尚未真人实测，若被拒请换用自己的 PowerShell/cmd 窗口，Git Bash 也可尝试 winpty 前缀。
+
+`AG_SYNTHETIC_CONFIRM=1` 仅供测试，且 AG_HOME 的真实路径必须在当前进程 tempfile.gettempdir() 下才生效；合成确认仍打印确认屏，不出短码，记录 synthetic 证明。真实默认 AG_HOME 不接受合成确认。授权必须同时匹配任务布尔值、authorization_identity 和历史确认事件的 proof；合成证明离开临时目录即失效。旧的无证明确认不迁移。
+
+| 拒绝码 | 含义与处理 |
+|---|---|
+| `human-console-required` | stdin 不是真控制台。把命令交给用户，在用户自己的终端运行。 |
+| `human-code-mismatch` | 连续 3 次短码不符，未记录批准；用户核对票面后可重试。 |
+| `authorization-unproven` | 缺少同身份的有效证明事件，布尔值不授予权限；人工核对确认来源，不能靠编辑状态解锁。 |
+
+已知边界：本关口防止工具随手代签，不防刻意伪造控制台、注入按键或重写历史。历史 sha256 不带密钥；这些有意绕过留待方案 D，本版不实现个人口令。

@@ -173,3 +173,13 @@ AG uses a **0-Token deterministic script pre-screen + one-front-one-back (`ticke
 To change a confirmed ticket, edit draft/ and run start, obtain independent review and personal confirm-map again, then verify the revised package. Existing construction stays in place; old verification is invalidated.
 
 For `long-ticket-retired`, use `abandon` to close the active ticket. Legacy long ticket data stays untouched in `<AG_HOME>` without migration: new code does not read, rewrite or delete `long/`, `long-goals.sqlite3` or historical records. Archived ticket queries provide a degraded view without granting authority.
+
+## Human presence and authorization
+
+Only the user runs `confirm-map` and `approve-self` in their own terminal. AI hands over the CLI command and waits. The MCP tool `ag_confirm_map` has been removed. After existing state checks, stderr shows the sealed human ticket, machine summary and a four-character code. The user has three attempts, ignoring case and surrounding whitespace; stdout remains a single JSON receipt.
+
+Windows checks GetConsoleMode on the stdin handle only; POSIX requires both os.isatty(0) and termios.tcgetattr(0). A non-console caller gets `human-console-required`; three incorrect codes produce `human-code-mismatch`. Git Bash/mintty and Windows Terminal still need human testing; use a personal PowerShell/cmd window if refused, or try winpty from Git Bash.
+
+`AG_SYNTHETIC_CONFIRM=1` is test-only and works only when the resolved AG_HOME is below this process's tempfile.gettempdir(). It still prints the screen, skips the code and records a synthetic proof. The real default AG_HOME never accepts synthetic confirmation. Authorization requires both the task flag and a confirmation event matching authorization_identity with a valid proof. Synthetic proofs become invalid outside temp. A flag without such an event yields `authorization-unproven`; old confirmations are not migrated.
+
+Known boundary: this prevents casual approval through AI tools; it does not prevent deliberate console fabrication, keystroke injection or history rewriting (history hashes are not keyed). Personal passphrases (scheme D) remain deferred.

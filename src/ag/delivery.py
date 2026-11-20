@@ -272,7 +272,11 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
     from .authorization import recorded
 
     retired = "long_goal" in task
-    approved = (recorded(task) or goal["confirmed"]) and not retired
+    from .presence import authorized
+    unproven = is_active and recorded(task) and not authorized(root, task)
+    if unproven:
+        blockers.append(issue("authorization-unproven", "No matching confirmation event with a valid presence proof", "user-confirm-map"))
+    approved = (recorded(task) or goal["confirmed"]) and not retired and not unproven
     live_error = ""
     goal["human_confirmed"] = current_confirmation
     goal["confirmed"] = approved
@@ -286,7 +290,9 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
             live_error = str(exc)
             blockers.append(issue("live-construction-unavailable", live_error, "recover-thaw"))
     readiness = "ready" if ready else "thaw-failed" if task.get("thaw_error") or live_error else "approved-but-frozen" if approved else "await-confirmation"
-    if draft_changed:
+    if unproven:
+        action = "user-confirm-map"
+    elif draft_changed:
         action = "revise-ticket-and-start"
     elif identity_changed:
         readiness = "await-user-decision" if current_confirmation else "await-confirmation"

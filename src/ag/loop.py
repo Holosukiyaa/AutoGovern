@@ -773,7 +773,7 @@ def status(root: Path) -> dict[str, Any]:
 
     out["delivery"] = build_delivery_snapshot(root, str((task or {}).get("id") or ""))
     for issue in out["delivery"].get("blockers", []):
-        if issue["kind"] in {"seal-invalid", "sealed-check-changed", "legacy-ticket-format"}:
+        if issue["kind"] in {"seal-invalid", "sealed-check-changed", "legacy-ticket-format", "authorization-unproven"}:
             out["hazards"].append(issue["kind"])
     out["readiness"] = out["delivery"]["readiness"]
     out["next_action"] = out["delivery"]["next_action"]
@@ -900,6 +900,9 @@ def start(
     if existing:
         require_single_ticket(existing)
         packages.load_seal(root, existing)
+        if recorded(existing):
+            from .presence import require_authorization
+            require_authorization(root, existing)
     ensure_local_excludes(root)
     ensure_upgraded(root)
     state = status(root)
@@ -1313,6 +1316,8 @@ def _complete_activation(root: Path, task: dict[str, Any], identity: str) -> Non
 
     if not recorded(task):
         raise ChainBroken("intent-map-unconfirmed: activation requires recorded authority")
+    from .presence import require_authorization
+    require_authorization(root, task)
     key = project_key(root)
     worktree, files = _activation_site(root, task)
     try:
@@ -1370,6 +1375,8 @@ def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
     require_single_ticket(task)
     identity = validate_confirmation(root, task)
     worktree, _ = _activation_site(root, task)
+    from .presence import require_human
+    proof = require_human(root, task)
     if not task.get("intent_map_confirmed"):
         task["intent_map_confirmed_at"] = datetime.now(timezone.utc).isoformat()
         task["intent_map_confirmed_by"] = str(by or "user-cli")
@@ -1378,9 +1385,8 @@ def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
         task["intent_identity"] = identity
         task["worktree_ready"] = False
         save_task(key, task)
-    if not any(step.get("phase") == "intent-map-confirmed" and step.get("intent_identity") == identity for step in load_task_timeline(root, task["id"])["steps"]):
-        from .delivery import task_facts
-        append_task_step(root, task["id"], "intent-map-confirmed", by=task.get("intent_map_confirmed_by") or "user-cli", intent_identity=identity, task=task_facts(task))
+    from .delivery import task_facts
+    append_task_step(root, task["id"], "intent-map-confirmed", by=task.get("intent_map_confirmed_by") or "user-cli", intent_identity=identity, proof=proof, task=task_facts(task))
     stage("approval-recorded")
     stage("thawing-worktree")
     _complete_activation(root, task, identity)
@@ -1524,6 +1530,9 @@ def finish(root: Path) -> dict[str, Any]:
     require_single_ticket(task)
     from .ticket_package import load_seal
     load_seal(root, task)
+    if task.get("intent_map_confirmed"):
+        from .presence import require_authorization
+        require_authorization(root, task)
     if task.get("process") == "completed" and task.get("merged_head"):
         if git(root, "rev-parse", "HEAD") != task["merged_head"]:
             raise ChainBroken("cleanup-pending: canonical moved since merge; inspect before retry")
@@ -1628,6 +1637,8 @@ def finish(root: Path) -> dict[str, Any]:
         if _is_self_governance(root):
             task_id = str(task.get("id") or "")
             if task.get("self_approved"):
+                from .presence import require_self_approval
+                require_self_approval(root, task, _switch_report_id(verify_blob))
                 task["self_governed_approved"] = {
                     "outcome": str((verify_blob.get("switch") or {}).get("outcome") or ""),
                     "report_id": _switch_report_id(verify_blob),
@@ -1787,6 +1798,10 @@ def approve_self(root: Path, task_id: str = "") -> dict[str, Any]:
             "[原因] 本票未处于 switch 拒单后的待批准态（或 switch 未拒/已通过） "
             "[下一步] 请先跑 ag_verify 再 ag_finish，待其停在待批准提示后再批准"
         )
+    from .authorization import validate_ticket
+    from .presence import require_human
+    validate_ticket(root, task)
+    proof = require_human(root, task)
     task["self_approved"] = {
         "by": "approve-self",
         "task_id": tid,
@@ -1796,7 +1811,7 @@ def approve_self(root: Path, task_id: str = "") -> dict[str, Any]:
     }
     save_task(key, task)
     usage_note(root, "ship", 6, "help", "self-governance approved")
-    append_task_step(root, tid, "self-governance-approved")
+    append_task_step(root, tid, "self-governance-approved", intent_identity=task.get("authorization_identity"), report_id=task["self_approved"]["report_id"], proof=proof)
     return status(root)
 
 

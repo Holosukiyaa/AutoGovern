@@ -92,6 +92,9 @@ def _live_ticket_identity(root: Path, task: dict[str, Any]) -> str:
 
 def validate_ticket(root: Path, task: dict[str, Any]) -> str:
     require_single_ticket(task)
+    if recorded(task):
+        from .presence import require_authorization
+        require_authorization(root, task)
     return _live_ticket_identity(root, task)
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .loop import abandon, confirm_map, enroll, finish, start, status, unenroll, verify
+from .loop import abandon, enroll, finish, start, status, unenroll, verify
 
 ID = "ship"
 JOB = "交货"
@@ -13,7 +13,7 @@ MAY_REFUSE_FINISH = True
 TOOLS = [
     {
         "name": "ag_status",
-        "description": "Read-only hook, canonical dirty state, and task-bound delivery facts. Diagnostics are explicit via ag_see.",
+        "description": "Read-only hook, canonical dirty state, and task-bound delivery facts. Diagnostics are explicit via ag_see. Confirmation is performed by the user in their own terminal; AI hands over the confirm-map command. human-console-required, human-code-mismatch and authorization-unproven explain refusal.",
         "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}}, "required": ["root"]},
     },
     {
@@ -31,7 +31,7 @@ TOOLS = [
     },
     {
         "name": "ag_start",
-        "description": "Open the draft/ ticket package (ticket.md, spec.json, checks/). Validate results and coverage, seal exact bytes and run target-red/guard-green baselines before independent review. continuation_of comes only from spec.json. Each ticket requires human confirm-map.",
+        "description": "Open the draft/ ticket package (ticket.md, spec.json, checks/). Validate results and coverage, seal exact bytes and run target-red/guard-green baselines before independent review. continuation_of comes only from spec.json. Each ticket requires the user to run confirm-map in their own terminal. AI must hand over the command and wait; human-console-required, human-code-mismatch and authorization-unproven explain refusal.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -57,21 +57,6 @@ TOOLS = [
                 "guards": {"type": "array", "items": {"type": "string"}},
                 "defaults": {"type": "array", "items": {"type": "string"}},
                 "contribution": {"type": "string"},
-            },
-            "required": ["root"],
-        },
-    },
-    {
-        "name": "ag_confirm_map",
-        "description": (
-            "Human-only confirmation. The user must execute confirm-map themselves; AI must never call it. "
-            "Checks current review and intent identity, then returns ready only after actual thaw."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "root": {"type": "string"},
-                "by": {"type": "string"},
             },
             "required": ["root"],
         },
@@ -141,8 +126,6 @@ def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
             fixed=fixed,
             contribution=str(args.get("contribution") or ""),
         )
-    if name == "ag_confirm_map":
-        return confirm_map(root, by=str(args.get("by") or ""))
     if name == "ag_verify":
         return verify(root)
     if name == "ag_finish":
