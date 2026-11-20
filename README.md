@@ -224,3 +224,15 @@ python -m ag worker-create <PROJECT_ROOT> --portrait "做成之后：..." --anch
 | `authorization-unproven` | 缺少同身份的有效证明事件，布尔值不授予权限；人工核对确认来源，不能靠编辑状态解锁。 |
 
 已知边界：本关口防止工具随手代签，不防刻意伪造控制台、注入按键或重写历史。历史 sha256 不带密钥；这些有意绕过留待方案 D，本版不实现个人口令。
+
+## 现场检查与停工
+
+要拉安灯（andon），不要绕路。走不通时主动说明原因是正常协作，不应越过票面范围硬做。
+
+有活动且 ready 的票，每次 CLI 命令或 MCP 工具调用前检查工地；status 也会收回施工权，但从不授予权限。只记录本次 site.changed、out_of_scope、budget 和 reminders，不写施工轨迹（T8）。改动相对 source_head，含未跟踪文件、排除 .ag-check/；deny 优先，allow/docs 支持精确文件名和 ** 跨目录 glob。预算取文件数比例和增删行数比例的较大者：低于 70% 记录，达到 70% 提醒，超过 100% 加重提醒，超过 150% 停工；越界立即停工。
+
+`andon <root> --reason "走不通的原因"` 主动停工。ag 复用冻结机制，记录 site-stopped 事件和 task.site_stop。readiness=stopped、next_action=handoff、hazards 含 site-stopped；verify、finish 和 worker 拒绝施工。abandon、andon、handoff、backbrief、confirm-map 不触发现场检查。
+
+停工后有两条路：① `handoff <root>` 生成客观简报，保存在 tickets/<id>.handoff/，包含原票、结果、改动与越界清单、预算、原因和给新会话的提示词；建议交给新会话。接手会话写 JSON `{ "out_of_scope": ["实际越界文件"], "goal": "至少二十字的目标复述", "next": "处理计划" }`，用 `backbrief <root> --file <json>` 回述。清单必须与现场完全一致，goal 至少 20 字，next 非空，否则 backbrief-mismatch 并保持冻结。通过后仍先核对 T5 既有授权证明，才解冻并记录 site-resumed；AI 可以执行 backbrief，但不能借此取得新授权。越界或超预算未解决，下一次调用仍会再次停工。② 修改 draft/ 后 start，重新审票，由用户本人 confirm-map；确认成功清除 site_stop，保留已有代码。
+
+MCP 提供 ag_andon、ag_handoff、ag_backbrief。没有调用 ag 就不会触发检查，这是已知局限；verify 前一定检查。不能通过改状态、改封存或绕过 T5 解锁。遇到 `site-stopped` 先交接；遇到 `backbrief-mismatch` 按客观事实修正回述。

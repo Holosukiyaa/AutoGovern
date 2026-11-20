@@ -308,7 +308,14 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
         ready = False
         readiness, action = ("blocked", "abandon") if is_active else (process, "read-archive")
         verified = []
+    from .site import snapshot
+    site = snapshot(root, task) if is_active else None
+    if task.get("site_stop") and is_active:
+        ready = False
+        readiness, action = "stopped", "handoff"
+        blockers.append(issue("site-stopped", task["site_stop"], action))
     return {
+        "site": site,
         "schema": "ag.delivery.v1",
         "root": str(root),
         "task_id": requested,

@@ -23,6 +23,7 @@ INSTRUCTIONS = (
     "To revise any ticket, edit draft/ then ag_start: validate and baseline on clean source_head before freezing construction, archiving the old seal and independently reviewing the new one. revise-ticket-and-start is the guidance; human confirm-map is required again, followed by a fresh verify. Rejected preparation leaves the current ticket unchanged. "
     "For long-ticket-retired use ag_abandon; archived long data stays untouched in AG_HOME without migration. "
     "ag_delivery is a read-only task query shared with CLI delivery, including archived tasks. "
+    "Every call on a ready site checks scope and budget; site-stopped requires ag_handoff then ag_backbrief, or a reviewed ticket revision and human confirmation. Pull ag_andon with a reason when blocked; do not work around scope. "
     "Keep the complete goal and remaining outcomes; internal phases do not require new tickets. "
     "Explicit continuation_of carries the common goal, contribution and remaining outcomes to an independently delivered successor. "
     "ag_verify selects this ticket's actual .ag-check scripts plus declared project checks, then probes and one switch review. "
@@ -99,6 +100,15 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
+    from pathlib import Path
+    from .site import command_scope, include_site
+
+    root = Path(args["root"]).expanduser() if args.get("root") else None
+    with command_scope(root, name.removeprefix("ag_").replace("_", "-")):
+        return include_site(_dispatch_tool(name, args))
+
+
+def _dispatch_tool(name: str, args: dict[str, Any]) -> dict[str, Any]:
     if any(str(item["name"]) == name for item in catalog.TOOLS):
         return catalog.call(name, args)
     return lane_call(name, args)

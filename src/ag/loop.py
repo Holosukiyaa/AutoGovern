@@ -773,8 +773,9 @@ def status(root: Path) -> dict[str, Any]:
 
     out["delivery"] = build_delivery_snapshot(root, str((task or {}).get("id") or ""))
     for issue in out["delivery"].get("blockers", []):
-        if issue["kind"] in {"seal-invalid", "sealed-check-changed", "legacy-ticket-format", "authorization-unproven"}:
+        if issue["kind"] in {"seal-invalid", "sealed-check-changed", "legacy-ticket-format", "authorization-unproven", "site-stopped"}:
             out["hazards"].append(issue["kind"])
+    out["site"] = out["delivery"].get("site")
     out["readiness"] = out["delivery"]["readiness"]
     out["next_action"] = out["delivery"]["next_action"]
     out["authorization"] = out["delivery"].get("authorization") or {}
@@ -1020,6 +1021,8 @@ def verify(root: Path) -> dict[str, Any]:
         )
     from .authorization import recorded, require_single_ticket
     require_single_ticket(task)
+    from .site import require_running
+    require_running(task)
     from .ticket_package import load_seal
     load_seal(Path(state["root"]), task)
     if not recorded(task):
@@ -1390,6 +1393,8 @@ def confirm_map(root: Path, *, by: str = "") -> dict[str, Any]:
     stage("approval-recorded")
     stage("thawing-worktree")
     _complete_activation(root, task, identity)
+    from .site import confirmed
+    confirmed(root, task)
     stage("ready")
     return {"schema": "ag.confirm-map.v2", "root": str(root), "key": key, "intent_map_confirmed": True, "readiness": "ready", "worktree": str(worktree), "task": task, "delivery": build_delivery_snapshot(root, task["id"]), "stages": stages}
 
@@ -1528,6 +1533,8 @@ def finish(root: Path) -> dict[str, Any]:
         )
     from .authorization import require_single_ticket
     require_single_ticket(task)
+    from .site import require_running
+    require_running(task)
     from .ticket_package import load_seal
     load_seal(root, task)
     if task.get("intent_map_confirmed"):

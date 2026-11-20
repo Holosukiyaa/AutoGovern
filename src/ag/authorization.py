@@ -104,6 +104,8 @@ def validate_confirmation(root: Path, task: dict[str, Any]) -> str:
 
 def require_construction(root: Path, task: dict[str, Any]) -> None:
     require_single_ticket(task)
+    from .site import require_running
+    require_running(task)
     if task.get("process") in {"completed", "abandoned"}:
         raise ChainBroken("cleanup-pending: task is closing; retry its finish/abandon operation")
     if not recorded(task):

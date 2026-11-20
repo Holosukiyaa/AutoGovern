@@ -13,6 +13,7 @@ from .prune import prune
 from .catalog import plug, plug_list
 from .managed import ChainBroken
 from .skill_install import install_skill
+from .site import dumps as command_json
 
 
 def _probe_main(args: argparse.Namespace) -> int:
@@ -21,11 +22,11 @@ def _probe_main(args: argparse.Namespace) -> int:
     root = Path(args.root)
     if args.probe_cmd == "calibrate":
         result = calibrate(root, id=args.id, observation=args.observation)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(command_json(result, ensure_ascii=False, indent=2))
         return 0 if result["valid"] else 1
     if args.probe_cmd == "insert":
         print(
-            json.dumps(
+            command_json(
                 insert(
                     root,
                     observation=args.observation,
@@ -42,7 +43,7 @@ def _probe_main(args: argparse.Namespace) -> int:
         return 0
     if args.probe_cmd == "drop":
         print(
-            json.dumps(
+            command_json(
                 drop(root, id=str(args.id or ""), reason=str(args.reason or ""), by=str(args.by or "")),
                 ensure_ascii=False,
                 indent=2,
@@ -51,7 +52,7 @@ def _probe_main(args: argparse.Namespace) -> int:
         return 0
     if args.probe_cmd == "run":
         print(
-            json.dumps(
+            command_json(
                 run(root, paths=args.path, awaken=bool(args.awaken)),
                 ensure_ascii=False,
                 indent=2,
@@ -59,7 +60,7 @@ def _probe_main(args: argparse.Namespace) -> int:
         )
         return 0
     if args.probe_cmd == "list":
-        print(json.dumps(list_probes(root, full=bool(args.full)), ensure_ascii=False, indent=2))
+        print(command_json(list_probes(root, full=bool(args.full)), ensure_ascii=False, indent=2))
         return 0
     return 2
 
@@ -107,6 +108,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser("finish", help="ff-only if digest matches").add_argument("root")
     sub.add_parser("abandon", help="drop the open worktree").add_argument("root")
+    andon_p = sub.add_parser("andon", help="pull the andon and freeze construction")
+    andon_p.add_argument("root")
+    andon_p.add_argument("--reason", required=True)
+    sub.add_parser("handoff", help="write an objective site handoff").add_argument("root")
+    backbrief_p = sub.add_parser("backbrief", help="resume existing authority after a correct backbrief")
+    backbrief_p.add_argument("root")
+    backbrief_p.add_argument("--file", required=True)
     approve_p = sub.add_parser("approve-self", help="record explicit human approval to let a self-governance ticket finish")
     approve_p.add_argument("root")
     approve_p.add_argument("task_id", nargs="?", default="")
@@ -272,6 +280,18 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
+    from .site import command_scope
+
+    try:
+        root = Path(args.root or Path.cwd()).expanduser() if hasattr(args, "root") else None
+        with command_scope(root, args.cmd):
+            return _dispatch(args)
+    except (ChainBroken, OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+
+def _dispatch(args: argparse.Namespace) -> int:
     try:
         if args.cmd == "mcp":
             from .mcp import serve
@@ -288,14 +308,14 @@ def _run(args: argparse.Namespace) -> int:
             if args.path_only:
                 print(ensure_config_file(root))
                 return 0
-            print(json.dumps(config_guide(root, ensure_file=True), ensure_ascii=False, indent=2))
+            print(command_json(config_guide(root, ensure_file=True), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "plug":
             root = Path(args.root)
             if args.action == "list":
-                print(json.dumps(plug_list(root), ensure_ascii=False, indent=2))
+                print(command_json(plug_list(root), ensure_ascii=False, indent=2))
             else:
-                print(json.dumps(plug(root, str(args.code or ""), on=args.action == "on"), ensure_ascii=False, indent=2))
+                print(command_json(plug(root, str(args.code or ""), on=args.action == "on"), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "critic-prompt":
             from .critic import prompt_text
@@ -313,7 +333,7 @@ def _run(args: argparse.Namespace) -> int:
             from .switch import switch_run
 
             print(
-                json.dumps(
+                command_json(
                     switch_run(
                         Path(args.root),
                         exam=args.exam,
@@ -330,7 +350,7 @@ def _run(args: argparse.Namespace) -> int:
             from .critic import pack
 
             print(
-                json.dumps(
+                command_json(
                     pack(
                         Path(args.root),
                         exam=args.exam,
@@ -347,7 +367,7 @@ def _run(args: argparse.Namespace) -> int:
             from .critic import critic_run
 
             print(
-                json.dumps(
+                command_json(
                     critic_run(
                         Path(args.root),
                         exam=args.exam,
@@ -363,7 +383,7 @@ def _run(args: argparse.Namespace) -> int:
         if args.cmd == "critic-log":
             from .critic import list_log
 
-            print(json.dumps(list_log(Path(args.root), limit=args.limit), ensure_ascii=False, indent=2))
+            print(command_json(list_log(Path(args.root), limit=args.limit), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "probe":
             return _probe_main(args)
@@ -394,7 +414,7 @@ def _run(args: argparse.Namespace) -> int:
                 ],
             ]
             print(
-                json.dumps(
+                command_json(
                     create_task(
                         worktree=worktree,
                         portrait=args.portrait,
@@ -422,7 +442,7 @@ def _run(args: argparse.Namespace) -> int:
 
             require_construction(Path(args.root), state.get("task") or {})
             print(
-                json.dumps(
+                command_json(
                     run_task(
                         worktree,
                         args.worker_id,
@@ -492,23 +512,37 @@ def _run(args: argparse.Namespace) -> int:
             worktree = Path(str((state.get("task") or {}).get("worktree") or ""))
             if not worktree.is_dir():
                 raise ChainBroken("no active AG worktree; ag_start first")
-            print(json.dumps(read_result(worktree, args.worker_id), ensure_ascii=False, indent=2))
+            print(command_json(read_result(worktree, args.worker_id), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "confirm-map":
-            print(json.dumps(confirm_map(Path(args.root), by=str(args.by or "")), ensure_ascii=False, indent=2))
+            print(command_json(confirm_map(Path(args.root), by=str(args.by or "")), ensure_ascii=False, indent=2))
             return 0
         root = Path(args.root)
+        if args.cmd in {"andon", "handoff", "backbrief"}:
+            from . import site
+            if args.cmd == "andon":
+                result = site.andon(root, args.reason)
+            elif args.cmd == "handoff":
+                result = site.handoff(root)
+            else:
+                try:
+                    brief = json.loads(Path(args.file).read_text(encoding="utf-8"))
+                except (OSError, ValueError) as exc:
+                    raise ChainBroken(f"backbrief-mismatch: {exc}") from exc
+                result = site.backbrief(root, brief)
+            print(command_json(result, ensure_ascii=False, indent=2))
+            return 0
         if args.cmd == "delivery":
             from .delivery import build_delivery_snapshot
 
             result = build_delivery_snapshot(root, args.task_id)
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print(command_json(result, ensure_ascii=False, indent=2))
             return 1 if result.get("error") else 0
         if args.cmd == "enroll":
-            print(json.dumps(enroll(root, test_argv=args.test_argv, note=args.note), ensure_ascii=False, indent=2))
+            print(command_json(enroll(root, test_argv=args.test_argv, note=args.note), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "status":
-            print(json.dumps(status(root), ensure_ascii=False, indent=2))
+            print(command_json(status(root), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "start":
             anchors = None
@@ -521,7 +555,7 @@ def _run(args: argparse.Namespace) -> int:
                     ],
                 ]
             print(
-                json.dumps(
+                command_json(
                     start(
                         root,
                         portrait=args.portrait,
@@ -538,36 +572,36 @@ def _run(args: argparse.Namespace) -> int:
             return 0
         if args.cmd == "verify":
             result = verify(root)
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print(command_json(result, ensure_ascii=False, indent=2))
             return 0 if result.get("verified_tree") else 1
         if args.cmd == "finish":
-            print(json.dumps(finish(root), ensure_ascii=False, indent=2))
+            print(command_json(finish(root), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "abandon":
-            print(json.dumps(abandon(root), ensure_ascii=False, indent=2))
+            print(command_json(abandon(root), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "approve-self":
-            print(json.dumps(approve_self(root, task_id=str(args.task_id or "")), ensure_ascii=False, indent=2))
+            print(command_json(approve_self(root, task_id=str(args.task_id or "")), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "dream":
             from .knowledge import dream
 
-            print(json.dumps(dream(root), ensure_ascii=False, indent=2))
+            print(command_json(dream(root), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "unenroll":
-            print(json.dumps(unenroll(root), ensure_ascii=False, indent=2))
+            print(command_json(unenroll(root), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "usage":
-            print(json.dumps(usage(root), ensure_ascii=False, indent=2))
+            print(command_json(usage(root), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "lift":
-            print(json.dumps(lift_run(root), ensure_ascii=False, indent=2))
+            print(command_json(lift_run(root), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "see":
-            print(json.dumps(see_run(root), ensure_ascii=False, indent=2))
+            print(command_json(see_run(root), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "prune":
-            print(json.dumps(prune(root), ensure_ascii=False, indent=2))
+            print(command_json(prune(root), ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "config-show":
             from . import settings as _settings
@@ -591,7 +625,7 @@ def _run(args: argparse.Namespace) -> int:
                         print(f"  {mark} {r.get('code'):9s} {r.get('name')}{lock}")
                 print()
             print("== 完整配置 (config.json) ==")
-            print(json.dumps(blob, ensure_ascii=False, indent=2))
+            print(command_json(blob, ensure_ascii=False, indent=2))
             return 0
         if args.cmd == "retro":
             from .knowledge import retro
@@ -613,7 +647,7 @@ def _run(args: argparse.Namespace) -> int:
             return 0
     except (ChainBroken, OSError, ValueError) as exc:
         details = getattr(exc, "details", None)
-        print(json.dumps({"error": str(exc), "details": details}, ensure_ascii=False) if details else str(exc), file=sys.stderr)
+        print(command_json({"error": str(exc), "details": details}, ensure_ascii=False) if details else str(exc), file=sys.stderr)
         return 1
     return 2
 

@@ -84,12 +84,22 @@ TOOLS = [
 ]
 
 TOOLS.extend([
+    {"name": "ag_andon", "description": "Pull andon with a nonempty reason; freezes the active site.", "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}, "reason": {"type": "string", "minLength": 1}}, "required": ["root", "reason"]}},
+    {"name": "ag_handoff", "description": "Write an objective handoff including site facts and a prompt for the next session.", "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}}, "required": ["root"]}},
+    {"name": "ag_backbrief", "description": "Resume existing proven authority after matching the actual out_of_scope list, goal (20+ characters) and next action.", "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}, "out_of_scope": {"type": "array", "items": {"type": "string"}}, "goal": {"type": "string", "minLength": 20}, "next": {"type": "string", "minLength": 1}}, "required": ["root", "out_of_scope", "goal", "next"]}},
     {"name": "ag_delivery", "description": "Read-only task facts for active or archived task_id; no installation, diagnosis, migration or authorization.", "inputSchema": {"type": "object", "properties": {"root": {"type": "string"}, "task_id": {"type": "string"}}, "required": ["root"]}},
 ])
 
 
 def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
     root = Path(str(args.get("root") or "")).expanduser()
+    if name in {"ag_andon", "ag_handoff", "ag_backbrief"}:
+        from . import site
+        if name == "ag_andon":
+            return site.andon(root, args.get("reason"))
+        if name == "ag_handoff":
+            return site.handoff(root)
+        return site.backbrief(root, args)
     if name == "ag_status":
         return status(root)
     if name == "ag_delivery":
