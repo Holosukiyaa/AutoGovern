@@ -6,6 +6,8 @@ import json
 import os
 import uuid
 from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,19 @@ from .store import exclusive_lock, project_dir, replace_file
 
 SCHEMA = "ag.history.record.v1"
 MAX_VOLUME_BYTES = 1024 * 1024
+
+ScanResult = tuple[list[dict[str, Any]], list[dict[str, Any]]]
+_command_scans: ContextVar[dict[Path, tuple[tuple[int, int], ScanResult]] | None] = ContextVar("history_command_scans", default=None)
+
+
+@contextmanager
+def command_scope():
+    """Reuse validated scans for one command; independent API calls remain uncached."""
+    token = _command_scans.set({})
+    try:
+        yield
+    finally:
+        _command_scans.reset(token)
 
 
 def _encode(value: Any) -> bytes:
@@ -35,7 +50,26 @@ def record(kind: str, task_id: str, payload: dict[str, Any], *, identity: str = 
     return {"schema": SCHEMA, **body, "id": identity or checksum, "sha256": checksum}
 
 
-def _scan(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _scan(path: Path) -> ScanResult:
+    scans = _command_scans.get()
+    if scans is None:
+        return _scan_file(path)
+    if not path.exists():
+        return [], []
+    try:
+        stamp = path.stat()
+    except OSError as exc:
+        raise ChainBroken(f"history-source-error: {path}: {exc}") from exc
+    signature = (stamp.st_size, stamp.st_mtime_ns)
+    cached = scans.get(path)
+    if cached is None or cached[0] != signature:
+        cached = (signature, _scan_file(path))
+        scans[path] = cached
+    # Neither records (including nested payloads) nor diagnostics escape by reference.
+    return deepcopy(cached[1])
+
+
+def _scan_file(path: Path) -> ScanResult:
     """Valid records and bad lines ({path, line, reason}; physical line numbers from 1)."""
     if not path.exists():
         return [], []

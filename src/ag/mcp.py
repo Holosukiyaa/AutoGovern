@@ -81,7 +81,10 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
         name = str(params.get("name") or "")
         args = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
         try:
-            text = json.dumps(_call(name, args), ensure_ascii=False, indent=2)
+            from .history import command_scope
+
+            with command_scope():
+                text = json.dumps(_call(name, args), ensure_ascii=False, indent=2)
         except (ChainBroken, OSError, TypeError, ValueError) as exc:
             details = getattr(exc, "details", None)
             message = json.dumps({"error": str(exc), "details": details}, ensure_ascii=False) if details else str(exc)

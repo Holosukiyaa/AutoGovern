@@ -263,6 +263,16 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("switch-prompt", help="print the switch startup prompt")
     sub.add_parser("hook", help="git pre-commit helper")
     args = parser.parse_args(argv)
+    if args.cmd == "mcp":
+        # The resident server scopes each tools/call, not its whole process.
+        return _run(args)
+    from .history import command_scope
+
+    with command_scope():
+        return _run(args)
+
+
+def _run(args: argparse.Namespace) -> int:
     try:
         if args.cmd == "mcp":
             from .mcp import serve
