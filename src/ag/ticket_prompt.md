@@ -8,6 +8,8 @@
 
 ## 桌上输入
 
+- `historical_redlines`：供参考的有效累积历史红线，不等于本票红线；已标记 [obsolete] 的条目不发送。
+
 `ticket_package` 提供 ticket.md 全文、spec.json 全文、每条封存检查的源码及基线（kind、exit、tail）。必须逐条核对，基线非零也可能是脚本错误，不能只看红绿。
 
 - `thread_id`：本次审票唯一无状态线程标识。

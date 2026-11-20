@@ -5,6 +5,8 @@ Never write the product tree; unplug deletes that folder.
 """
 from __future__ import annotations
 
+from .diffparse import parse
+
 import hashlib
 import json
 import os
@@ -33,7 +35,7 @@ _LIFT_TIMEOUT_MAX_S = 1800
 def _git(cwd: Path, *args: str) -> str:
     try:
         ran = subprocess.run(
-            ["git", "-C", str(cwd), *args],
+            ["git", "-c", "core.quotePath=false", "-C", str(cwd), *args],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -615,7 +617,6 @@ _MOCK_PROD_RE = re.compile(
 _STUB_RE = re.compile(
     r"(?:\b(?:TO" + r"DO|FIX" + r"ME|NotImple" + r"mentedError)\b|\b(?:to" + r"do|unimple" + r"mented)!\s*\()"
 )
-_HUNK_LINE_RE = re.compile(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
 def _is_non_prod_path(rel: str) -> bool:
@@ -646,43 +647,19 @@ def lift_16(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     diff_text = _git(cwd, "diff", "-U0", "HEAD")
     hits: list[dict[str, Any]] = []
     seen_files: set[str] = set()
-    cur_file = ""
-    line_no = 0
     prev_added = ""
-    for raw in diff_text.splitlines():
-        if raw.startswith("+++ "):
-            target = raw[4:].strip()
-            if target.startswith("b/"):
-                target = target[2:]
-            cur_file = "" if target == "/dev/null" else _rel_posix(target)
-            if cur_file:
-                seen_files.add(cur_file)
+    for line in parse(diff_text):
+        if line.kind == "file":
+            seen_files.add(line.path)
+        if line.kind in {"file", "hunk", "context"}:
             prev_added = ""
+        if line.kind != "add" or not line.path or _is_non_prod_path(line.path):
             continue
-        if raw.startswith("@@ "):
-            match = _HUNK_LINE_RE.search(raw)
-            line_no = int(match.group(1)) if match else 1
-            prev_added = ""
-            continue
-        if not cur_file or _is_non_prod_path(cur_file):
-            continue
-        if raw.startswith("+") and not raw.startswith("+++"):
-            added = raw[1:]
-            kind = _classify_shortcut(added, prev_added)
-            if kind:
-                hits.append(
-                    {
-                        "file": cur_file,
-                        "line": line_no,
-                        "kind": kind,
-                        "snippet": added.strip()[:160],
-                    }
-                )
-            prev_added = added
-            line_no += 1
-        elif not raw.startswith("-"):
-            prev_added = ""
-            line_no += 1
+        added = line.raw[1:]
+        kind = _classify_shortcut(added, prev_added)
+        if kind:
+            hits.append({"file": line.path, "line": line.new, "kind": kind, "snippet": added.strip()[:160]})
+        prev_added = added
 
     for raw_rel in _git(cwd, "ls-files", "-o", "--exclude-standard").splitlines():
         rel = _rel_posix(raw_rel)
@@ -926,30 +903,18 @@ def see_12(root: Path, _item: dict[str, Any]) -> dict[str, Any]:
     diff_text = _git(cwd, "diff", "-U0", "HEAD")
     file_counts: dict[str, dict[str, int]] = {}
     seen_diff_files: set[str] = set()
-    cur_file = ""
-    for raw in diff_text.splitlines():
-        if raw.startswith("+++ "):
-            target = raw[4:].strip()
-            if target.startswith("b/"):
-                target = target[2:]
-            cur_file = "" if target == "/dev/null" else _rel_posix(target)
-            if cur_file:
-                seen_diff_files.add(cur_file)
+    for line in parse(diff_text):
+        if line.kind == "file":
+            seen_diff_files.add(line.path)
+        if not line.path or Path(line.path).suffix.lower() not in _THERM_SUFFIXES:
             continue
-        if not cur_file or Path(cur_file).suffix.lower() not in _THERM_SUFFIXES:
+        if line.path.startswith(".ag-check/") or _skip_rel(line.path):
             continue
-        if cur_file.startswith(".ag-check/") or _skip_rel(cur_file):
-            continue
-        if raw.startswith("+") and not raw.startswith("+++"):
-            found = len(_SUPPRESS_RE.findall(raw[1:]))
+        if line.kind in {"add", "delete"}:
+            found = len(_SUPPRESS_RE.findall(line.raw[1:]))
             if found:
-                slot = file_counts.setdefault(cur_file, {"added": 0, "removed": 0})
-                slot["added"] += found
-        elif raw.startswith("-") and not raw.startswith("---"):
-            found = len(_SUPPRESS_RE.findall(raw[1:]))
-            if found:
-                slot = file_counts.setdefault(cur_file, {"added": 0, "removed": 0})
-                slot["removed"] += found
+                slot = file_counts.setdefault(line.path, {"added": 0, "removed": 0})
+                slot["added" if line.kind == "add" else "removed"] += found
 
     for raw_rel in _git(cwd, "ls-files", "-o", "--exclude-standard").splitlines():
         rel = _rel_posix(raw_rel)

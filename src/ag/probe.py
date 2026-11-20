@@ -402,7 +402,7 @@ def _bad_line_reason(snippet: str) -> str:
 
 def _git_lines(tree: Path, *args: str) -> list[str]:
     completed = subprocess.run(
-        ["git", "-C", str(tree), *args],
+        ["git", "-c", "core.quotePath=false", "-C", str(tree), *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -423,25 +423,13 @@ def _changed_lines(tree: Path, source_head: str) -> dict[str, set[int]]:
     out: dict[str, set[int]] = {}
     if not str(source_head or "").strip():
         return out
-    current: str | None = None
-    new_line = 0
-    for line in _git_lines(tree, "diff", "--unified=0", source_head, "--"):
-        if line.startswith("+++ b/"):
-            current = line[6:].strip().replace("\\", "/")
-            out.setdefault(current, set())
-        elif line.startswith("@@"):
-            match = re.search(r"\+(\d+)(?:,(\d+))?", line)
-            if match and current is not None:
-                new_line = int(match.group(1))
-                span = int(match.group(2) or "1")
-                for off in range(max(span, 1)):
-                    out[current].add(new_line + off)
-        elif line.startswith("+") and not line.startswith("+++"):
-            new_line += 1
-        elif line.startswith("-") and not line.startswith("---"):
-            pass
-        elif current is not None and not line.startswith("\\"):
-            new_line += 1
+    from .diffparse import parse
+
+    for line in parse("\n".join(_git_lines(tree, "diff", "--unified=0", source_head, "--"))):
+        if line.kind == "file" and line.path:
+            out.setdefault(line.path, set())
+        elif line.kind == "hunk" and line.path:
+            out.setdefault(line.path, set()).update(range(line.new, line.new + max(line.new_count, 1)))
     return out
 
 
@@ -546,13 +534,13 @@ def plant_from_reject(root: Path, *, items: Any, tree: Path, source_head: str = 
             )
             continue
         name = str(item.get("name") or "")
-        if not (rel.startswith("src/ag/") and rel.endswith(".py") and (tree_root / rel).is_file()):
+        if not ((tree_root / rel).is_file() and (tree_root / rel).resolve().is_relative_to(tree_root.resolve()) and not {".ag-check", ".git"}.intersection(Path(rel).parts)):
             audit_note(
                 repo,
                 action="skip-plant",
                 probe_id=probe_id,
                 area=[rel],
-                reason=f"{rel}:{lineno} 文件闸：非本票 src/ag/*.py 真实代码文件 task={task_id}",
+                reason=f"{rel}:{lineno} 文件闸：不是候选工地内的真实产品文件 task={task_id}",
             )
             continue
         if lineno not in changed.get(rel, set()):

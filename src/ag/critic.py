@@ -4,6 +4,8 @@ Not a worker ticket. Does not write product files or refuse finish.
 """
 from __future__ import annotations
 
+from .diffparse import annotate as annotate_diff_with_lines, added_lines as _added_diff_lines
+
 import ast
 import http.client
 import json
@@ -28,7 +30,6 @@ MAX_FILE_CHARS = 100_000
 MAX_INLINE_FILE_CHARS = 12_000
 DIFF_WINDOW_RADIUS = 30
 MAX_CHECK_FILE_BYTES = 64_000
-_HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 _BACKTICK_TOKEN_RE = re.compile(r"`([^`\n]+)`")
 _MUTATION_WORDS = (
     "严禁修改",
@@ -252,7 +253,7 @@ def prompt_text() -> str:
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", "-C", str(cwd), *args],
+        ["git", "-c", "core.quotePath=false", "-C", str(cwd), *args],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -315,78 +316,6 @@ def _file_entry(repo: Path, rel: str) -> dict[str, Any]:
     if len(text) > MAX_FILE_CHARS:
         return {"path": rel, "content": text[:MAX_FILE_CHARS], "truncated": True}
     return {"path": rel, "content": text}
-
-
-def annotate_diff_with_lines(
-    diff_text: str,
-    max_chars: int = 48_000,
-) -> tuple[str, dict[str, list[int]]]:
-    touched_lines: dict[str, list[int]] = {}
-    out_lines: list[str] = []
-    rel = ""
-    old_lineno = 0
-    new_lineno = 0
-    in_hunk = False
-
-    def _record_line(path_rel: str, lineno: int) -> None:
-        if not path_rel or lineno <= 0:
-            return
-        bucket = touched_lines.setdefault(path_rel, [])
-        if lineno not in bucket:
-            bucket.append(lineno)
-
-    for line in str(diff_text or "").splitlines():
-        if line.startswith("diff --git "):
-            in_hunk = False
-            out_lines.append(line)
-            continue
-        if line.startswith("--- "):
-            in_hunk = False
-            out_lines.append(line)
-            continue
-        if line.startswith("+++ "):
-            in_hunk = False
-            raw_target = line[4:].strip()
-            if raw_target == "/dev/null":
-                rel = ""
-            elif raw_target.startswith("b/"):
-                rel = _posix(raw_target[2:])
-            else:
-                rel = _posix(raw_target)
-            out_lines.append(line)
-            continue
-        match = _HUNK_HEADER_RE.match(line)
-        if match:
-            old_lineno = int(match.group(1))
-            new_lineno = int(match.group(2))
-            in_hunk = True
-            out_lines.append(line)
-            continue
-        if in_hunk and rel:
-            if line.startswith("+"):
-                out_lines.append(f"{rel}:{new_lineno} | {line}")
-                _record_line(rel, new_lineno)
-                new_lineno += 1
-                continue
-            if line.startswith("-"):
-                out_lines.append(f"{rel}:{old_lineno} | {line}")
-                _record_line(rel, max(1, new_lineno))
-                old_lineno += 1
-                continue
-            if line.startswith(" ") or line == "":
-                out_lines.append(f"{rel}:{new_lineno} | {line}")
-                _record_line(rel, new_lineno)
-                old_lineno += 1
-                new_lineno += 1
-                continue
-        out_lines.append(line)
-
-    annotated_text = "\n".join(out_lines)
-    if diff_text.endswith("\n") and annotated_text:
-        annotated_text += "\n"
-    if max_chars > 0 and len(annotated_text) > max_chars:
-        annotated_text = annotated_text[:max_chars]
-    return annotated_text, touched_lines
 
 
 def _slim_file_entry(
@@ -463,39 +392,6 @@ def _slim_file_entry(
         "original_chars": len(text),
         "slimmed_chars": len(windowed),
     }
-
-
-def _added_diff_lines(diff_text: str) -> list[tuple[str, int, str]]:
-    added: list[tuple[str, int, str]] = []
-    rel = ""
-    new_lineno = 0
-    in_hunk = False
-    for line in str(diff_text or "").splitlines():
-        if line.startswith(("diff --git ", "--- ")):
-            in_hunk = False
-            continue
-        if line.startswith("+++ "):
-            in_hunk = False
-            raw_target = line[4:].strip()
-            if raw_target == "/dev/null":
-                rel = ""
-            elif raw_target.startswith("b/"):
-                rel = _posix(raw_target[2:])
-            else:
-                rel = _posix(raw_target)
-            continue
-        match = _HUNK_HEADER_RE.match(line)
-        if match:
-            new_lineno = int(match.group(2))
-            in_hunk = True
-            continue
-        if in_hunk and rel:
-            if line.startswith("+"):
-                added.append((rel, new_lineno, line[1:]))
-                new_lineno += 1
-            elif line.startswith(" ") or line == "":
-                new_lineno += 1
-    return added
 
 
 def _has_word(text: str, words: tuple[str, ...]) -> bool:
@@ -874,7 +770,6 @@ def pack(
         "schema": PACK_SCHEMA,
         "exam": exam_text,
         "structure": structure,
-        "diff": annotated_diff,
         "annotated_diff": annotated_diff,
         "changed_files": changed,
         "neighbors": hops,

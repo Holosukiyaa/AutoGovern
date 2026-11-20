@@ -338,11 +338,11 @@ def _dirty(root: Path) -> bool:
 def _ticket_paths(worktree: Path, source_head: str) -> list[str]:
     names: list[str] = []
     if source_head:
-        for line in git(worktree, "diff", "--name-only", source_head, check=False).splitlines():
+        for line in git(worktree, "-c", "core.quotePath=false", "diff", "--name-only", source_head, check=False).splitlines():
             rel = line.replace("\\", "/").strip().strip('"')
             if rel and rel not in names:
                 names.append(rel)
-    for line in git(worktree, "ls-files", "-o", "--exclude-standard", check=False).splitlines():
+    for line in git(worktree, "-c", "core.quotePath=false", "ls-files", "-o", "--exclude-standard", check=False).splitlines():
         rel = line.replace("\\", "/").strip().strip('"')
         if rel and rel not in names:
             names.append(rel)
@@ -1057,7 +1057,7 @@ def verify(root: Path) -> dict[str, Any]:
     product_before = product_tree(worktree, candidate_before, write=True)
     untracked = [
         ln.strip()
-        for ln in git(worktree, "ls-files", "-o", "--exclude-standard", check=False).splitlines()
+        for ln in git(worktree, "-c", "core.quotePath=false", "ls-files", "-o", "--exclude-standard", check=False).splitlines()
         if ln.strip()
     ]
     timings: dict[str, float] = {}
