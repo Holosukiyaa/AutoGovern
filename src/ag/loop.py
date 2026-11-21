@@ -772,6 +772,9 @@ def status(root: Path) -> dict[str, Any]:
     from .delivery import build_delivery_snapshot
 
     out["delivery"] = build_delivery_snapshot(root, str((task or {}).get("id") or ""))
+    from .context import task_burden, trend
+    out["context_burden"] = task_burden(root, task or {})
+    out["context_trend"] = trend(root)
     for issue in out["delivery"].get("blockers", []):
         if issue["kind"] in {"seal-invalid", "sealed-check-changed", "legacy-ticket-format", "authorization-unproven", "site-stopped"}:
             out["hazards"].append(issue["kind"])
@@ -852,6 +855,9 @@ def _review_package(root: Path, task: dict[str, Any], package: dict[str, Any], *
     candidate["fixed_rules"] = hard_rules(candidate["anchors"])
     candidate["current_anchor"] = candidate["anchors"][0]["id"]
     candidate["redlines"] = [row["text"] for row in spec.get("redlines", [])]
+    from .context import task_burden
+    candidate.pop("context_burden", None)
+    candidate["context_burden"] = task_burden(root, {**candidate, "package_spec": spec})
     candidate["package_spec"] = spec
     candidate["anchor_preview"] = package["ticket"]
     if revising:
@@ -1054,6 +1060,8 @@ def verify(root: Path) -> dict[str, Any]:
     ensure_start_step(enrolled, task_id, task.get("portrait"), worktree)
     from .site import record_trail
     record_trail(enrolled, task, "verify")
+    from .context import task_burden, comparison
+    task["context_burden"] = task_burden(enrolled, task)
     from .checks import run as run_checks, selection
 
     chosen_checks = selection(worktree, [str(x) for x in (state.get("test_argv") or [])], root=Path(state["root"]), task=task)
@@ -1147,6 +1155,7 @@ def verify(root: Path) -> dict[str, Any]:
         usage_note(root, "ship", 6, "block", f"exit {record['exit']}")
         out = status(root)
         out.update({"verify": record, "verified_tree": "", "next_action": "fix-and-verify"})
+        out["context"] = comparison(enrolled, task)
         return out
     from .switch import attach_verify as attach_switch
 
@@ -1231,6 +1240,7 @@ def verify(root: Path) -> dict[str, Any]:
     out["missing"] = list(record["missing"])
     out["critic"] = critic
     out["switch"] = switch
+    out["context"] = comparison(enrolled, task, switch)
     out["switch_report_id"] = str(switch.get("report_id") or "")
     out["probes_planted"] = list(record.get("probes_planted") or [])
     out["timings"] = dict(record.get("timings") or {})

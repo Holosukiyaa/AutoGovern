@@ -16,7 +16,7 @@ PASS = {"passed", "pass", "allow"}
 
 
 def task_facts(task: dict[str, Any]) -> dict[str, Any]:
-    names = ("id", "branch", "source_head", "worktree", "portrait", "anchors", "fixed", "fixed_rules", "redlines", "anchor_preview", "intent_identity", "intent_map_confirmed", "intent_map_confirmed_by", "intent_map_confirmed_at", "authorization_identity", "worktree_ready", "thaw_error", "ticket_review", "verify", "verified_tree", "goal_link", "check_argv", "verified_executor_src", "process", "cleanup_error", "archive_error", "merged_head", "ticket_type", "original_ticket", "candidate_archive", "package_spec")
+    names = ("id", "branch", "source_head", "worktree", "portrait", "anchors", "fixed", "fixed_rules", "redlines", "anchor_preview", "intent_identity", "intent_map_confirmed", "intent_map_confirmed_by", "intent_map_confirmed_at", "authorization_identity", "worktree_ready", "thaw_error", "ticket_review", "verify", "verified_tree", "goal_link", "check_argv", "verified_executor_src", "process", "cleanup_error", "archive_error", "merged_head", "ticket_type", "original_ticket", "candidate_archive", "package_spec", "context_burden")
     return {name: task[name] for name in names if name in task}
 
 
@@ -81,6 +81,8 @@ def _candidate_current(root: Path, task: dict[str, Any], verify: dict[str, Any])
 
 
 def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
+    from .context import task_burden
+
     root = real_root(root)
     base = project_dir(root)
     active = _read_object(base / "task.json")
@@ -346,6 +348,7 @@ def build_delivery_snapshot(root: Path, task_id: str = "") -> dict[str, Any]:
             "review_report_id": review.get("report_id") or "",
             "thaw_succeeded": ready,
         },
+        "context_burden": task_burden(root, task),
         "readiness": readiness,
         "history_refs": [
             {"kind": row["kind"], "identity": row["id"], "sha256": row["sha256"], "ref": f"{row['_source']}#{row['id']}"}

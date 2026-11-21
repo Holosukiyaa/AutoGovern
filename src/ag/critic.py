@@ -606,7 +606,13 @@ def _candidate_files(base: Path) -> list[Path]:
     return [base.with_suffix(".py"), base / "__init__.py"]
 
 
-def _existing_rel(repo: Path, path: Path) -> str | None:
+def _existing_rel(repo: Path, path: Path, known: set[str] | None = None) -> str | None:
+    if known is not None:
+        try:
+            rel = path.relative_to(repo).as_posix()
+        except ValueError:
+            return None
+        return rel if rel in known else None
     try:
         resolved = path.resolve()
         repo_res = repo.resolve()
@@ -618,7 +624,7 @@ def _existing_rel(repo: Path, path: Path) -> str | None:
     return None
 
 
-def _resolve_module(repo: Path, source: Path, module: str, level: int) -> str | None:
+def _resolve_module(repo: Path, source: Path, module: str, level: int, known: set[str] | None = None) -> str | None:
     if level:
         base = source.parent
         for _ in range(max(0, level - 1)):
@@ -630,7 +636,7 @@ def _resolve_module(repo: Path, source: Path, module: str, level: int) -> str | 
         if module:
             base = base.joinpath(*module.split("."))
         for candidate in _candidate_files(base):
-            rel = _existing_rel(repo, candidate)
+            rel = _existing_rel(repo, candidate, known)
             if rel:
                 return rel
         return None
@@ -640,18 +646,18 @@ def _resolve_module(repo: Path, source: Path, module: str, level: int) -> str | 
     roots = [repo, repo / "src", source.parent]
     for root in roots:
         for candidate in _candidate_files(root / parts):
-            rel = _existing_rel(repo, candidate)
+            rel = _existing_rel(repo, candidate, known)
             if rel:
                 return rel
     return None
 
 
-def _neighbors_from_file(repo: Path, rel: str, content: str) -> list[str]:
+def _neighbors_from_file(repo: Path, rel: str, content: str, known: set[str] | None = None) -> list[str]:
     if not rel.endswith(".py"):
         return []
     source = repo / rel
     raw_source = content
-    if source.is_file():
+    if known is None and source.is_file():
         try:
             raw_source = source.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -664,7 +670,7 @@ def _neighbors_from_file(repo: Path, rel: str, content: str) -> list[str]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                hit = _resolve_module(repo, source, alias.name, 0)
+                hit = _resolve_module(repo, source, alias.name, 0, known)
                 if hit and hit not in found and hit != rel:
                     found.append(hit)
         elif isinstance(node, ast.ImportFrom):
@@ -672,22 +678,22 @@ def _neighbors_from_file(repo: Path, rel: str, content: str) -> list[str]:
             level = int(node.level or 0)
             if level and not module:
                 for alias in node.names:
-                    hit = _resolve_module(repo, source, alias.name, level)
+                    hit = _resolve_module(repo, source, alias.name, level, known)
                     if hit and hit not in found and hit != rel:
                         found.append(hit)
                 continue
-            hit = _resolve_module(repo, source, module, level)
+            hit = _resolve_module(repo, source, module, level, known)
             if hit and hit not in found and hit != rel:
                 found.append(hit)
     return found
 
 
-def neighbors(repo: Path, changed_files: list[dict[str, Any]]) -> list[str]:
+def neighbors(repo: Path, changed_files: list[dict[str, Any]], *, known: set[str] | None = None) -> list[str]:
     out: list[str] = []
     for item in changed_files:
         rel = str(item.get("path") or "")
         content = str(item.get("content") or "")
-        for hit in _neighbors_from_file(repo, rel, content):
+        for hit in _neighbors_from_file(repo, rel, content, known):
             if hit not in out:
                 out.append(hit)
     return out
@@ -766,7 +772,7 @@ def pack(
         structure = structure_check(repo)
     except Exception as exc:
         structure = {"configured": False, "detail": f"体检异常不阻断：{exc}"}
-    return {
+    packed = {
         "schema": PACK_SCHEMA,
         "exam": exam_text,
         "structure": structure,
@@ -784,6 +790,9 @@ def pack(
         },
     }
 
+    from .context import observe_pack
+    observe_pack(packed, repo, annotate_diff_with_lines(diff_text, max_chars=0)[0])
+    return packed
 
 def global_config_path() -> Path:
     return ag_home() / CONFIG_NAME
@@ -1066,14 +1075,18 @@ def complete_chat(config: dict[str, Any], messages: list[dict[str, str]]) -> tup
     timeout = int(config.get("timeout") or DEFAULT_TIMEOUT)
     deadline = time.monotonic() + timeout
     on_delta = config.get("on_delta")
+    observed_usage = []
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             content, reasoning = _read_chat_body(
-                response, on_delta=on_delta if callable(on_delta) else None, deadline=deadline, timeout=timeout
+                response, on_delta=on_delta if callable(on_delta) else None, deadline=deadline, timeout=timeout, on_usage=observed_usage.append
             )
     except (urllib.error.URLError, urllib.error.HTTPError, http.client.HTTPException, TimeoutError, OSError,
             json.JSONDecodeError, ValueError) as exc:
         raise RuntimeError(f"failed: {exc}") from exc
+    finally:
+        from .context import record_call
+        record_call(messages, observed_usage[-1] if observed_usage else None)
     if not content.strip() and not reasoning.strip():
         raise RuntimeError("failed: empty message")
     return content, reasoning
@@ -1103,7 +1116,7 @@ def _apply_delta(payload: dict[str, Any], content: str, reasoning: str) -> tuple
 
 
 def _read_chat_body(
-    response: Any, *, on_delta: Any = None, deadline: float | None = None, timeout: int = 0
+    response: Any, *, on_delta: Any = None, deadline: float | None = None, timeout: int = 0, on_usage: Any = None
 ) -> tuple[str, str]:
     def readline() -> bytes | str:
         if deadline is not None and time.monotonic() > deadline:
@@ -1117,6 +1130,8 @@ def _read_chat_body(
         while chunk := readline():
             raw.append(chunk)
         body = json.loads(b"".join(raw).decode("utf-8"))
+        if isinstance(body, dict) and callable(on_usage) and "usage" in body:
+            on_usage(body["usage"])
         try:
             message = body["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as exc:
@@ -1146,6 +1161,8 @@ def _read_chat_body(
         except json.JSONDecodeError:
             return True
         if isinstance(payload, dict):
+            if callable(on_usage) and "usage" in payload:
+                on_usage(payload["usage"])
             content, reasoning = _apply_delta(payload, content, reasoning)
             if callable(on_delta):
                 on_delta(reasoning, content)

@@ -73,3 +73,9 @@ MCP 提供 ag_andon、ag_handoff、ag_backbrief。没有调用 ag 就不会触�
 现场检查之后及 verify 开始时，在 `<AG_HOME>/projects/<key>/tickets/<id>.trail.jsonl` 追加产品快照，关票后保留。记录时间、命令、产品树、各文件增删行数，包含未跟踪产品文件、排除 `.ag-check`；产品树未变不追加。只在调用 ag 时观察，两次调用之间的中间过程看不到。使用临时 index，不动真实暂存区，快照不进入 history。
 
 终审收到 `trajectory`：快照数、时间跨度、各文件改写次数与首次出现序号、建了又删和越界后撤回的文件、停工次数；轨迹只作参考，单独不构成拒绝理由。`extraneous` 列出新增文件、按适配器引用规则判定的无人引用新增源文件，以及像草稿的名称。终审会审查多余物：每个新增文件和新增函数必须说明服务于 `spec.results` 哪一条，新增文件须有出处，无法说明就判 fail。原有审核和 T7 停工规则继续适用，走不通要拉安灯，不要绕路。
+
+## 上下文观测
+
+`context_burden` 只观测、不拦截：开票按 source_head 上 allow 减 deny 的已跟踪文件，加结构适配器 ref_patterns 规则的一跳直接引用估算（未配置时沿用终审 neighbors），随票保存，在审票、status、delivery 展示。est_tokens 按每四字符约一个 token 向上取整，空输入为零；这是粗估，不设阈值，不要求拆票。
+
+审核历史 payload 的 `usage` 记录 prompt_tokens、completion_tokens、total_tokens、cached_tokens、calls 和 per_call 各次调用；支持流式尾块和普通 JSON，缺失或异常为 null，不影响结论，不改请求参数。终审 `exam_size` 记录实际 system/user 的 sent_chars、补回被省略文件/检查/diff 原文的 raw_chars、truncated_files。verify 的 context 对照开票 estimate、measured 的 usage/exam_size 与按实际改动重算的 actual_scope。`context_trend` 从历史展示最近十次终审，新的在前，旧记录缺值为 null。不新增 hazard、门禁或审核维度，不改截断规则。

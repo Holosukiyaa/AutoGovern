@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .context import observe_review, review_measurement, task_burden
 from .critic import (
     _EVIDENCE_REF,
     _configured,
@@ -170,6 +171,9 @@ def append_log(
     timings: dict[str, Any] | None = None,
     prompt_version: str = "",
     ts: str = "",
+    usage: dict[str, Any] | None = None,
+    exam_size: dict[str, Any] | None = None,
+    context_burden: dict[str, Any] | None = None,
 ) -> str:
     spec = _spec(kind)
     try:
@@ -184,6 +188,9 @@ def append_log(
             "pack_sha256": _sha256_text(json.dumps(pack, ensure_ascii=False, sort_keys=True)) if pack is not None else "",
             "items": _trim_items(items),
         }
+        row["usage"] = usage
+        if kind == "switch":
+            row.update(exam_size=exam_size, context_burden=context_burden)
         if task_id:
             row["task_id"] = task_id
         if model:
@@ -326,6 +333,10 @@ def seat_result(
         "store": "",
         "configured": bool(configured),
     }
+    measured = review_measurement()
+    blob["usage"] = measured["usage"]
+    if kind == "switch":
+        blob["exam_size"] = measured["exam_size"]
     blob["task_id"] = str(task_id)
     for name in ("candidate", "product_tree", "review_identity", "review_config_identity"):
         if pack.get(name):
@@ -357,6 +368,7 @@ def seat_result(
             thinking=thinking,
             timings=merged_timings if merged_timings else None,
             ts=blob["ts"],
+            usage=blob["usage"], exam_size=blob.get("exam_size"), context_burden=pack.get("context_burden"),
         )
     except ChainBroken as exc:
         # The review log is damaged, so this verdict cannot be recorded: it must not count.
@@ -665,6 +677,7 @@ def ticket_verdict_problems(
     return problems, is_lazy
 
 
+@observe_review
 def ticket_run(
     root: Path,
     *,
@@ -721,6 +734,8 @@ def ticket_run(
         "script_digest": prescreen,
         "goal_link": goal_link,
     }
+    from .loop import load_task
+    packed["context_burden"] = task_burden(repo, load_task(project_key(repo)) or {})
     if package_material is not None:
         packed["ticket_package"] = package_material
     cfg = load_config(repo)
@@ -1114,6 +1129,7 @@ def attach_ticket_review(
         }
 
 
+@observe_review
 def seat_run(
     kind: str,
     root: Path,
@@ -1185,6 +1201,7 @@ def seat_run(
 
         active = load_task(project_key(root)) or {}
         if active.get("id") == task_id:
+            packed["context_burden"] = task_burden(root, active)
             packed["trajectory"] = trajectory(root, active, candidate_root, packed["candidate"])
             packed["extraneous"] = extraneous(root, candidate_root, active["source_head"], packed["candidate"])
     if verification is not None:
@@ -1407,6 +1424,7 @@ def attach_verify(
                 "candidate": raw.get("candidate") or "",
                 "product_tree": raw.get("product_tree") or "",
             }
+            blob.update(usage=raw.get("usage"), exam_size=raw.get("exam_size"))
             if raw.get("thread_id"):
                 blob["thread_id"] = str(raw["thread_id"])
             if raw.get("model"):

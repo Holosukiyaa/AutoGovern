@@ -6,6 +6,8 @@
 只输出一个 JSON 对象，不要前言、不要 Markdown 代码块之外的解释。形状必须是：
 {"verdict":"pass" 或 "reject","understood_goal":"用你自己的大白话独立复述这张票要解决的真实业务目标（严禁原样照搬票面原句）","doubts":["若有看不明白或存疑之处逐条列出，无疑惑则为空数组"],"scores":{"goal_clarity":{"score":8,"status":"pass" 或 "fail","evidence":"portrait:引用票面具体片段","comment":"具体评语"},"anchor_chain":{"score":8,"status":"pass" 或 "fail","evidence":"portrait:引用锚点具体片段","comment":"具体评语"},"redline_focus":{"score":8,"status":"pass" 或 "fail","evidence":"portrait:引用红线具体片段","comment":"具体评语"}},"items":[{"name":"goal_clarity","status":"pass" 或 "fail","evidence":"portrait:引用票面具体片段","comment":"具体评语"},{"name":"anchor_chain","status":"pass" 或 "fail","evidence":"portrait:引用锚点具体片段","comment":"具体评语"},{"name":"redline_focus","status":"pass" 或 "fail","evidence":"portrait:引用红线具体片段","comment":"具体评语"}],"summary":"一句话总结裁决结论"}
 
+桌上的 `context_burden` 是范围内已跟踪文件与一跳直接引用的上下文负担估算；只作参考，单独不构成拒绝理由。
+
 ## 桌上输入
 
 - `historical_redlines`：供参考的有效累积历史红线，不等于本票红线；已标记 [obsolete] 的条目不发送。
