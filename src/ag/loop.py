@@ -606,6 +606,8 @@ def status(root: Path) -> dict[str, Any]:
     from .context import task_burden, trend
     out["context_burden"] = task_burden(root, task or {})
     out["context_trend"] = trend(root)
+    from .entropy import status_observations
+    out.update(status_observations(root))
     for issue in out["delivery"].get("blockers", []):
         if issue["kind"] in {"seal-invalid", "sealed-check-changed", "legacy-ticket-format", "authorization-unproven", "site-stopped"}:
             out["hazards"].append(issue["kind"])
@@ -899,6 +901,8 @@ def verify(root: Path) -> dict[str, Any]:
     test_argv = chosen_checks["commands"]
     candidate_before = tree_digest(worktree)
     product_before = product_tree(worktree, candidate_before, write=True)
+    from .entropy import observations
+    observed = observations(enrolled, task, product_before)
     untracked = [
         ln.strip()
         for ln in git(worktree, "-c", "core.quotePath=false", "ls-files", "-o", "--exclude-standard", check=False).splitlines()
@@ -987,6 +991,7 @@ def verify(root: Path) -> dict[str, Any]:
         out = status(root)
         out.update({"verify": record, "verified_tree": "", "next_action": "fix-and-verify"})
         out["context"] = comparison(enrolled, task)
+        out.update(observed)
         return out
     from .switch import attach_verify as attach_switch
 
@@ -999,7 +1004,7 @@ def verify(root: Path) -> dict[str, Any]:
         probe_red=probe_red,
         critic=None,
         tests_failed=bool(test_argv) and int(record.get("exit") or 0) != 0,
-        verification={"task_id": task_id, "candidate": candidate_before, "product_tree": product_before, "check_selection": chosen_checks, **record["evidence"]},
+        verification={"observations": observed, "task_id": task_id, "candidate": candidate_before, "product_tree": product_before, "check_selection": chosen_checks, **record["evidence"]},
         redlines=sealed_redlines,
         source_head=str(task.get("source_head") or ""),
     )
@@ -1072,6 +1077,7 @@ def verify(root: Path) -> dict[str, Any]:
     out["critic"] = critic
     out["switch"] = switch
     out["context"] = comparison(enrolled, task, switch)
+    out.update(observed)
     out["switch_report_id"] = str(switch.get("report_id") or "")
     out["probes_planted"] = list(record.get("probes_planted") or [])
     out["timings"] = dict(record.get("timings") or {})

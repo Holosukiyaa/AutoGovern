@@ -23,6 +23,7 @@ verdict 只能是 pass 或 reject。pass = 放行 finish。reject = 拒绝 finis
 - this_ticket_checks（工地 `.ag-check/`，可能 truncated）
 - verification：本票候选和检查摘要绑定的实际执行结果、stdout/stderr 尾部、探针与 Worker 证据。它证明执行结果，仍须结合检查源码判断覆盖是否充分。
 - probes
+- `entropy`（熵账）列出产品增删行、新文件、捷径、抑制标记、宽泛异常、平行实现和同名文件；只作参考，单独不构成拒绝理由。
 - redlines：开工时封存的红线副本。空名单表示这张票没有红线
 
 ## 100% 注意力聚焦（三维语义裁决）

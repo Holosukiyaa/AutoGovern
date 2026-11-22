@@ -245,6 +245,14 @@ MCP 提供 ag_andon、ag_handoff、ag_backbrief。没有调用 ag 就不会触�
 
 ## 上下文观测
 
-`context_burden` 只观测、不拦截：开票按 source_head 上 allow 减 deny 的已跟踪文件，加结构适配器 ref_patterns 规则的一跳直接引用估算（未配置时沿用终审 neighbors），随票保存，在审票、status、delivery 展示。est_tokens 按每四字符约一个 token 向上取整，空输入为零；这是粗估，不设阈值，不要求拆票。
+`context_burden` 只观测、不拦截：开票按 source_head 上 allow 减 deny 的已跟踪文件，加结构适配器 ref_patterns 规则的一跳直接引用估算（未配置时沿用终审 neighbors），随票保存，在审票、status、delivery 展示。est_tokens 按下述 chars_per_token 实测比率向上取整，空输入为零；这是粗估，不设阈值，不要求拆票。
 
 审核历史 payload 的 `usage` 记录 prompt_tokens、completion_tokens、total_tokens、cached_tokens、calls 和 per_call 各次调用；支持流式尾块和普通 JSON，缺失或异常为 null，不影响结论，不改请求参数。终审 `exam_size` 记录实际 system/user 的 sent_chars、补回被省略文件/检查/diff 原文的 raw_chars、truncated_files。verify 的 context 对照开票 estimate、measured 的 usage/exam_size 与按实际改动重算的 actual_scope。`context_trend` 从历史展示最近十次终审，新的在前，旧记录缺值为 null。不新增 hazard、门禁或审核维度，不改截断规则。
+
+## 熵账与减重参照
+
+`entropy` 对比候选与 source_head，统计产品增删及净增行、新文件、捷径、抑制标记增减、宽泛异常、平行实现名称、同名文件；含未跟踪文件，排除 `.ag-check`。复用 advice 规则，每类证据 items 最多 10 条，同一份熵账进入终审考卷、verify 输出与终审历史。`entropy_trend` 展示最近 10 次终审，旧记录缺值为 null。`budget_actual` 复用 T7 现场预算算法；`budget_reference` 按每票最新终审展示最近 10 张票的 kind、预算、实际量和比例。
+
+`slim_reminder` 从 finish 历史统计上次 slim 合入后的非减重票，满 8 张或累计产品净增 800 行时提示下一张宜开减重票；放弃的票不计，slim 合入后清零，没有 slim 时从最早票包格式票开始。不进入 hazards，不改变 readiness、next_action，不新增拒绝或审核维度；熵账和预算均只作参考。
+
+`chars_per_token` 取最近 10 条有效终审 sent_chars/prompt_tokens 的中位数，ratio_source 为 history；没有实测则为 default、4.0。开票 context_burden 和 actual_scope 都按 ceil(total_chars / chars_per_token) 粗估，context_burden 只观测、不拦截；已保存的开票估算保留当时比率。

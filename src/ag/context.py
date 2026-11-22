@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import math
+from statistics import median
 import re
 import subprocess
 import tempfile
@@ -126,6 +128,24 @@ def direct_neighbors(project, tree, entries, known, source_head):
     return found
 
 
+def token_ratio(root):
+    """T9b r6: median of the newest ten valid measured char/token ratios."""
+    from .store import list_llm_events
+
+    ratios = []
+    for row in reversed(list_llm_events(root, "switch_event", limit=0)):
+        size = row.get("exam_size") if isinstance(row.get("exam_size"), dict) else {}
+        usage = row.get("usage") if isinstance(row.get("usage"), dict) else {}
+        chars, tokens = size.get("sent_chars"), usage.get("prompt_tokens")
+        if (type(chars) in (int, float) and type(tokens) in (int, float) and chars > 0 and tokens > 0
+                and math.isfinite(chars) and math.isfinite(tokens) and math.isfinite(chars / tokens)):
+            ratios.append(chars / tokens)
+            if len(ratios) == 10:
+                break
+    return {"chars_per_token": float(median(ratios)) if ratios else 4.0,
+            "ratio_source": "history" if ratios else "default"}
+
+
 def burden(tree, scope, *, source_head="", paths=None, project=None):
     """r3-r4: count scope plus one-hop neighbors, with the exam's reference rules."""
     from .site import matches
@@ -154,14 +174,19 @@ def burden(tree, scope, *, source_head="", paths=None, project=None):
     scope_chars = sum(len(item["content"]) for item in entries)
     neighbor_chars = sum(len(text(p)) for p in direct)
     total = scope_chars + neighbor_chars
+    ratio = token_ratio(project or tree)
     return {"scope_files": len(selected), "scope_chars": scope_chars, "neighbor_files": len(direct),
-            "neighbor_chars": neighbor_chars, "total_chars": total, "est_tokens": (total + 3) // 4}
+            "neighbor_chars": neighbor_chars, "total_chars": total, "est_tokens": math.ceil(total / ratio["chars_per_token"]), **ratio}
 
 
 def task_burden(root, task):
     """r3: preserve the opening observation; older active tickets can derive it read-only."""
     if task.get("context_burden") is not None:
-        return task["context_burden"]
+        estimate = task["context_burden"]
+        if "chars_per_token" not in estimate:
+            ratio = token_ratio(root)
+            return {**estimate, **ratio, "est_tokens": math.ceil(estimate["total_chars"] / ratio["chars_per_token"])}
+        return estimate
     if task.get("package_spec") and task.get("source_head"):
         return burden(root, task["package_spec"]["scope"], source_head=task["source_head"])
     return None

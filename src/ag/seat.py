@@ -191,6 +191,7 @@ def append_log(
         row["usage"] = usage
         if kind == "switch":
             row.update(exam_size=exam_size, context_burden=context_burden)
+            row.update({name: (pack or {}).get(name) for name in ("entropy", "budget_actual", "kind")})
         if task_id:
             row["task_id"] = task_id
         if model:
@@ -337,6 +338,7 @@ def seat_result(
     blob["usage"] = measured["usage"]
     if kind == "switch":
         blob["exam_size"] = measured["exam_size"]
+        blob.update({name: pack.get(name) for name in ("entropy", "budget_actual", "kind")})
     blob["task_id"] = str(task_id)
     for name in ("candidate", "product_tree", "review_identity", "review_config_identity"):
         if pack.get(name):
@@ -1218,7 +1220,8 @@ def seat_run(
             enrolled = (lookup_project(root) or {}).get("test_argv") or []
             if selection(candidate_root, list(enrolled), root=root, task=active)["sha256"] != verification["check_selection"].get("sha256"):
                 raise ChainBroken("check-digest-mismatch: current checks are not bound to the verification")
-        packed["verification"] = verification
+        packed.update(verification.get("observations") or {})
+        packed["verification"] = {k: v for k, v in verification.items() if k != "observations"}
     cfg = load_config(root)
     configured = bool(cfg.get("error") or _configured(cfg))
     extra: dict[str, Any] = {
@@ -1425,6 +1428,7 @@ def attach_verify(
                 "product_tree": raw.get("product_tree") or "",
             }
             blob.update(usage=raw.get("usage"), exam_size=raw.get("exam_size"))
+            blob.update({name: raw.get(name) for name in ("entropy", "budget_actual", "kind")})
             if raw.get("thread_id"):
                 blob["thread_id"] = str(raw["thread_id"])
             if raw.get("model"):
@@ -1462,6 +1466,8 @@ def attach_verify(
             except Exception as exc:
                 blob["probes_plant_error"] = f"failed: {exc}"
     if not logged:
+        observed = (verification or {}).get("observations") or {}
+        blob.update(observed)
         try:
             blob["report_id"] = append_log(
                 kind,
@@ -1473,6 +1479,7 @@ def attach_verify(
                 exam=portrait,
                 task_id=task_id,
                 probe_red=probe_red,
+                pack=observed,
             )
         except ChainBroken as exc:
             # Only unavailable results reach this branch; a damaged log must not turn them into an exception.
