@@ -220,6 +220,8 @@ Only `kind=fix` requires `root_cause` with at least 20 characters after trimming
 
 ## Graduated checks
 
+The sealed_check observation uses the same timeout_s rule as command probes: an integer from 1 to 1800 seconds, default 300; invalid values produce red without executing the script.
+
 Declare `graduate: [{"file": "checks/check_x.py"}]` in spec.json to graduate a target after a successful merge; optional task references an already merged ticket, and optional area is a nonempty relative glob list. The default area is the source ticket's scope.allow. A backfilled target runs during verify before graduation. Graduated guards only protect behavior; they are not evidence that a new ticket is complete.
 
 The guard id is grad-<source-task>-<check-stem> (at most 64 characters). Its sealed_check observation executes the original sealed script with Python -B, after checking all sealed checks and helpers against seal.json (ignoring __pycache__). Changed, missing or extra files report guard-tampered without executing the script. Areas use site.matches globs, and graduated guards never age into archives. Plain probes keep their existing matching and lifetime rules.

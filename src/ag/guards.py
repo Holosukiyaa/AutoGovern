@@ -130,7 +130,7 @@ def backfills(root, task):
 def run_sealed(tree, observation):
     """r3: verify all sealed check hashes before executing the original script."""
     from .ticket_package import sealed_dir, file_hashes, _relative
-    from .probe import _tail
+    from .probe import _tail, _timeout_s
 
     try:
         folder = sealed_dir(_canonical_root(tree), observation["task"])
@@ -146,15 +146,19 @@ def run_sealed(tree, observation):
             raise ValueError("check missing or outside package")
     except (OSError, ValueError, KeyError, TypeError, AttributeError, ChainBroken) as exc:
         return "red", 1, f"guard-tampered: {exc}"
+    try:
+        timeout = _timeout_s(observation.get("timeout_s", 300))
+    except ChainBroken as exc:
+        return "red", -1, _tail(str(exc))
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     if (tree / "src").is_dir():
         env["PYTHONPATH"] = str(tree / "src") + os.pathsep + str(tree)
     try:
         result = subprocess.run([sys.executable, "-B", "-X", "utf8", str(script)], cwd=tree, env=env,
-                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
+                                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
     except subprocess.TimeoutExpired:
-        return "red", -1, "sealed_check timeout after 300s"
+        return "red", -1, f"sealed_check timeout after {timeout}s"
     except OSError as exc:
         return "red", -1, str(exc)
     return ("green" if result.returncode == 0 else "red"), result.returncode, _tail(result.stdout + "\n" + result.stderr)

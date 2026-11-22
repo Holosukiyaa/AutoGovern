@@ -263,6 +263,8 @@ MCP 提供 ag_andon、ag_handoff、ag_backbrief。没有调用 ag 就不会触�
 
 ## 检查毕业与撤销
 
+sealed_check 观测的 timeout_s 与命令探针规则相同：须为 1 到 1800 的整数，默认 300 秒；非法值判红且不执行脚本。
+
 在 spec.json 预注册 `graduate: [{"file": "checks/check_x.py"}]`，仅允许 target；可选 task 指向已经合入票的 target，可选 area 是非空相对 glob 列表，默认用来源票 scope.allow。补毕业的旧票检查会先在本票 verify 中运行；毕业守护只保护行为，不计入新票的完成证明。
 
 合入成功后登记 grad-<来源票号>-<检查名>（最长 64 字符）及审计，直接引用封存原件。sealed_check 每次先按 seal.json 核对 checks/ 全部文件和辅助模块（忽略 __pycache__）；篡改、缺失、多出文件都报 guard-tampered，脚本不执行。核对通过后用 Python -B 在被测树执行。area 用 site.matches，支持 * 和 **；毕业守护永不自动归档，普通探针保持原规则。
