@@ -4,7 +4,18 @@
 
 Local engineering delivery guardrails and stateless review foundation (MCP + CLI) for AI-assisted programming (Vibe Coding).
 
-Current version: **v0.5.2**.
+Current version: **v0.7.0**.
+
+## What's New in v0.7.0
+
+- **Ticket packages (T4)**: write ticket.md, spec.json and checks/ in draft/; start seals exact bytes and runs baselines, while revisions require fresh review, personal confirmation and verification.
+- **Human confirmation (T5)**: the user completes confirm-map and approve-self with a short code in a real console; the MCP confirmation tool is removed and authorization is checked against recorded proof.
+- **Site checks and andon (T7)**: inspect changes against ticket scope and budget, freeze on scope violations or the budget stop limit, and use andon and handoff instead of bypassing the gates.
+- **Trails and extraneous additions (T8)**: observe product-tree changes when ag is called and send trajectory and extraneous evidence to review; new files and functions must serve results, while the trail alone never justifies rejection.
+- **Context and entropy observations (T9a/T9b)**: expose context_burden, model usage, exam size, entropy, budget references and slimming reminders; these metrics observe only and do not block, with estimates calibrated from measured history.
+- **Root causes for fixes (T9c)**: a fix ticket's root_cause needs at least 20 characters explaining where and why the failure occurs; both review seats distinguish causal repairs from symptom-only fallbacks.
+- **Graduated checks (T10/T11)**: graduate registers sealed targets as lasting guards and retires removes them after merge; hashes are checked before execution, the first guards are six T5 anti-impersonation checks, and sealed_check uses command-probe timeout rules.
+- **Fixes and slimming (T1–T3, T9s)**: resolve recorded defects, retire long tickets and route/resume paths, and extract shared workspace utilities to reduce reading and dependency burden.
 
 ## What's New in v0.5.2
 
