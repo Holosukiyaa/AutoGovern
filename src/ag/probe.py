@@ -11,6 +11,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -602,6 +603,8 @@ def drop(root: Path, *, id: str, reason: str = "", by: str = "") -> dict[str, An
     target = next((row for row in blob["probes"] if str(row.get("id") or "") == probe_id), None)
     if target is None:
         raise ChainBroken(f"probe {probe_id} not found; store unchanged")
+    if target.get("origin") == "graduated":
+        raise ChainBroken("guard-graduated: retire this guard through a ticket package")
     area = [str(item) for item in (target.get("area") or []) if isinstance(item, str)]
     blob["probes"] = [row for row in blob["probes"] if str(row.get("id") or "") != probe_id]
     _save(path, blob)
@@ -714,6 +717,9 @@ def _eval_text(repo: Path, observation: dict[str, Any]) -> tuple[str, int, str]:
 
 def _eval(repo: Path, observation: dict[str, Any]) -> tuple[str, int, str]:
     kind = str(observation.get("kind") or "")
+    if kind == "sealed_check":
+        from .guards import run_sealed
+        return run_sealed(repo, observation)
     if kind == "command":
         return _eval_command(repo, observation)
     if kind == "text_in_file":
@@ -723,6 +729,9 @@ def _eval(repo: Path, observation: dict[str, Any]) -> tuple[str, int, str]:
 
 def _should_run(row: dict[str, Any], paths: list[str] | None, awaken: bool) -> bool:
     state = str(row.get("state") or "armed")
+    if row.get("origin") == "graduated":
+        from .site import matches
+        return not paths or any(matches(path, area) for path in paths for area in row.get("area", []))
     if state == "pending-behavior":
         return False
     area = [str(item) for item in (row.get("area") or []) if isinstance(item, str)]
@@ -743,8 +752,9 @@ def evaluate(
     paths: list[str] | None = None,
     awaken: bool = False,
     tree: Path | None = None,
+    extra_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Red/green tails only. Does not change probe lifetime or write probes.json."""
+    """Red/green tails without lifetime changes; graduated runtimes are recorded."""
     repo = real_root(root)
     cwd = real_root(Path(tree)) if tree is not None else repo
     path = store_path(repo)
@@ -752,14 +762,26 @@ def evaluate(
     path_filter = wanted or None
     results: list[dict[str, Any]] = []
     blob = _load(path)
-    for row in blob["probes"]:
+    from .guards import retired_ids
+    retired = retired_ids(repo)
+    extras = {row["id"]: row for row in (extra_rows or [])}
+    rows = list(blob["probes"]) + [row for identity, row in extras.items() if not any(p.get("id") == identity for p in blob["probes"])]
+    timings = {}
+    for row in rows:
+        if row.get("origin") == "graduated" and row.get("id") in retired:
+            continue
+        if extra_rows and paths == [] and row.get("id") not in extras:
+            continue
         if row.get("state") == "pending-behavior" and (not path_filter or area_hits(list(row.get("area") or []), path_filter)):
             results.append({"id": row.get("id"), "state": "pending-behavior", "verdict": "unproven", "exit": None, "tail": "Review pointer retained; supply a before/after behavior comparison", "next_action": "calibrate-probe"})
             continue
-        if not _should_run(row, path_filter, awaken):
+        if row.get("id") not in extras and not _should_run(row, path_filter, awaken):
             continue
         observation = row.get("observation") if isinstance(row.get("observation"), dict) else {}
+        started = time.perf_counter()
         verdict, exit_code, tail = _eval(cwd, observation)
+        if row.get("origin") == "graduated":
+            timings[row["id"]] = time.perf_counter() - started
         results.append(
             {
                 "id": str(row.get("id") or ""),
@@ -769,6 +791,11 @@ def evaluate(
                 "tail": tail,
             }
         )
+    if timings:
+        for row in blob["probes"]:
+            if row.get("id") in timings:
+                row["last_seconds"] = timings[row["id"]]
+        _save(path, blob)
     return {"schema": RUN_SCHEMA, "root": str(repo), "results": results}
 
 
@@ -778,10 +805,11 @@ def run(
     paths: list[str] | None = None,
     awaken: bool = False,
     tree: Path | None = None,
+    extra_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     repo = real_root(root)
     path = store_path(repo)
-    out = evaluate(repo, paths=paths, awaken=awaken, tree=tree)
+    out = evaluate(repo, paths=paths, awaken=awaken, tree=tree, extra_rows=extra_rows)
     by_id = {str(item.get("id") or ""): item for item in out["results"]}
     blob = _load(path)
     dirty = False
@@ -790,6 +818,10 @@ def run(
         if hit is None:
             continue
         if hit.get("verdict") not in {"red", "green"}:
+            continue
+        if row.get("origin") == "graduated":
+            row["state"] = hit["state"] = "armed"
+            dirty = True
             continue
         ttl = int(row.get("ttl_quiet_loops") or DEFAULT_TTL)
         if hit["verdict"] == "green":

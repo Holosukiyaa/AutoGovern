@@ -80,3 +80,11 @@ target 开票前为红、交卷变绿；guard 开票和交卷均为绿。非零�
 | `authorization-unproven` | 缺少同身份的有效证明事件，布尔值不授予权限；人工核对确认来源，不能靠编辑状态解锁。 |
 
 已知边界：本关口防止工具随手代签，不防刻意伪造控制台、注入按键或重写历史。历史 sha256 不带密钥；这些有意绕过留待方案 D，本版不实现个人口令。
+
+## 检查毕业与撤销
+
+在 spec.json 预注册 `graduate: [{"file": "checks/check_x.py"}]`，仅允许 target；可选 task 指向已经合入票的 target，可选 area 是非空相对 glob 列表，默认用来源票 scope.allow。补毕业的旧票检查会先在本票 verify 中运行；毕业守护只保护行为，不计入新票的完成证明。
+
+合入成功后登记 grad-<来源票号>-<检查名>（最长 64 字符）及审计，直接引用封存原件。sealed_check 每次先按 seal.json 核对 checks/ 全部文件和辅助模块（忽略 __pycache__）；篡改、缺失、多出文件都报 guard-tampered，脚本不执行。核对通过后用 Python -B 在被测树执行。area 用 site.matches，支持 * 和 **；毕业守护永不自动归档，普通探针保持原规则。
+
+只能在票包声明 `retires: [{"id": "grad-...", "reason": "至少二十个字符的撤销理由"}]` 撤销：verify 跳过并返回 retired_guards，合入后才删除并审计；放弃不登记、不删除。直接 ag probe drop 会报 guard-graduated。status.guard_cost 汇总毕业守护最近耗时，达到 600 秒提示用 retires 开票精简，只提示，不进 hazards、不改 readiness 或 next_action。不复制脚本，不新增 guards_dir 配置。

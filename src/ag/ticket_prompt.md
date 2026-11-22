@@ -8,6 +8,8 @@
 
 桌上的 `context_burden` 是范围内已跟踪文件与一跳直接引用的上下文负担估算；只作参考，单独不构成拒绝理由。
 
+预注册的 `spec.graduate` 是拟长期守护的 target 清单，修复票的 target 是自然候选；请判断是否值得保留，过多或无关的写入 doubts。`spec.retires` 是合入后撤销毕业守护的声明，须核对理由和影响。
+
 ## 桌上输入
 
 - `historical_redlines`：供参考的有效累积历史红线，不等于本票红线；已标记 [obsolete] 的条目不发送。

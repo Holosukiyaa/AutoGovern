@@ -91,3 +91,11 @@ MCP 提供 ag_andon、ag_handoff、ag_backbrief。没有调用 ag 就不会触�
 ## 修复票根因
 
 仅 `kind=fix` 必须填写 `root_cause`，去掉首尾空白后至少 20 个字符，否则报 `spec-invalid` 并点名字段。根因要说明哪里、为什么会出错，不能只复述症状。审票将症状式说明写入 doubts，并在 goal_clarity 上判 fail；终审考卷顶层保留 root_cause 原文，逐个核对改动是解决根因，还是只在症状处加判断、兜底或特例，后者判 fail 并提供改动的 path:line。feature、slim 不受此要求影响，其他审核规则不变。
+
+## 检查毕业与撤销
+
+在 spec.json 预注册 `graduate: [{"file": "checks/check_x.py"}]`，仅允许 target；可选 task 指向已经合入票的 target，可选 area 是非空相对 glob 列表，默认用来源票 scope.allow。补毕业的旧票检查会先在本票 verify 中运行；毕业守护只保护行为，不计入新票的完成证明。
+
+合入成功后登记 grad-<来源票号>-<检查名>（最长 64 字符）及审计，直接引用封存原件。sealed_check 每次先按 seal.json 核对 checks/ 全部文件和辅助模块（忽略 __pycache__）；篡改、缺失、多出文件都报 guard-tampered，脚本不执行。核对通过后用 Python -B 在被测树执行。area 用 site.matches，支持 * 和 **；毕业守护永不自动归档，普通探针保持原规则。
+
+只能在票包声明 `retires: [{"id": "grad-...", "reason": "至少二十个字符的撤销理由"}]` 撤销：verify 跳过并返回 retired_guards，合入后才删除并审计；放弃不登记、不删除。直接 ag probe drop 会报 guard-graduated。status.guard_cost 汇总毕业守护最近耗时，达到 600 秒提示用 retires 开票精简，只提示，不进 hazards、不改 readiness 或 next_action。不复制脚本，不新增 guards_dir 配置。

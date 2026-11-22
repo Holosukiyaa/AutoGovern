@@ -217,3 +217,11 @@ Review history payloads record `usage` (prompt_tokens, completion_tokens, total_
 ## Root causes for fix tickets
 
 Only `kind=fix` requires `root_cause` with at least 20 characters after trimming; an absent or shorter value is rejected as `spec-invalid` naming `root_cause`. Describe where and why the failure occurs, not just the symptom. Ticket review puts symptom-only explanations in doubts and fails goal_clarity. The switch receives the verbatim root_cause at the top level and checks each change against it; symptom-level checks, fallbacks or special cases fail with the changed path:line as evidence. Feature and slim tickets skip this requirement; all other review rules stay unchanged.
+
+## Graduated checks
+
+Declare `graduate: [{"file": "checks/check_x.py"}]` in spec.json to graduate a target after a successful merge; optional task references an already merged ticket, and optional area is a nonempty relative glob list. The default area is the source ticket's scope.allow. A backfilled target runs during verify before graduation. Graduated guards only protect behavior; they are not evidence that a new ticket is complete.
+
+The guard id is grad-<source-task>-<check-stem> (at most 64 characters). Its sealed_check observation executes the original sealed script with Python -B, after checking all sealed checks and helpers against seal.json (ignoring __pycache__). Changed, missing or extra files report guard-tampered without executing the script. Areas use site.matches globs, and graduated guards never age into archives. Plain probes keep their existing matching and lifetime rules.
+
+Only a ticket's `retires: [{"id": "grad-...", "reason": "at least 20 characters"}]` can retire these guards: verify skips the named guards, returns retired_guards, and successful merge removes them with an audit. Abandon does not register or retire anything. Direct probe drop reports guard-graduated. `guard_cost` sums graduated guards' latest runtimes and suggests a retires ticket at 600 seconds; it never changes hazards, readiness or next_action. No scripts are copied and no guards_dir configuration is needed.

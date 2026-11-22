@@ -87,10 +87,12 @@ def _relative(value: Any, field: str) -> PurePosixPath:
     return path
 
 
-def file_hashes(folder: Path) -> dict[str, str]:
+def file_hashes(folder: Path, *, ignore_pycache: bool = False) -> dict[str, str]:
     hashes = {}
     for path in sorted(folder.rglob("*")):
         rel = path.relative_to(folder).as_posix()
+        if ignore_pycache and "__pycache__" in path.relative_to(folder).parts:
+            continue
         if path.is_symlink() or (hasattr(path, "is_junction") and path.is_junction()):
             raise ChainBroken(f"sealed-check-changed: links are not allowed: {rel}")
         if path.is_file() and rel != "seal.json":
@@ -210,6 +212,8 @@ def load_draft(root: Path) -> dict[str, Any]:
             _invalid("checks", "package links are not allowed")
         if path.name == "seal.json" or path.suffix == ".tmp":
             _invalid(path.relative_to(folder).as_posix(), "reserved package file")
+    from .guards import validate
+    validate(root, spec, folder)
     return {"ticket": text, "spec": spec, "spec_text": raw_spec, "files": file_hashes(folder)}
 
 

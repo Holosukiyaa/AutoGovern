@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .guards import verification_scope
 from .freeze import freeze_canonical, freeze_worktree, thaw_canonical, thaw_worktree
 from .history import history_issues, require_intact
 from .hook import hook_main
@@ -608,6 +609,8 @@ def status(root: Path) -> dict[str, Any]:
     out["context_trend"] = trend(root)
     from .entropy import status_observations
     out.update(status_observations(root))
+    from .guards import cost
+    out["guard_cost"] = cost(root)
     for issue in out["delivery"].get("blockers", []):
         if issue["kind"] in {"seal-invalid", "sealed-check-changed", "legacy-ticket-format", "authorization-unproven", "site-stopped"}:
             out["hazards"].append(issue["kind"])
@@ -847,6 +850,7 @@ def _refuse_dirty_verify(root: Path, key: str, task: dict[str, Any], state: dict
     raise ChainBroken(reason)
 
 
+@verification_scope
 def verify(root: Path) -> dict[str, Any]:
     state = status(root)
     require_intact(Path(state["root"]))
@@ -916,10 +920,12 @@ def verify(root: Path) -> dict[str, Any]:
     append_task_step(enrolled, task_id, "verify-tests", seconds=timings["tests_s"])
     paths = _ticket_paths(worktree, str(task.get("source_head") or ""))
     probe_results: list[Any] = []
-    if paths:
+    from .guards import backfills, retired_ids
+    pending_guards = backfills(enrolled, task)
+    if paths or pending_guards:
         from .probe import run as probe_run
 
-        probe_out = probe_run(Path(state["root"]), paths=paths, awaken=True, tree=worktree)
+        probe_out = probe_run(Path(state["root"]), paths=paths, awaken=True, tree=worktree, extra_rows=pending_guards)
         raw = probe_out.get("results") if isinstance(probe_out, dict) else []
         probe_results = [row for row in raw if isinstance(row, dict)] if isinstance(raw, list) else []
     record["evidence"] = {
@@ -992,6 +998,7 @@ def verify(root: Path) -> dict[str, Any]:
         out.update({"verify": record, "verified_tree": "", "next_action": "fix-and-verify"})
         out["context"] = comparison(enrolled, task)
         out.update(observed)
+        out["retired_guards"] = list(retired_ids(enrolled))
         return out
     from .switch import attach_verify as attach_switch
 
@@ -1078,6 +1085,7 @@ def verify(root: Path) -> dict[str, Any]:
     out["switch"] = switch
     out["context"] = comparison(enrolled, task, switch)
     out.update(observed)
+    out["retired_guards"] = list(retired_ids(enrolled))
     out["switch_report_id"] = str(switch.get("report_id") or "")
     out["probes_planted"] = list(record.get("probes_planted") or [])
     out["timings"] = dict(record.get("timings") or {})
@@ -1393,6 +1401,8 @@ def finish(root: Path) -> dict[str, Any]:
         if git(root, "rev-parse", "HEAD") != task["merged_head"]:
             raise ChainBroken("cleanup-pending: canonical moved since merge; inspect before retry")
         thaw_canonical(root)
+        from .guards import complete
+        complete(root, task)
         delivery = _close_task(root, key, task, process="completed", product=task.get("close_product") or "undeclared", head=task["merged_head"])
         return {"schema": "ag.finish.v1", "root": str(root), "head": task["merged_head"], "process": "completed", "product": task.get("close_product"), "delivery": delivery, "recovered": True}
 
@@ -1583,6 +1593,8 @@ def _finish_after_thaw(
     product = _product([str(x) for x in (state.get("test_argv") or [])], task.get("verify") if isinstance(task.get("verify"), dict) else None)
 
     head = git(root, "rev-parse", "HEAD")
+    from .guards import complete
+    complete(root, task)
     vblob = task.get("verify") if isinstance(task.get("verify"), dict) else None
     anchors = [dict(item) for item in (task.get("anchors") or []) if isinstance(item, dict)]
     current_anchor = str(task.get("current_anchor") or (anchors[0].get("id") if anchors else ""))
