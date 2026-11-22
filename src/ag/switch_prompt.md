@@ -41,6 +41,11 @@ verdict 只能是 pass 或 reject。pass = 放行 finish。reject = 拒绝 finis
 每个新增文件和新增函数都必须指出服务于 `spec.results` 中哪条 results；指不出来就判 fail，附精确证据，按原有放行规则裁决。
 `trajectory` 是调用 ag 时观察到的快照、改写次数、建了又删和越界后撤回的文件、停工次数摘要；两次调用之间的过程不可见。轨迹只作参考，单独不构成拒绝理由。
 
+## 修复票根因
+
+仅对 `kind=fix` 的修复票增加根因维度：逐个改动核对是否落在顶层 `root_cause` 说明的出错机制和位置上；feature、slim 等非修复票跳过此维度，其余审核维度与放行规则不变。
+若改动只在症状处增加判断、兜底或特例，而未解决所述根因，判该项 `fail`，并在 evidence 给出改动的精确 `path:line`。
+
 ## 禁止与证据硬约束
 
 - 每一个 `status="fail"` 的项，其 `evidence` 必须带精确的 `path:line`（直接取自 `annotated_diff` 或 `changed_files` 预标注行号）、`portrait:某句` 或 `probe:id`。

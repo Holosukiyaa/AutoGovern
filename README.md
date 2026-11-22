@@ -256,3 +256,7 @@ MCP 提供 ag_andon、ag_handoff、ag_backbrief。没有调用 ag 就不会触�
 `slim_reminder` 从 finish 历史统计上次 slim 合入后的非减重票，满 8 张或累计产品净增 800 行时提示下一张宜开减重票；放弃的票不计，slim 合入后清零，没有 slim 时从最早票包格式票开始。不进入 hazards，不改变 readiness、next_action，不新增拒绝或审核维度；熵账和预算均只作参考。
 
 `chars_per_token` 取最近 10 条有效终审 sent_chars/prompt_tokens 的中位数，ratio_source 为 history；没有实测则为 default、4.0。开票 context_burden 和 actual_scope 都按 ceil(total_chars / chars_per_token) 粗估，context_burden 只观测、不拦截；已保存的开票估算保留当时比率。
+
+## 修复票根因
+
+仅 `kind=fix` 必须填写 `root_cause`，去掉首尾空白后至少 20 个字符，否则报 `spec-invalid` 并点名字段。根因要说明哪里、为什么会出错，不能只复述症状。审票将症状式说明写入 doubts，并在 goal_clarity 上判 fail；终审考卷顶层保留 root_cause 原文，逐个核对改动是解决根因，还是只在症状处加判断、兜底或特例，后者判 fail 并提供改动的 path:line。feature、slim 不受此要求影响，其他审核规则不变。

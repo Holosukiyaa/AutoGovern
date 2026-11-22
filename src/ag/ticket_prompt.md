@@ -25,6 +25,8 @@
 
 三维含义：`goal_clarity` 只读 ticket.md 能否理解目标并独立复述；`anchor_chain` 核对 spec.results 的正反结果、target 检查的真实覆盖和基线失败原因；`redline_focus` 核对约束来源、scope/budget 合理性，以及机器部分不比人话少、没有缩小承诺。
 
+仅对 `kind=fix`：`ticket_package.spec.root_cause` 必须说明为什么会出错，指出机制和位置；若只复述症状（如“X 报错”“Y 不对”），须写进 `doubts`，并在 `goal_clarity` 上判 `fail`。feature、slim 等非修复票跳过此要求，三维名称、阈值和其余规则不变。
+
 ## 三维强制语义裁决标准（0-10 分，`score < 7` 或 `status == "fail"` 必须判 `verdict = "reject"`）
 
 1. **`goal_clarity`（业务目标清晰度，0-10 分，pass|fail）**

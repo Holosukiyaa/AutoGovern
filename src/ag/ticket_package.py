@@ -122,7 +122,7 @@ def load_draft(root: Path) -> dict[str, Any]:
     if spec.get("kind") not in ("feature", "fix", "slim"):
         _invalid("kind")
     if spec["kind"] == "fix":
-        _text(spec.get("root_cause"), "root_cause")
+        _text(spec.get("root_cause"), "root_cause", 20)
     origin = spec.get("origin")
     words = origin.get("user_words") if isinstance(origin, dict) else None
     if not isinstance(words, list) or not words:

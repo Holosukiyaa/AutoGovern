@@ -24,7 +24,7 @@ start 校验、把 draft 逐字节封存到 `tickets/<task_id>/`，在尚未解�
 spec 与人话必须一致，机器部分只能更细，不能偷偷删掉承诺。字段如下：
 
 - `schema` 固定为 `ag.ticket.v2`。
-- `kind` 是 feature、fix 或 slim；fix 必须有非空 `root_cause`。
+- `kind` 是 feature、fix 或 slim；fix 的 `root_cause` 去掉首尾空白后至少 20 个字符，feature、slim 不要求。
 - `origin.user_words` 是非空的用户原话列表，`origin.source` 写来源和日期。
 - `results` 非空，每项 id 唯一，text 至少 20 字，写触发条件、正向结果和拒绝边界。内部 soft 锚点按原顺序由它生成。
 - `scope.allow` 为非空相对路径模式列表，deny/docs 也是路径模式列表；不允许绝对路径或上级越界。
@@ -34,6 +34,15 @@ spec 与人话必须一致，机器部分只能更细，不能偷偷删掉承诺
 - `checks` 每项有 file、kind、serves。file 是 checks/ 下真实的 check_*.py，相对路径不能含上级越界，也不能通过链接逃出包。
 
 每条 result 至少有一条 target 检查覆盖；target 的 serves 引用结果 id，guard 可以引用结果或写 ["guard"]。检查覆盖正向与反向边界，不能用桩替代本来能走通的产品入口。真正的外部依赖边界可以隔离；如果被测内部入口走不通，应查明断点，不准制造假通过。
+
+## 修复票根因写法
+
+仅 kind=fix 必填 `root_cause`：至少 20 字，写清“哪里”（模块、函数或具体处理位置）和“为什么”（输入如何触发错误的机制），不能只复述症状。不要为了凑长度把“报错、结果不对”重复几遍。
+
+- **正例**：`greet` 在参数入口直接调用 `name.strip()`，未校验输入类型，传入 None 时先触发 AttributeError，无法按接口约定拒绝非法名字。
+- **反例**：`greet` 遇到某些名字总是报错，结果不对，应该加一个判断修好它。这里只写症状，没有指出出错机制与位置。
+
+审票会将仅复述症状的根因写入 doubts，并在 goal_clarity 上判 fail；终审逐项核对改动是否解决 root_cause，不能仅在症状上叠加兜底或特例。
 
 ## 基线与审核
 

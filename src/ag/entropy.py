@@ -121,8 +121,11 @@ def observations(root, task, candidate):
     budget = task.get("package_spec", {}).get("budget")
     budget_actual = {"budget": budget, "actual": {k: actual[k] for k in ("files", "lines")},
                      "ratio": actual["ratio"]} if actual else None
-    return {"entropy": ledger(Path(task["worktree"]), task["source_head"], candidate),
-            "budget_actual": budget_actual, "kind": task.get("package_spec", {}).get("kind")}
+    observed = {"entropy": ledger(Path(task["worktree"]), task["source_head"], candidate),
+                "budget_actual": budget_actual, "kind": task.get("package_spec", {}).get("kind")}
+    if observed["kind"] == "fix":
+        observed["root_cause"] = task["package_spec"].get("root_cause")
+    return observed
 
 
 def status_observations(root):

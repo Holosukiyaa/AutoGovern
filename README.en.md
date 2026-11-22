@@ -213,3 +213,7 @@ Review history payloads record `usage` (prompt_tokens, completion_tokens, total_
 `slim_reminder` suggests a slimming ticket after 8 non-slim tickets or 800 net product lines since the last finished slim ticket; it reads finish history, excludes abandoned tickets and resets after a slim finish. With no slim history, it starts at the earliest package ticket. It never adds hazards or changes readiness/next_action. All these observations are reference only, with no new gate or review dimension.
 
 `chars_per_token` is the median sent_chars/prompt_tokens of the latest 10 valid switch measurements; ratio_source is history, or default with 4.0 when none exist. Both opening context_burden and actual_scope use ceil(total_chars / chars_per_token); context_burden does not block. Saved opening estimates retain their ratio.
+
+## Root causes for fix tickets
+
+Only `kind=fix` requires `root_cause` with at least 20 characters after trimming; an absent or shorter value is rejected as `spec-invalid` naming `root_cause`. Describe where and why the failure occurs, not just the symptom. Ticket review puts symptom-only explanations in doubts and fails goal_clarity. The switch receives the verbatim root_cause at the top level and checks each change against it; symptom-level checks, fallbacks or special cases fail with the changed path:line as evidence. Feature and slim tickets skip this requirement; all other review rules stay unchanged.
