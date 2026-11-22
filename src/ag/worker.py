@@ -222,7 +222,7 @@ def run_task(
     directory = worker_dir(worktree, worker_id)
     task_path = directory / "task.json"
     task_blob = json.loads(task_path.read_text(encoding="utf-8"))
-    from .loop import _canonical_root, load_task
+    from .workspace import _canonical_root, load_task
     from .managed import project_key
     canonical = _canonical_root(worktree)
     parent = load_task(project_key(canonical)) or {}
@@ -368,7 +368,7 @@ def create_task(
         "guards": [str(item) for item in (guards or []) if str(item).strip()],
         "defaults": [str(item) for item in (defaults or []) if str(item).strip()],
     }
-    from .loop import _canonical_root, load_task
+    from .workspace import _canonical_root, load_task
     from .managed import project_key
 
     canonical = _canonical_root(worktree)

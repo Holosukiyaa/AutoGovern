@@ -115,7 +115,7 @@ def require_construction(root: Path, task: dict[str, Any]) -> None:
         raise ChainBroken("thaw-failed: approval is recorded but construction is not ready; retry human confirm-map")
     assert_live_construction(root, task)
     if "worktree_ready" not in task:
-        from .loop import save_task
+        from .workspace import save_task
         from .store import append_task_step
 
         task["worktree_ready"] = True

@@ -69,7 +69,7 @@ def _user_pack(packed: dict[str, Any], critic: dict[str, Any] | None) -> dict[st
 
 
 def _sealed_redlines(root: Path) -> list[str]:
-    from .loop import load_task
+    from .workspace import load_task
     from .managed import lookup_project, project_key
 
     item = lookup_project(root)

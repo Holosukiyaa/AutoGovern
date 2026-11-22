@@ -734,7 +734,7 @@ def ticket_run(
         "script_digest": prescreen,
         "goal_link": goal_link,
     }
-    from .loop import load_task
+    from .workspace import load_task
     packed["context_burden"] = task_burden(repo, load_task(project_key(repo)) or {})
     if package_material is not None:
         packed["ticket_package"] = package_material
@@ -1188,13 +1188,13 @@ def seat_run(
         if (sealed_dir(root, task_id) / "seal.json").is_file():
             packed["ticket_package"] = materials(root, task_id)
         packed["delivery_context"] = {"goal": view.get("goal"), "goal_link": view.get("goal_link"), "contribution": view.get("contribution"), "remaining": view.get("remaining")}
-    from .loop import product_tree, tree_digest
+    from .workspace import product_tree, tree_digest
 
     candidate_root = Path(tree) if tree is not None else root
     packed["candidate"] = tree_digest(candidate_root)
     packed["product_tree"] = product_tree(candidate_root, packed["candidate"])
     if kind == "switch" and task_id:
-        from .loop import load_task
+        from .workspace import load_task
         from .managed import project_key
         from .site import trajectory
         from .structure import extraneous
@@ -1212,7 +1212,7 @@ def seat_run(
             from .checks import selection
             from .managed import lookup_project
 
-            from .loop import load_task
+            from .workspace import load_task
             from .managed import project_key
             active = load_task(project_key(root))
             enrolled = (lookup_project(root) or {}).get("test_argv") or []

@@ -8,7 +8,7 @@ from pathlib import Path
 
 def hook_main() -> int:
     from .catalog import enabled
-    from .loop import (
+    from .workspace import (
         PREV_UNSET,
         _canonical_root,
         _deliver_token_ok,

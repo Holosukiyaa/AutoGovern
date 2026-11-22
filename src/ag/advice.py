@@ -95,7 +95,7 @@ def _run_bounded(cmd: str | list[str], cwd: Path, *, shell: bool = False) -> dic
 
 
 def _task(root: Path) -> dict[str, Any] | None:
-    from .loop import load_task
+    from .workspace import load_task
 
     item = lookup_project(root)
     if item is None:

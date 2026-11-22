@@ -62,7 +62,7 @@ def _candidate_current(root: Path, task: dict[str, Any], verify: dict[str, Any])
     if not candidate or not tree.is_dir():
         return False
     product = str(verify.get("product_tree") or candidate)
-    from .loop import product_tree, tree_digest
+    from .workspace import product_tree, tree_digest
 
     # Both helpers use a disposable index/projection, exactly as verify does.
     # Untracked product files count; the temporary .ag-check tree does not.

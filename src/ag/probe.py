@@ -807,7 +807,7 @@ def run(
 
 
 def calibrate(root: Path, *, id: str, observation: Any) -> dict[str, Any]:
-    from .loop import git, load_task, tree_digest
+    from .workspace import git, load_task, tree_digest
     from .store import append_task_step
 
     repo = real_root(root)

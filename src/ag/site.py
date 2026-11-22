@@ -142,7 +142,7 @@ def _trail_rows(root: Path, task_id: str) -> list[dict[str, Any]]:
 
 def record_trail(root: Path, task: dict[str, Any], command: str, view: dict[str, Any] | None = None) -> None:
     """Append only on product changes; never touch the real index or history."""
-    from .loop import product_tree, tree_digest
+    from .workspace import product_tree, tree_digest
 
     tree = Path(task["worktree"])
     digest = product_tree(tree, tree_digest(tree), write=True)
@@ -199,7 +199,7 @@ def require_running(task: dict[str, Any]) -> None:
 
 
 def _task(root: Path) -> tuple[Path, dict[str, Any]]:
-    from .loop import load_task
+    from .workspace import load_task
 
     root = real_root(root)
     task = load_task(project_key(root))
@@ -209,7 +209,7 @@ def _task(root: Path) -> tuple[Path, dict[str, Any]]:
 
 
 def stop(root: Path, task: dict[str, Any], kind: str, reason: str, evidence: Any) -> None:
-    from .loop import save_task
+    from .workspace import save_task
 
     if task.get("site_stop"):
         return
@@ -223,7 +223,7 @@ def before_command(root: Path, command: str) -> dict[str, Any] | None:
     """Only ready active sites are checked; exemptions never inspect or grant access."""
     if command in EXEMPT or not lookup_project(root):
         return None
-    from .loop import load_task
+    from .workspace import load_task
     from .authorization import require_construction
 
     root = real_root(root)
@@ -303,7 +303,7 @@ def backbrief(root: Path, brief: Any) -> dict[str, Any]:
         raise ChainBroken("backbrief-mismatch: out_of_scope 必须与现场完全一致，goal 至少 20 字，next 不能为空")
     from .presence import require_authorization
     from .authorization import validate_ticket
-    from .loop import save_task
+    from .workspace import save_task
 
     require_authorization(root, task)
     validate_ticket(root, task)
@@ -322,7 +322,7 @@ def confirmed(root: Path, task: dict[str, Any]) -> None:
     """Clear a stop only after human confirmation and full activation succeeded."""
     if not task.get("site_stop"):
         return
-    from .loop import save_task
+    from .workspace import save_task
 
     previous = task.pop("site_stop")
     try:

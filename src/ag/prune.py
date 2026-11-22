@@ -10,7 +10,7 @@ from .store import append_project_jsonl, project_dir
 
 
 def _active_task_id(root: Path) -> str:
-    from .loop import load_task
+    from .workspace import load_task
 
     return str((load_task(project_key(real_root(root))) or {}).get("id") or "")
 
